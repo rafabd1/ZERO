@@ -16,6 +16,7 @@ type SubfinderRunner struct {
 	providerConfig string
 	sources        string
 	rateLimits     string
+	limit          int
 }
 
 type SubfinderResult struct {
@@ -45,10 +46,18 @@ func (r *SubfinderRunner) WithRateLimits(rateLimits string) *SubfinderRunner {
 	return r
 }
 
+func (r *SubfinderRunner) WithLimit(limit int) *SubfinderRunner {
+	r.limit = limit
+	return r
+}
+
 func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 	roots, err := r.repo.ListDomainRoots(ctx)
 	if err != nil {
 		return SubfinderResult{}, err
+	}
+	if r.limit > 0 && len(roots) > r.limit {
+		roots = roots[:r.limit]
 	}
 
 	result := SubfinderResult{Roots: len(roots)}

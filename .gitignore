@@ -23,4 +23,5 @@ reports/generated/
 
 # Local tool credentials.
 .secrets/
+.tools/
 configs/subfinder/provider-config.yaml

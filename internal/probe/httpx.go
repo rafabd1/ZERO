@@ -15,8 +15,9 @@ import (
 )
 
 type HTTPXRunner struct {
-	repo *db.Repository
-	bin  string
+	repo  *db.Repository
+	bin   string
+	limit int
 }
 
 type HTTPXResult struct {
@@ -25,6 +26,7 @@ type HTTPXResult struct {
 }
 
 type httpxLine struct {
+	Input        string          `json:"input"`
 	URL          string          `json:"url"`
 	Scheme       string          `json:"scheme"`
 	Host         string          `json:"host"`
@@ -44,10 +46,18 @@ func NewHTTPXRunner(repo *db.Repository, bin string) *HTTPXRunner {
 	return &HTTPXRunner{repo: repo, bin: bin}
 }
 
+func (r *HTTPXRunner) WithLimit(limit int) *HTTPXRunner {
+	r.limit = limit
+	return r
+}
+
 func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	subdomains, err := r.repo.ListSubdomains(ctx)
 	if err != nil {
 		return HTTPXResult{}, err
+	}
+	if r.limit > 0 && len(subdomains) > r.limit {
+		subdomains = subdomains[:r.limit]
 	}
 
 	var input bytes.Buffer
@@ -86,9 +96,12 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			return fmt.Errorf("parse httpx json: %w", err)
 		}
-		service, err := parsed.toService(byHost)
+		service, ok, err := parsed.toService(byHost)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return nil
 		}
 		_, err = r.repo.UpsertHTTPService(ctx, service)
 		if err != nil {
@@ -100,17 +113,17 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	return result, err
 }
 
-func (h httpxLine) toService(byHost map[string]db.Subdomain) (db.HTTPService, error) {
+func (h httpxLine) toService(byHost map[string]db.Subdomain) (db.HTTPService, bool, error) {
 	if h.URL == "" {
-		return db.HTTPService{}, fmt.Errorf("httpx output without url")
+		return db.HTTPService{}, false, fmt.Errorf("httpx output without url")
 	}
 	u, err := url.Parse(h.URL)
 	if err != nil {
-		return db.HTTPService{}, err
+		return db.HTTPService{}, false, err
 	}
 	host, ok := sanitize.CanonicalDomain(u.Hostname())
 	if !ok {
-		return db.HTTPService{}, fmt.Errorf("httpx output host %q is not a valid domain", u.Hostname())
+		return db.HTTPService{}, false, fmt.Errorf("httpx output host %q is not a valid domain", u.Hostname())
 	}
 	var port *int
 	if h.Port != "" {
@@ -125,7 +138,13 @@ func (h httpxLine) toService(byHost map[string]db.Subdomain) (db.HTTPService, er
 	raw, _ := json.Marshal(h)
 	sub, ok := byHost[host]
 	if !ok || sub.ProgramID == "" {
-		return db.HTTPService{}, fmt.Errorf("httpx output host %q is not linked to a known program", host)
+		inputHost, inputOK := sanitize.CanonicalDomain(h.Input)
+		if inputOK {
+			sub, ok = byHost[inputHost]
+		}
+	}
+	if !ok || sub.ProgramID == "" || !sanitize.IsWithinRoot(host, sub.RootDomain) {
+		return db.HTTPService{}, false, nil
 	}
 	return db.HTTPService{
 		ProgramID:    sub.ProgramID,
@@ -141,7 +160,7 @@ func (h httpxLine) toService(byHost map[string]db.Subdomain) (db.HTTPService, er
 		FaviconHash:  h.FaviconHash,
 		TLS:          h.TLS,
 		Raw:          raw,
-	}, nil
+	}, true, nil
 }
 
 func firstNonEmpty(values ...string) string {

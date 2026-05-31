@@ -38,6 +38,20 @@ Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_pr
 
 Zero should not blindly delete missing data. Missing assets should be marked inactive only after enough scan evidence shows they are gone. New or changed entities are written to `zero_change_events`, and reports/Discord notifications should use that table to avoid repeating old results.
 
+## Smoke Tests
+
+Use limits when validating external tools:
+
+```bash
+zero sync h1
+zero enum subfinder --limit 2
+zero probe httpx --limit 50
+zero analyze nuclei --limit 5 --template-id CVE-2025-20362
+zero api
+```
+
+This validates the pipeline without turning a local setup check into a broad scan.
+
 ## Subfinder Providers
 
 The public repo ships only a safe template at `configs/subfinder/provider-config.example.yaml`.

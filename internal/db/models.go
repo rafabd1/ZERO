@@ -33,6 +33,7 @@ type Subdomain struct {
 }
 
 type HTTPService struct {
+	ID           string
 	ProgramID    string
 	SubdomainID  string
 	URL          string
@@ -46,4 +47,25 @@ type HTTPService struct {
 	FaviconHash  string
 	TLS          json.RawMessage
 	Raw          json.RawMessage
+}
+
+type NucleiTarget struct {
+	ProgramID     string
+	HTTPServiceID string
+	URL           string
+}
+
+type NucleiResult struct {
+	ProgramID     string
+	HTTPServiceID string
+	TemplateID    string
+	TemplatePath  string
+	MatchedAt     string
+	Severity      string
+	CVEs          []string
+	Tags          []string
+	Type          string
+	ExtractorName string
+	EvidenceHash  string
+	Raw           json.RawMessage
 }

@@ -1,10 +1,10 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
@@ -16,6 +16,7 @@ type Config struct {
 	Scope     ScopeConfig
 	Tools     ToolConfig
 	Schedule  ScheduleConfig
+	API       APIConfig
 }
 
 type SupabaseConfig struct {
@@ -42,8 +43,17 @@ type ToolConfig struct {
 	SubfinderRateLimits     string
 	HTTPXBin                string
 	NucleiBin               string
+	NucleiTags              string
+	NucleiSeverities        string
+	NucleiTemplateIDs       string
 	NucleiRate              int
 	NucleiC                 int
+	NucleiBulkSize          int
+}
+
+type APIConfig struct {
+	Addr  string
+	Token string
 }
 
 type ScheduleConfig struct {
@@ -55,7 +65,7 @@ type ScheduleConfig struct {
 }
 
 func Load() (Config, error) {
-	_ = godotenv.Load()
+	loadDotEnv()
 
 	v := viper.New()
 	v.SetEnvPrefix("ZERO")
@@ -71,22 +81,43 @@ func Load() (Config, error) {
 	v.SetDefault("tools.subfinder_rate_limits", "shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s")
 	v.SetDefault("tools.httpx_bin", "httpx")
 	v.SetDefault("tools.nuclei_bin", "nuclei")
+	v.SetDefault("tools.nuclei_tags", "cve")
+	v.SetDefault("tools.nuclei_severities", "medium,high,critical")
+	v.SetDefault("tools.nuclei_template_ids", "")
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
+	v.SetDefault("tools.nuclei_bulk_size", 5)
 	v.SetDefault("schedule.scope_sync", "0 15 3 * * *")
 	v.SetDefault("schedule.enum", "0 45 3 * * *")
 	v.SetDefault("schedule.probe", "0 30 4 * * *")
 	v.SetDefault("schedule.cve", "0 15 5 * * *")
 	v.SetDefault("schedule.nuclei", "0 45 5 * * *")
+	v.SetDefault("api.addr", "127.0.0.1:8080")
 
+	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
+	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
+	_ = v.BindEnv("supabase_url", "ZERO_SUPABASE_URL")
+	_ = v.BindEnv("supabase_anon_key", "ZERO_SUPABASE_ANON_KEY")
+	_ = v.BindEnv("supabase_service_role_key", "ZERO_SUPABASE_SERVICE_ROLE_KEY")
+	_ = v.BindEnv("h1.username", "ZERO_H1_USERNAME")
+	_ = v.BindEnv("h1.token", "ZERO_H1_TOKEN")
+	_ = v.BindEnv("scope.bounty_only", "ZERO_SCOPE_BOUNTY_ONLY")
+	_ = v.BindEnv("scope.private_only", "ZERO_SCOPE_PRIVATE_ONLY")
+	_ = v.BindEnv("scope.categories", "ZERO_SCOPE_CATEGORIES")
 	_ = v.BindEnv("tools.subfinder_bin", "ZERO_SUBFINDER_BIN")
 	_ = v.BindEnv("tools.subfinder_provider_config", "ZERO_SUBFINDER_PROVIDER_CONFIG", "SUBFINDER_PROVIDER_CONFIG")
 	_ = v.BindEnv("tools.subfinder_sources", "ZERO_SUBFINDER_SOURCES")
 	_ = v.BindEnv("tools.subfinder_rate_limits", "ZERO_SUBFINDER_RATE_LIMITS")
 	_ = v.BindEnv("tools.httpx_bin", "ZERO_HTTPX_BIN")
 	_ = v.BindEnv("tools.nuclei_bin", "ZERO_NUCLEI_BIN")
+	_ = v.BindEnv("tools.nuclei_tags", "ZERO_NUCLEI_TAGS")
+	_ = v.BindEnv("tools.nuclei_severities", "ZERO_NUCLEI_SEVERITIES")
+	_ = v.BindEnv("tools.nuclei_template_ids", "ZERO_NUCLEI_TEMPLATE_IDS")
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
+	_ = v.BindEnv("tools.nuclei_bulk_size", "ZERO_NUCLEI_BULK_SIZE")
+	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
+	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
 
 	return Config{
 		DatabaseURL: v.GetString("database_url"),
@@ -111,8 +142,12 @@ func Load() (Config, error) {
 			SubfinderRateLimits:     v.GetString("tools.subfinder_rate_limits"),
 			HTTPXBin:                v.GetString("tools.httpx_bin"),
 			NucleiBin:               v.GetString("tools.nuclei_bin"),
+			NucleiTags:              v.GetString("tools.nuclei_tags"),
+			NucleiSeverities:        v.GetString("tools.nuclei_severities"),
+			NucleiTemplateIDs:       v.GetString("tools.nuclei_template_ids"),
 			NucleiRate:              v.GetInt("tools.nuclei_rate"),
 			NucleiC:                 v.GetInt("tools.nuclei_c"),
+			NucleiBulkSize:          v.GetInt("tools.nuclei_bulk_size"),
 		},
 		Schedule: ScheduleConfig{
 			ScopeSync: v.GetString("schedule.scope_sync"),
@@ -121,7 +156,35 @@ func Load() (Config, error) {
 			CVE:       v.GetString("schedule.cve"),
 			Nuclei:    v.GetString("schedule.nuclei"),
 		},
+		API: APIConfig{
+			Addr:  v.GetString("api.addr"),
+			Token: v.GetString("api.token"),
+		},
 	}, nil
+}
+
+func loadDotEnv() {
+	data, err := os.ReadFile(".env")
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "\ufeff"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(strings.TrimPrefix(key, "\ufeff"))
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, value)
+	}
 }
 
 func DefaultCommandTimeout() time.Duration {

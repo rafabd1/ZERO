@@ -18,13 +18,19 @@ Recommended starting command shape:
 
 ```bash
 nuclei -l urls.txt \
-  -jsonl \
+  -j \
+  -duc \
+  -ni \
+  -pt http \
   -tags cve \
   -severity medium,high,critical \
   -rate-limit 80 \
   -c 20 \
+  -bs 5 \
   -retries 1 \
-  -timeout 8
+  -timeout 8 \
+  -or \
+  -ot
 ```
 
 These are starting values, not a promise that every target tolerates them. Per-program overrides should be supported later.
@@ -54,3 +60,9 @@ Each Nuclei result is linked to:
 - raw JSON output
 
 The unique key is `(program_id, template_id, matched_at, evidence_hash)` so reruns do not create duplicate rows.
+
+For targeted validation after passive matching:
+
+```bash
+zero analyze nuclei --limit 5 --template-id CVE-2025-20362
+```

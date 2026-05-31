@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/rafabd1/ZERO/internal/sanitize"
 )
 
@@ -73,6 +74,45 @@ func (r *Repository) UpsertScopeAsset(ctx context.Context, asset ScopeAsset) (st
 		return "", fmt.Errorf("upsert scope asset: %w", err)
 	}
 	return id, nil
+}
+
+func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset) (int, error) {
+	if len(assets) == 0 {
+		return 0, nil
+	}
+
+	batch := &pgx.Batch{}
+	for _, asset := range assets {
+		if asset.Source == "" {
+			asset.Source = "bbscope"
+		}
+		meta, _ := json.Marshal(asset.Metadata)
+		batch.Queue(`
+			INSERT INTO zero_scope_assets(
+				program_id, platform, handle, asset_type, target_raw, target_normalized,
+				description, in_scope, eligible_for_bounty, source, metadata
+			)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+			ON CONFLICT(program_id, asset_type, target_normalized, in_scope) DO UPDATE SET
+				target_raw = excluded.target_raw,
+				description = excluded.description,
+				eligible_for_bounty = excluded.eligible_for_bounty,
+				active = true,
+				last_seen_at = now(),
+				metadata = zero_scope_assets.metadata || excluded.metadata
+		`, asset.ProgramID, asset.Platform, asset.Handle, asset.AssetType, asset.TargetRaw, asset.TargetNormalized,
+			asset.Description, asset.InScope, asset.EligibleForBounty, asset.Source, string(meta))
+	}
+
+	results := r.pool.SendBatch(ctx, batch)
+	defer results.Close()
+
+	for range assets {
+		if _, err := results.Exec(); err != nil {
+			return 0, fmt.Errorf("batch upsert scope assets: %w", err)
+		}
+	}
+	return len(assets), nil
 }
 
 func (r *Repository) ListDomainRoots(ctx context.Context) ([]DomainRoot, error) {
@@ -191,7 +231,7 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 		}
 		_, err := r.pool.Exec(ctx, `
 			INSERT INTO zero_technology_observations(program_id, http_service_id, name, source, confidence, evidence)
-			VALUES ($1,$2,$3,'httpx',60,jsonb_build_object('url',$4))
+			VALUES ($1,$2,$3,'httpx',60,jsonb_build_object('url',$4::text))
 			ON CONFLICT(http_service_id, lower(name), version, source) DO UPDATE SET
 				last_seen_at = now(),
 				confidence = GREATEST(zero_technology_observations.confidence, excluded.confidence),

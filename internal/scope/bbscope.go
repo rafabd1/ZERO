@@ -3,6 +3,7 @@ package scope
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/sw33tLie/bbscope/v2/pkg/platforms"
@@ -20,6 +21,7 @@ type HackerOneOptions struct {
 	BountyOnly  bool
 	PrivateOnly bool
 	Categories  string
+	Concurrency int
 }
 
 type SyncResult struct {
@@ -44,47 +46,94 @@ func (s *Service) SyncHackerOne(ctx context.Context, opts HackerOneOptions) (Syn
 		return SyncResult{}, fmt.Errorf("list HackerOne programs: %w", err)
 	}
 
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 5
+	}
+
+	handleCh := make(chan string)
+	errCh := make(chan error, len(handles))
+	var mu sync.Mutex
 	result := SyncResult{}
+
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for handle := range handleCh {
+				programCount, assetCount, err := s.syncHackerOneProgram(ctx, poller, pollOpts, handle)
+				if err != nil {
+					errCh <- err
+					continue
+				}
+				mu.Lock()
+				result.Programs += programCount
+				result.Assets += assetCount
+				mu.Unlock()
+			}
+		}()
+	}
+
 	for _, handle := range handles {
-		program, err := poller.FetchProgramScope(ctx, handle, pollOpts)
-		if err != nil {
-			return result, fmt.Errorf("fetch HackerOne scope for %s: %w", handle, err)
-		}
-
-		programID, err := s.repo.UpsertProgram(ctx, "h1", handle, program.Url, map[string]any{
-			"source":       "bbscope",
-			"bbscope_name": poller.Name(),
-		})
-		if err != nil {
+		select {
+		case handleCh <- handle:
+		case err := <-errCh:
+			close(handleCh)
+			wg.Wait()
 			return result, err
+		case <-ctx.Done():
+			close(handleCh)
+			wg.Wait()
+			return result, ctx.Err()
 		}
-		result.Programs++
+	}
+	close(handleCh)
+	wg.Wait()
 
-		count, err := s.upsertElements(ctx, programID, "h1", handle, program.InScope, true)
-		if err != nil {
-			return result, err
-		}
-		result.Assets += count
-
-		count, err = s.upsertElements(ctx, programID, "h1", handle, program.OutOfScope, false)
-		if err != nil {
-			return result, err
-		}
-		result.Assets += count
+	select {
+	case err := <-errCh:
+		return result, err
+	default:
 	}
 
 	return result, nil
 }
 
-func (s *Service) upsertElements(ctx context.Context, programID, platform, handle string, elements []bbscope.ScopeElement, inScope bool) (int, error) {
-	count := 0
+func (s *Service) syncHackerOneProgram(ctx context.Context, poller *h1platform.Poller, pollOpts platforms.PollOptions, handle string) (int, int, error) {
+	program, err := poller.FetchProgramScope(ctx, handle, pollOpts)
+	if err != nil {
+		return 0, 0, fmt.Errorf("fetch HackerOne scope for %s: %w", handle, err)
+	}
+
+	programID, err := s.repo.UpsertProgram(ctx, "h1", handle, program.Url, map[string]any{
+		"source":       "bbscope",
+		"bbscope_name": poller.Name(),
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	assets := make([]db.ScopeAsset, 0, len(program.InScope)+len(program.OutOfScope))
+	assets = append(assets, buildAssets(programID, "h1", handle, program.InScope, true)...)
+	assets = append(assets, buildAssets(programID, "h1", handle, program.OutOfScope, false)...)
+
+	count, err := s.repo.UpsertScopeAssets(ctx, assets)
+	if err != nil {
+		return 0, 0, err
+	}
+	return 1, count, nil
+}
+
+func buildAssets(programID, platform, handle string, elements []bbscope.ScopeElement, inScope bool) []db.ScopeAsset {
+	assets := make([]db.ScopeAsset, 0, len(elements))
 	for _, element := range elements {
 		target := element.Target
 		normalized := db.NormalizeTarget(target)
 		if normalized == "" {
 			continue
 		}
-		_, err := s.repo.UpsertScopeAsset(ctx, db.ScopeAsset{
+		assets = append(assets, db.ScopeAsset{
 			ProgramID:         programID,
 			Platform:          platform,
 			Handle:            handle,
@@ -96,10 +145,6 @@ func (s *Service) upsertElements(ctx context.Context, programID, platform, handl
 			EligibleForBounty: element.IsBBP,
 			Source:            "bbscope",
 		})
-		if err != nil {
-			return count, err
-		}
-		count++
 	}
-	return count, nil
+	return assets
 }

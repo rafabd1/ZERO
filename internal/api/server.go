@@ -1,0 +1,177 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/rafabd1/ZERO/internal/db"
+)
+
+type Server struct {
+	repo  *db.Repository
+	token string
+	mux   *http.ServeMux
+}
+
+func NewServer(repo *db.Repository, token string) *Server {
+	s := &Server{
+		repo:  repo,
+		token: token,
+		mux:   http.NewServeMux(),
+	}
+	s.routes()
+	return s
+}
+
+func (s *Server) ListenAndServe(addr string) error {
+	return http.ListenAndServe(addr, s)
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/healthz" && s.token != "" {
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if got == "" || got != s.token {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+	}
+	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	s.mux.HandleFunc("GET /v1/programs", s.query(`
+		SELECT jsonb_build_object(
+			'id', id,
+			'platform', platform,
+			'handle', handle,
+			'program_url', program_url,
+			'active', active,
+			'scan_interval_hours', scan_interval_hours,
+			'last_scan_started_at', last_scan_started_at,
+			'last_scan_finished_at', last_scan_finished_at,
+			'first_seen_at', first_seen_at,
+			'last_seen_at', last_seen_at
+		)
+		FROM zero_programs
+		ORDER BY platform, handle
+	`))
+	s.mux.HandleFunc("GET /v1/assets", s.query(`
+		SELECT jsonb_build_object(
+			'id', a.id,
+			'program_id', a.program_id,
+			'asset_type', a.asset_type,
+			'target_normalized', a.target_normalized,
+			'in_scope', a.in_scope,
+			'eligible_for_bounty', a.eligible_for_bounty,
+			'active', a.active,
+			'first_seen_at', a.first_seen_at,
+			'last_seen_at', a.last_seen_at
+		)
+		FROM zero_scope_assets a
+		WHERE a.active = true
+		ORDER BY a.last_seen_at DESC
+		LIMIT 500
+	`))
+	s.mux.HandleFunc("GET /v1/services", s.query(`
+		SELECT jsonb_build_object(
+			'id', s.id,
+			'program_id', s.program_id,
+			'url', s.url,
+			'host', s.host,
+			'status_code', s.status_code,
+			'title', s.title,
+			'webserver', s.webserver,
+			'technologies', s.technologies,
+			'first_seen_at', s.first_seen_at,
+			'last_seen_at', s.last_seen_at
+		)
+		FROM zero_http_services s
+		WHERE s.active = true
+		ORDER BY s.last_seen_at DESC
+		LIMIT 500
+	`))
+	s.mux.HandleFunc("GET /v1/nuclei-results", s.query(`
+		SELECT jsonb_build_object(
+			'id', n.id,
+			'program_id', n.program_id,
+			'http_service_id', n.http_service_id,
+			'template_id', n.template_id,
+			'matched_at', n.matched_at,
+			'severity', n.severity,
+			'cves', n.cves,
+			'tags', n.tags,
+			'first_seen_at', n.first_seen_at,
+			'last_seen_at', n.last_seen_at
+		)
+		FROM zero_nuclei_results n
+		ORDER BY n.first_seen_at DESC
+		LIMIT 500
+	`))
+	s.mux.HandleFunc("GET /v1/findings", s.query(`
+		SELECT jsonb_build_object(
+			'id', f.id,
+			'program_id', f.program_id,
+			'http_service_id', f.http_service_id,
+			'nuclei_result_id', f.nuclei_result_id,
+			'severity', f.severity,
+			'confidence', f.confidence,
+			'status', f.status,
+			'evidence', f.evidence,
+			'first_seen_at', f.first_seen_at,
+			'last_seen_at', f.last_seen_at
+		)
+		FROM zero_candidate_findings f
+		ORDER BY f.first_seen_at DESC
+		LIMIT 500
+	`))
+}
+
+func (s *Server) query(sql string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rows, err := s.repo.QueryJSONRows(r.Context(), sql)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	}
+}
+
+func writeRawJSONArray(w http.ResponseWriter, rows []json.RawMessage) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("["))
+	for i, row := range rows {
+		if i > 0 {
+			_, _ = w.Write([]byte(","))
+		}
+		_, _ = w.Write(row)
+	}
+	_, _ = w.Write([]byte("]"))
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]any{"error": msg})
+}
+
+func Shutdown(ctx context.Context, srv *http.Server) error {
+	if srv == nil {
+		return nil
+	}
+	if err := srv.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutdown api server: %w", err)
+	}
+	return nil
+}

@@ -8,6 +8,7 @@ import (
 )
 
 func newProbeCommand() *cobra.Command {
+	var httpxLimit int
 	cmd := &cobra.Command{
 		Use:   "probe",
 		Short: "Run live host probing and fingerprinting tasks.",
@@ -21,7 +22,7 @@ func newProbeCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
-			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin)
+			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).WithLimit(httpxLimit)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return err
@@ -30,5 +31,6 @@ func newProbeCommand() *cobra.Command {
 			return nil
 		},
 	})
+	cmd.Commands()[0].Flags().IntVar(&httpxLimit, "limit", 0, "limit number of hosts to probe")
 	return cmd
 }
