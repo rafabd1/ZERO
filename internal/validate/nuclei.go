@@ -29,9 +29,10 @@ type NucleiRunner struct {
 }
 
 type NucleiResult struct {
-	Targets  int
-	Results  int
-	Inserted int
+	Targets          int
+	Results          int
+	Inserted         int
+	FindingsInserted int
 }
 
 func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
@@ -125,13 +126,20 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		}
 		parsed.ProgramID = target.ProgramID
 		parsed.HTTPServiceID = target.HTTPServiceID
-		_, inserted, err := r.repo.UpsertNucleiResult(ctx, parsed)
+		nucleiID, inserted, err := r.repo.UpsertNucleiResult(ctx, parsed)
+		if err != nil {
+			return err
+		}
+		_, findingInserted, err := r.repo.UpsertCandidateFindingFromNuclei(ctx, nucleiID, parsed)
 		if err != nil {
 			return err
 		}
 		result.Results++
 		if inserted {
 			result.Inserted++
+		}
+		if findingInserted {
+			result.FindingsInserted++
 		}
 		return nil
 	})

@@ -58,3 +58,50 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 	}
 	return id, inserted, nil
 }
+
+func (r *Repository) UpsertCandidateFindingFromNuclei(ctx context.Context, nucleiResultID string, result NucleiResult) (string, bool, error) {
+	evidence, _ := json.Marshal(map[string]any{
+		"source":      "nuclei",
+		"template_id": result.TemplateID,
+		"matched_at":  result.MatchedAt,
+		"severity":    result.Severity,
+		"cves":        result.CVEs,
+		"tags":        result.Tags,
+		"nuclei_hash": result.EvidenceHash,
+	})
+	confidence := nucleiConfidence(result.Severity)
+	evidenceHash := "nuclei:" + result.EvidenceHash
+
+	var id string
+	var inserted bool
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO zero_candidate_findings(
+			program_id, http_service_id, nuclei_result_id, severity, confidence,
+			status, evidence_hash, evidence
+		)
+		VALUES ($1,$2,$3,$4,$5,'new',$6,$7::jsonb)
+		ON CONFLICT(evidence_hash) DO UPDATE SET
+			last_seen_at = now(),
+			severity = excluded.severity,
+			confidence = GREATEST(zero_candidate_findings.confidence, excluded.confidence),
+			evidence = zero_candidate_findings.evidence || excluded.evidence
+		RETURNING id, (xmax = 0) AS inserted
+	`, result.ProgramID, nullString(result.HTTPServiceID), nucleiResultID, result.Severity, confidence, evidenceHash, string(evidence)).Scan(&id, &inserted)
+	if err != nil {
+		return "", false, fmt.Errorf("upsert candidate finding from nuclei: %w", err)
+	}
+	return id, inserted, nil
+}
+
+func nucleiConfidence(severity string) int {
+	switch severity {
+	case "critical":
+		return 92
+	case "high":
+		return 88
+	case "medium":
+		return 80
+	default:
+		return 70
+	}
+}
