@@ -2,7 +2,7 @@
 
 Zero is a public bug bounty target-monitoring pipeline for continuously collecting program scopes, enumerating exposed assets, fingerprinting technologies, and preparing high-signal vulnerability triage candidates.
 
-The project is intentionally conservative: a CVE candidate should be emitted only when there is enough evidence to justify Proteus/Codex follow-up. Weak technology guesses are stored as observations, not findings.
+The project is intentionally conservative: a CVE candidate should be emitted only when there is enough evidence to justify follow-up. Weak technology guesses are stored as observations, not findings.
 
 ## Pipeline
 
