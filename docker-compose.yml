@@ -1,0 +1,15 @@
+services:
+  zero:
+    build: .
+    env_file:
+      - .env
+    command: ["worker"]
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    env_file:
+      - .env
+    command: ["migrate", "up"]
+    profiles:
+      - tools

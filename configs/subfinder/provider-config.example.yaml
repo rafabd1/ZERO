@@ -1,0 +1,8 @@
+shodan:
+  - "${ZERO_SUBFINDER_SHODAN_API_KEY}"
+bevigil:
+  - "${ZERO_SUBFINDER_BEVIGIL_API_KEY}"
+virustotal:
+  - "${ZERO_SUBFINDER_VIRUSTOTAL_API_KEY}"
+securitytrails:
+  - "${ZERO_SUBFINDER_SECURITYTRAILS_API_KEY}"

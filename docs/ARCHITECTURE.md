@@ -1,0 +1,64 @@
+# Architecture
+
+Zero is a scheduled pipeline with a Postgres/Supabase state store.
+
+```mermaid
+flowchart LR
+  H1["HackerOne API"] --> BBS["bbscope poller"]
+  BBS --> DB["Supabase Postgres"]
+  DB --> SF["subfinder"]
+  SF --> DB
+  DB --> HX["httpx"]
+  HX --> DB
+  DB --> INTEL["passive CVE/KEV matching"]
+  INTEL --> NUCLEI["nuclei validation"]
+  NUCLEI --> DB
+  DB --> REPORT["new-only deduped reports"]
+```
+
+## Components
+
+- `cmd/zero`: CLI entrypoint.
+- `internal/scope`: scope source adapters. The first adapter imports HackerOne via `github.com/sw33tLie/bbscope/v2/pkg/platforms/hackerone`.
+- `internal/enumeration`: external enumeration tools such as `subfinder`.
+- `internal/probe`: live checks and fingerprinting, currently `httpx`.
+- `internal/db`: Supabase/Postgres repository and migrations.
+- `docs`: operator design, integration notes, and roadmap.
+
+## Data Model
+
+- `zero_programs`: platform program identity.
+- `zero_scope_assets`: raw and normalized in/out-of-scope assets.
+- `zero_subdomains`: discovered hostnames from domain/wildcard scope.
+- `zero_http_services`: alive URLs and httpx fingerprint data.
+- `zero_technology_observations`: normalized technology observations from tools.
+- `zero_vulnerability_records`: CVE/KEV/advisory/template records.
+- `zero_nuclei_results`: active validation hits from Nuclei, deduped by program/template/match/evidence.
+- `zero_candidate_findings`: deduplicated candidate matches.
+- `zero_change_events`: append-only record of added/updated/removed entities per scan.
+- `zero_scan_runs`: execution history, counts, status, and per-run stats.
+- `zero_reports`: generated report artifacts.
+
+Every discovered entity is linked back to `zero_programs`. This is required because the same hostname can appear in more than one program and because notifications/reports must be scoped to the bug bounty target, not just a raw URL.
+
+## Execution Model
+
+Zero should scan multiple programs concurrently, starting with `ZERO_TARGET_PARALLELISM=4`. Inside each program, external tools should use moderate defaults and batching:
+
+- Scope sync writes in batches on first import and uses unique constraints for deduplication.
+- Enumeration accepts only sanitized, valid, in-scope wildcard or URL-host roots linked to the program.
+- `httpx` stores target intel for alive services and technology observations.
+- `nuclei` runs after probing and only against alive URLs.
+- Report generation emits only changes/new findings since the previous successful scan.
+
+## Scheduler
+
+The worker uses second-enabled cron expressions:
+
+- `ZERO_SCHEDULE_SCOPE_SYNC`
+- `ZERO_SCHEDULE_ENUM`
+- `ZERO_SCHEDULE_PROBE`
+- `ZERO_SCHEDULE_CVE`
+- `ZERO_SCHEDULE_NUCLEI`
+
+Default ordering runs scope sync before enumeration, enumeration before probing, passive CVE analysis after probing, and Nuclei validation after passive analysis.

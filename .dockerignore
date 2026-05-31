@@ -1,0 +1,11 @@
+.git
+.tmp
+tmp
+bin
+dist
+reports/generated
+subfinder-output
+httpx-output
+.env
+.env.*
+README.local.md

@@ -1,0 +1,26 @@
+.env
+.env.*
+!.env.example
+
+bin/
+dist/
+tmp/
+.tmp/
+coverage.out
+*.exe
+
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+.vscode/
+.idea/
+
+subfinder-output/
+httpx-output/
+reports/generated/
+
+# Local tool credentials.
+.secrets/
+configs/subfinder/provider-config.yaml
