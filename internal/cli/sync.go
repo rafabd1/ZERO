@@ -33,6 +33,7 @@ func newSyncCommand() *cobra.Command {
 			result, err := svc.SyncHackerOne(ctx, scope.HackerOneOptions{
 				Username:    cfg.HackerOne.Username,
 				Token:       cfg.HackerOne.Token,
+				ScanRunID:   scanID,
 				BountyOnly:  cfg.Scope.BountyOnly,
 				PrivateOnly: cfg.Scope.PrivateOnly,
 				Categories:  cfg.Scope.Categories,

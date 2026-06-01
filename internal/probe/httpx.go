@@ -17,6 +17,7 @@ import (
 type HTTPXRunner struct {
 	repo      *db.Repository
 	bin       string
+	scanRunID string
 	programID string
 	limit     int
 }
@@ -54,6 +55,11 @@ func (r *HTTPXRunner) WithLimit(limit int) *HTTPXRunner {
 
 func (r *HTTPXRunner) WithProgramID(programID string) *HTTPXRunner {
 	r.programID = programID
+	return r
+}
+
+func (r *HTTPXRunner) WithScanRunID(scanRunID string) *HTTPXRunner {
+	r.scanRunID = scanRunID
 	return r
 }
 
@@ -97,7 +103,7 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			return fmt.Errorf("parse httpx json: %w", err)
 		}
-		services, err := parsed.toServices(byHost)
+		services, err := parsed.toServices(byHost, r.scanRunID)
 		if err != nil {
 			return err
 		}
@@ -113,7 +119,7 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	return result, err
 }
 
-func (h httpxLine) toServices(byHost map[string][]db.ProbeTarget) ([]db.HTTPService, error) {
+func (h httpxLine) toServices(byHost map[string][]db.ProbeTarget, scanRunID string) ([]db.HTTPService, error) {
 	if h.URL == "" {
 		return nil, fmt.Errorf("httpx output without url")
 	}
@@ -158,19 +164,20 @@ func (h httpxLine) toServices(byHost map[string][]db.ProbeTarget) ([]db.HTTPServ
 		}
 		seen[key] = true
 		services = append(services, db.HTTPService{
-			ProgramID:    target.ProgramID,
-			SubdomainID:  target.SubdomainID,
-			URL:          h.URL,
-			Scheme:       firstNonEmpty(h.Scheme, u.Scheme),
-			Host:         host,
-			Port:         port,
-			StatusCode:   status,
-			Title:        h.Title,
-			Webserver:    h.Webserver,
-			Technologies: h.Technologies,
-			FaviconHash:  h.FaviconHash,
-			TLS:          h.TLS,
-			Raw:          raw,
+			ProgramID:     target.ProgramID,
+			SubdomainID:   target.SubdomainID,
+			LastScanRunID: scanRunID,
+			URL:           h.URL,
+			Scheme:        firstNonEmpty(h.Scheme, u.Scheme),
+			Host:          host,
+			Port:          port,
+			StatusCode:    status,
+			Title:         h.Title,
+			Webserver:     h.Webserver,
+			Technologies:  h.Technologies,
+			FaviconHash:   h.FaviconHash,
+			TLS:           h.TLS,
+			Raw:           raw,
 		})
 	}
 	return services, nil

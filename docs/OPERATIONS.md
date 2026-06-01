@@ -54,6 +54,8 @@ Zero should not blindly delete missing data. Missing assets should be marked ina
 
 Current change events are emitted for newly inserted scope assets, subdomains, HTTP services, technology observations, Nuclei results, and candidate findings. They are deduped by stable evidence hash and can be read from `/v1/changes` or `/v1/programs/{program_id}/changes`.
 
+Task-generated entities carry the current scan id: scope assets, subdomains, HTTP services, and technology observations use `last_scan_run_id`; Nuclei results, reports, and change events use `scan_run_id`. This is the authoritative audit trail for tying a report or notification back to the execution that produced it.
+
 On worker startup, `ZERO_RECOVER_RUNNING_SCANS=true` marks interrupted `zero_scan_runs.status='running'` rows as failed with recovery metadata. Since the program's `last_scan_finished_at` is not advanced by an interrupted run, that program remains due and the startup run can continue from the persisted database state.
 
 HackerOne scope sync defaults to `ZERO_SCOPE_PRIVATE_ONLY=false`, so bbscope imports both public and private open programs visible to the configured account. `ZERO_SCOPE_BOUNTY_ONLY=true` keeps VDP programs out. Assets that are listed as in-scope by the platform but are not bounty-eligible are stored as out-of-scope in Zero, so they block broad wildcard expansion instead of being scanned. Set `ZERO_SCOPE_PRIVATE_ONLY=true` only when intentionally limiting Zero to private/soft-launched programs.

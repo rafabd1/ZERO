@@ -14,6 +14,7 @@ import (
 
 type Generator struct {
 	repo      *db.Repository
+	scanRunID string
 	programID string
 	limit     int
 }
@@ -40,6 +41,11 @@ func (g *Generator) WithProgramID(programID string) *Generator {
 	return g
 }
 
+func (g *Generator) WithScanRunID(scanRunID string) *Generator {
+	g.scanRunID = strings.TrimSpace(scanRunID)
+	return g
+}
+
 func (g *Generator) Run(ctx context.Context) (Result, error) {
 	findings, err := g.repo.ListUnreportedFindings(ctx, g.programID, g.limit)
 	if err != nil {
@@ -52,6 +58,7 @@ func (g *Generator) Run(ctx context.Context) (Result, error) {
 
 	for _, group := range groupByProgram(findings) {
 		draft := buildDraft(group)
+		draft.ScanRunID = g.scanRunID
 		_, inserted, err := g.repo.CreateReport(ctx, draft)
 		if err != nil {
 			return result, err

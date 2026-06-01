@@ -23,8 +23,20 @@ func newReportCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
-			result, err := report.NewGenerator(repo).WithProgramID(programID).WithLimit(limit).Run(ctx)
+			scanID, err := startScanRun(ctx, repo, "intel", programID)
 			if err != nil {
+				return err
+			}
+			result, err := report.NewGenerator(repo).WithScanRunID(scanID).WithProgramID(programID).WithLimit(limit).Run(ctx)
+			if err != nil {
+				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+			}
+			if err := finishScanRun(ctx, repo, scanID, nil, result.Findings, result.Inserted, map[string]any{
+				"findings":   result.Findings,
+				"reports":    result.Reports,
+				"inserted":   result.Inserted,
+				"program_id": programID,
+			}); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "processed %d new findings, generated %d reports and inserted %d new reports\n", result.Findings, result.Reports, result.Inserted)

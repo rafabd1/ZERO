@@ -112,11 +112,12 @@ func (r *Repository) UpsertScopeAsset(ctx context.Context, asset ScopeAsset) (st
 	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_scope_assets(
-			program_id, platform, handle, asset_type, target_raw, target_normalized,
+			program_id, last_scan_run_id, platform, handle, asset_type, target_raw, target_normalized,
 			description, in_scope, eligible_for_bounty, source, metadata
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+		VALUES ($1,NULLIF($2, '')::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
 		ON CONFLICT(program_id, asset_type, target_normalized, in_scope) DO UPDATE SET
+			last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_scope_assets.last_scan_run_id),
 			target_raw = excluded.target_raw,
 			description = excluded.description,
 			eligible_for_bounty = excluded.eligible_for_bounty,
@@ -124,7 +125,7 @@ func (r *Repository) UpsertScopeAsset(ctx context.Context, asset ScopeAsset) (st
 			last_seen_at = now(),
 			metadata = zero_scope_assets.metadata || excluded.metadata
 		RETURNING id, (xmax = 0) AS inserted
-	`, asset.ProgramID, asset.Platform, asset.Handle, asset.AssetType, asset.TargetRaw, asset.TargetNormalized,
+	`, asset.ProgramID, asset.LastScanRunID, asset.Platform, asset.Handle, asset.AssetType, asset.TargetRaw, asset.TargetNormalized,
 		asset.Description, asset.InScope, asset.EligibleForBounty, asset.Source, string(meta)).Scan(&id, &inserted)
 	if err != nil {
 		return "", fmt.Errorf("upsert scope asset: %w", err)
@@ -132,6 +133,7 @@ func (r *Repository) UpsertScopeAsset(ctx context.Context, asset ScopeAsset) (st
 	if inserted {
 		if err := r.RecordChangeEvent(ctx, ChangeEvent{
 			ProgramID:  asset.ProgramID,
+			ScanRunID:  asset.LastScanRunID,
 			EntityType: "scope_asset",
 			EntityID:   id,
 			EntityKey:  asset.AssetType + ":" + asset.TargetNormalized + ":" + fmt.Sprint(asset.InScope),
@@ -163,11 +165,12 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 		meta, _ := json.Marshal(asset.Metadata)
 		batch.Queue(`
 			INSERT INTO zero_scope_assets(
-				program_id, platform, handle, asset_type, target_raw, target_normalized,
+				program_id, last_scan_run_id, platform, handle, asset_type, target_raw, target_normalized,
 				description, in_scope, eligible_for_bounty, source, metadata
 			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+			VALUES ($1,NULLIF($2, '')::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
 			ON CONFLICT(program_id, asset_type, target_normalized, in_scope) DO UPDATE SET
+				last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_scope_assets.last_scan_run_id),
 				target_raw = excluded.target_raw,
 				description = excluded.description,
 				eligible_for_bounty = excluded.eligible_for_bounty,
@@ -175,7 +178,7 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 				last_seen_at = now(),
 				metadata = zero_scope_assets.metadata || excluded.metadata
 			RETURNING id::text, (xmax = 0) AS inserted
-		`, asset.ProgramID, asset.Platform, asset.Handle, asset.AssetType, asset.TargetRaw, asset.TargetNormalized,
+		`, asset.ProgramID, asset.LastScanRunID, asset.Platform, asset.Handle, asset.AssetType, asset.TargetRaw, asset.TargetNormalized,
 			asset.Description, asset.InScope, asset.EligibleForBounty, asset.Source, string(meta))
 	}
 
@@ -191,6 +194,7 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 		if inserted {
 			events = append(events, ChangeEvent{
 				ProgramID:  asset.ProgramID,
+				ScanRunID:  asset.LastScanRunID,
 				EntityType: "scope_asset",
 				EntityID:   id,
 				EntityKey:  asset.AssetType + ":" + asset.TargetNormalized + ":" + fmt.Sprint(asset.InScope),
@@ -260,22 +264,24 @@ func (r *Repository) UpsertSubdomain(ctx context.Context, sub Subdomain) (string
 	var id string
 	var inserted bool
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO zero_subdomains(program_id, scope_asset_id, root_domain, fqdn, source)
-		VALUES ($1,$2,$3,$4,$5)
+		INSERT INTO zero_subdomains(program_id, scope_asset_id, last_scan_run_id, root_domain, fqdn, source)
+		VALUES ($1,$2,NULLIF($3, '')::uuid,$4,$5,$6)
 		ON CONFLICT(program_id, fqdn) DO UPDATE SET
 			scope_asset_id = COALESCE(excluded.scope_asset_id, zero_subdomains.scope_asset_id),
+			last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_subdomains.last_scan_run_id),
 			root_domain = excluded.root_domain,
 			source = excluded.source,
 			active = true,
 			last_seen_at = now()
 		RETURNING id, (xmax = 0) AS inserted
-	`, sub.ProgramID, nullString(sub.ScopeAssetID), sub.RootDomain, sub.FQDN, sub.Source).Scan(&id, &inserted)
+	`, sub.ProgramID, nullString(sub.ScopeAssetID), sub.LastScanRunID, sub.RootDomain, sub.FQDN, sub.Source).Scan(&id, &inserted)
 	if err != nil {
 		return "", fmt.Errorf("upsert subdomain: %w", err)
 	}
 	if inserted {
 		if err := r.RecordChangeEvent(ctx, ChangeEvent{
 			ProgramID:  sub.ProgramID,
+			ScanRunID:  sub.LastScanRunID,
 			EntityType: "subdomain",
 			EntityID:   id,
 			EntityKey:  sub.FQDN,
@@ -469,11 +475,12 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_http_services(
 			program_id, subdomain_id, url, scheme, host, port, status_code, title, webserver,
-			technologies, favicon_hash, tls, raw
+			technologies, favicon_hash, tls, raw, last_scan_run_id
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12::jsonb,$13::jsonb)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12::jsonb,$13::jsonb,NULLIF($14, '')::uuid)
 		ON CONFLICT(program_id, url) DO UPDATE SET
 			subdomain_id = COALESCE(excluded.subdomain_id, zero_http_services.subdomain_id),
+			last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_http_services.last_scan_run_id),
 			scheme = excluded.scheme,
 			host = excluded.host,
 			port = excluded.port,
@@ -488,13 +495,14 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 			last_seen_at = now()
 		RETURNING id, (xmax = 0) AS inserted
 	`, service.ProgramID, nullString(service.SubdomainID), service.URL, service.Scheme, service.Host, service.Port, service.StatusCode,
-		service.Title, service.Webserver, string(tech), service.FaviconHash, string(service.TLS), string(service.Raw)).Scan(&id, &inserted)
+		service.Title, service.Webserver, string(tech), service.FaviconHash, string(service.TLS), string(service.Raw), service.LastScanRunID).Scan(&id, &inserted)
 	if err != nil {
 		return "", fmt.Errorf("upsert http service: %w", err)
 	}
 	if inserted {
 		if err := r.RecordChangeEvent(ctx, ChangeEvent{
 			ProgramID:  service.ProgramID,
+			ScanRunID:  service.LastScanRunID,
 			EntityType: "http_service",
 			EntityID:   id,
 			EntityKey:  service.URL,
@@ -522,20 +530,22 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 		var techID string
 		var techInserted bool
 		err := r.pool.QueryRow(ctx, `
-			INSERT INTO zero_technology_observations(program_id, http_service_id, name, source, confidence, evidence)
-			VALUES ($1,$2,$3,'httpx',60,jsonb_build_object('url',$4::text))
+			INSERT INTO zero_technology_observations(program_id, http_service_id, last_scan_run_id, name, source, confidence, evidence)
+			VALUES ($1,$2,NULLIF($3, '')::uuid,$4,'httpx',60,jsonb_build_object('url',$5::text))
 			ON CONFLICT(http_service_id, lower(name), version, source) DO UPDATE SET
+				last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_technology_observations.last_scan_run_id),
 				last_seen_at = now(),
 				confidence = GREATEST(zero_technology_observations.confidence, excluded.confidence),
 				evidence = zero_technology_observations.evidence || excluded.evidence
 			RETURNING id::text, (xmax = 0) AS inserted
-		`, service.ProgramID, id, name, service.URL).Scan(&techID, &techInserted)
+		`, service.ProgramID, id, service.LastScanRunID, name, service.URL).Scan(&techID, &techInserted)
 		if err != nil {
 			return "", fmt.Errorf("upsert technology observation: %w", err)
 		}
 		if techInserted {
 			if err := r.RecordChangeEvent(ctx, ChangeEvent{
 				ProgramID:  service.ProgramID,
+				ScanRunID:  service.LastScanRunID,
 				EntityType: "technology",
 				EntityID:   techID,
 				EntityKey:  service.URL + ":" + strings.ToLower(strings.TrimSpace(name)),

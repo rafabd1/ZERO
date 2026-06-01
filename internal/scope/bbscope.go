@@ -18,6 +18,7 @@ type Service struct {
 type HackerOneOptions struct {
 	Username    string
 	Token       string
+	ScanRunID   string
 	BountyOnly  bool
 	PrivateOnly bool
 	Categories  string
@@ -62,7 +63,7 @@ func (s *Service) SyncHackerOne(ctx context.Context, opts HackerOneOptions) (Syn
 		go func() {
 			defer wg.Done()
 			for handle := range handleCh {
-				programCount, assetCount, err := s.syncHackerOneProgram(ctx, poller, pollOpts, handle)
+				programCount, assetCount, err := s.syncHackerOneProgram(ctx, poller, pollOpts, opts.ScanRunID, handle)
 				if err != nil {
 					errCh <- err
 					continue
@@ -100,7 +101,7 @@ func (s *Service) SyncHackerOne(ctx context.Context, opts HackerOneOptions) (Syn
 	return result, nil
 }
 
-func (s *Service) syncHackerOneProgram(ctx context.Context, poller *h1platform.Poller, pollOpts platforms.PollOptions, handle string) (int, int, error) {
+func (s *Service) syncHackerOneProgram(ctx context.Context, poller *h1platform.Poller, pollOpts platforms.PollOptions, scanRunID, handle string) (int, int, error) {
 	program, err := poller.FetchProgramScope(ctx, handle, fetchScopeOptions(pollOpts))
 	if err != nil {
 		return 0, 0, fmt.Errorf("fetch HackerOne scope for %s: %w", handle, err)
@@ -117,9 +118,9 @@ func (s *Service) syncHackerOneProgram(ctx context.Context, poller *h1platform.P
 	inScope, bountyExcluded := splitBountyScope(program.InScope, pollOpts.BountyOnly)
 
 	assets := make([]db.ScopeAsset, 0, len(program.InScope)+len(program.OutOfScope))
-	assets = append(assets, buildAssets(programID, "h1", handle, inScope, true)...)
-	assets = append(assets, buildAssets(programID, "h1", handle, bountyExcluded, false)...)
-	assets = append(assets, buildAssets(programID, "h1", handle, program.OutOfScope, false)...)
+	assets = append(assets, buildAssets(programID, scanRunID, "h1", handle, inScope, true)...)
+	assets = append(assets, buildAssets(programID, scanRunID, "h1", handle, bountyExcluded, false)...)
+	assets = append(assets, buildAssets(programID, scanRunID, "h1", handle, program.OutOfScope, false)...)
 
 	count, err := s.repo.UpsertScopeAssets(ctx, assets)
 	if err != nil {
@@ -149,7 +150,7 @@ func splitBountyScope(elements []bbscope.ScopeElement, bountyOnly bool) ([]bbsco
 	return inScope, outOfScope
 }
 
-func buildAssets(programID, platform, handle string, elements []bbscope.ScopeElement, inScope bool) []db.ScopeAsset {
+func buildAssets(programID, scanRunID, platform, handle string, elements []bbscope.ScopeElement, inScope bool) []db.ScopeAsset {
 	assets := make([]db.ScopeAsset, 0, len(elements))
 	for _, element := range elements {
 		target := element.Target
@@ -159,6 +160,7 @@ func buildAssets(programID, platform, handle string, elements []bbscope.ScopeEle
 		}
 		assets = append(assets, db.ScopeAsset{
 			ProgramID:         programID,
+			LastScanRunID:     scanRunID,
 			Platform:          platform,
 			Handle:            handle,
 			AssetType:         element.Category,

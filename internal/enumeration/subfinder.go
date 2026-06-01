@@ -16,6 +16,7 @@ type SubfinderRunner struct {
 	providerConfig string
 	sources        string
 	rateLimits     string
+	scanRunID      string
 	programID      string
 	limit          int
 }
@@ -57,6 +58,11 @@ func (r *SubfinderRunner) WithProgramID(programID string) *SubfinderRunner {
 	return r
 }
 
+func (r *SubfinderRunner) WithScanRunID(scanRunID string) *SubfinderRunner {
+	r.scanRunID = strings.TrimSpace(scanRunID)
+	return r
+}
+
 func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 	roots, err := r.repo.ListDomainRoots(ctx, r.programID)
 	if err != nil {
@@ -88,11 +94,12 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 				return nil
 			}
 			_, err := r.repo.UpsertSubdomain(ctx, db.Subdomain{
-				ProgramID:    root.ProgramID,
-				ScopeAssetID: root.ScopeAssetID,
-				RootDomain:   root.RootDomain,
-				FQDN:         fqdn,
-				Source:       "subfinder",
+				ProgramID:     root.ProgramID,
+				ScopeAssetID:  root.ScopeAssetID,
+				LastScanRunID: r.scanRunID,
+				RootDomain:    root.RootDomain,
+				FQDN:          fqdn,
+				Source:        "subfinder",
 			})
 			if err != nil {
 				return err

@@ -73,13 +73,13 @@ func (r *Repository) CreateReport(ctx context.Context, draft ReportDraft) (strin
 	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_reports(
-			program_id, report_key, title, severity, confidence, body_markdown, finding_ids, metadata
+			program_id, scan_run_id, report_key, title, severity, confidence, body_markdown, finding_ids, metadata
 		)
-		VALUES ($1::uuid,$2,$3,$4,$5,$6,$7::text[]::uuid[],$8::jsonb)
+		VALUES ($1::uuid,NULLIF($2, '')::uuid,$3,$4,$5,$6,$7,$8::text[]::uuid[],$9::jsonb)
 		ON CONFLICT(report_key) DO UPDATE SET
 			metadata = zero_reports.metadata || excluded.metadata
 		RETURNING id::text, (xmax = 0) AS inserted
-	`, draft.ProgramID, draft.ReportKey, draft.Title, draft.Severity, draft.Confidence, draft.Body, draft.FindingIDs, string(meta)).Scan(&id, &inserted)
+	`, draft.ProgramID, draft.ScanRunID, draft.ReportKey, draft.Title, draft.Severity, draft.Confidence, draft.Body, draft.FindingIDs, string(meta)).Scan(&id, &inserted)
 	if err != nil {
 		return "", false, fmt.Errorf("create report: %w", err)
 	}

@@ -25,6 +25,7 @@ type NucleiRunner struct {
 	rate        int
 	concurrency int
 	bulkSize    int
+	scanRunID   string
 	programID   string
 	limit       int
 }
@@ -83,6 +84,11 @@ func (r *NucleiRunner) WithProgramID(programID string) *NucleiRunner {
 	return r
 }
 
+func (r *NucleiRunner) WithScanRunID(scanRunID string) *NucleiRunner {
+	r.scanRunID = strings.TrimSpace(scanRunID)
+	return r
+}
+
 func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	targets, err := r.repo.ListNucleiTargets(ctx, r.programID)
 	if err != nil {
@@ -132,6 +138,7 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		}
 		parsed.ProgramID = target.ProgramID
 		parsed.HTTPServiceID = target.HTTPServiceID
+		parsed.ScanRunID = r.scanRunID
 		nucleiID, inserted, err := r.repo.UpsertNucleiResult(ctx, parsed)
 		if err != nil {
 			return err

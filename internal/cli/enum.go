@@ -31,6 +31,7 @@ func newEnumCommand() *cobra.Command {
 				WithProviderConfig(cfg.Tools.SubfinderProviderConfig).
 				WithSources(cfg.Tools.SubfinderSources).
 				WithRateLimits(cfg.Tools.SubfinderRateLimits).
+				WithScanRunID(scanID).
 				WithProgramID(programID).
 				WithLimit(subfinderLimit)
 			result, err := runner.Run(ctx)

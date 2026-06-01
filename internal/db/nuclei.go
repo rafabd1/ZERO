@@ -38,12 +38,13 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_nuclei_results(
-			program_id, http_service_id, template_id, template_path, matched_at,
+			program_id, http_service_id, scan_run_id, template_id, template_path, matched_at,
 			severity, cves, tags, type, extractor_name, evidence_hash, raw
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+		VALUES ($1,$2,NULLIF($3, '')::uuid,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
 		ON CONFLICT(program_id, template_id, matched_at, evidence_hash) DO UPDATE SET
 			http_service_id = COALESCE(excluded.http_service_id, zero_nuclei_results.http_service_id),
+			scan_run_id = COALESCE(excluded.scan_run_id, zero_nuclei_results.scan_run_id),
 			severity = excluded.severity,
 			cves = excluded.cves,
 			tags = excluded.tags,
@@ -52,7 +53,7 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 			raw = excluded.raw,
 			last_seen_at = now()
 		RETURNING id, (xmax = 0) AS inserted
-	`, result.ProgramID, nullString(result.HTTPServiceID), result.TemplateID, result.TemplatePath, result.MatchedAt,
+	`, result.ProgramID, nullString(result.HTTPServiceID), result.ScanRunID, result.TemplateID, result.TemplatePath, result.MatchedAt,
 		result.Severity, result.CVEs, result.Tags, result.Type, result.ExtractorName, result.EvidenceHash, string(result.Raw)).Scan(&id, &inserted)
 	if err != nil {
 		return "", false, fmt.Errorf("upsert nuclei result: %w", err)
@@ -60,6 +61,7 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 	if inserted {
 		if err := r.RecordChangeEvent(ctx, ChangeEvent{
 			ProgramID:  result.ProgramID,
+			ScanRunID:  result.ScanRunID,
 			EntityType: "nuclei_result",
 			EntityID:   id,
 			EntityKey:  result.TemplateID + ":" + result.MatchedAt + ":" + result.EvidenceHash,
@@ -112,6 +114,7 @@ func (r *Repository) UpsertCandidateFindingFromNuclei(ctx context.Context, nucle
 	if inserted {
 		if err := r.RecordChangeEvent(ctx, ChangeEvent{
 			ProgramID:  result.ProgramID,
+			ScanRunID:  result.ScanRunID,
 			EntityType: "candidate_finding",
 			EntityID:   id,
 			EntityKey:  evidenceHash,

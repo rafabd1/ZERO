@@ -65,6 +65,7 @@ func (s *Server) routes() {
 		SELECT jsonb_build_object(
 			'id', a.id,
 			'program_id', a.program_id,
+			'last_scan_run_id', a.last_scan_run_id,
 			'asset_type', a.asset_type,
 			'target_normalized', a.target_normalized,
 			'in_scope', a.in_scope,
@@ -82,6 +83,7 @@ func (s *Server) routes() {
 		SELECT jsonb_build_object(
 			'id', s.id,
 			'program_id', s.program_id,
+			'last_scan_run_id', s.last_scan_run_id,
 			'url', s.url,
 			'host', s.host,
 			'status_code', s.status_code,
@@ -100,6 +102,7 @@ func (s *Server) routes() {
 		SELECT jsonb_build_object(
 			'id', n.id,
 			'program_id', n.program_id,
+			'scan_run_id', n.scan_run_id,
 			'http_service_id', n.http_service_id,
 			'template_id', n.template_id,
 			'matched_at', n.matched_at,
@@ -134,6 +137,7 @@ func (s *Server) routes() {
 		SELECT jsonb_build_object(
 			'id', r.id,
 			'program_id', r.program_id,
+			'scan_run_id', r.scan_run_id,
 			'report_key', r.report_key,
 			'title', r.title,
 			'severity', r.severity,
@@ -150,6 +154,7 @@ func (s *Server) routes() {
 		SELECT jsonb_build_object(
 			'id', r.id,
 			'program_id', r.program_id,
+			'scan_run_id', r.scan_run_id,
 			'report_key', r.report_key,
 			'title', r.title,
 			'severity', r.severity,
@@ -240,6 +245,7 @@ func (s *Server) routes() {
 			SELECT jsonb_build_object(
 				'id', a.id,
 				'program_id', a.program_id,
+				'last_scan_run_id', a.last_scan_run_id,
 				'asset_type', a.asset_type,
 				'target_normalized', a.target_normalized,
 				'in_scope', a.in_scope,
@@ -265,6 +271,7 @@ func (s *Server) routes() {
 			SELECT jsonb_build_object(
 				'id', s.id,
 				'program_id', s.program_id,
+				'last_scan_run_id', s.last_scan_run_id,
 				'url', s.url,
 				'host', s.host,
 				'status_code', s.status_code,
@@ -291,6 +298,7 @@ func (s *Server) routes() {
 			SELECT jsonb_build_object(
 				'id', n.id,
 				'program_id', n.program_id,
+				'scan_run_id', n.scan_run_id,
 				'http_service_id', n.http_service_id,
 				'template_id', n.template_id,
 				'matched_at', n.matched_at,

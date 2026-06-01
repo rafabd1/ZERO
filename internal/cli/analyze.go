@@ -60,6 +60,7 @@ func newAnalyzeCommand() *cobra.Command {
 			}
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
 				WithPolicy(cfg.Tools.NucleiTags, cfg.Tools.NucleiSeverities, templateIDs, cfg.Tools.NucleiRate, cfg.Tools.NucleiC, cfg.Tools.NucleiBulkSize).
+				WithScanRunID(scanID).
 				WithProgramID(nucleiProgramID).
 				WithLimit(nucleiLimit)
 			result, err := runner.Run(ctx)

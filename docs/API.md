@@ -40,6 +40,8 @@ Current implementation also includes `GET /v1/reports`, `GET /v1/reports/latest`
 
 The `since` query parameter accepts a Postgres-compatible timestamp and returns events with `occurred_at` greater than that value.
 
+Asset and service responses include `last_scan_run_id` when the entity was produced or refreshed by a task. Nuclei results, reports, and change events expose `scan_run_id`.
+
 ## Notification Flow
 
 1. Scan finishes.

@@ -27,7 +27,7 @@ func newProbeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).WithProgramID(programID).WithLimit(httpxLimit)
+			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).WithScanRunID(scanID).WithProgramID(programID).WithLimit(httpxLimit)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)

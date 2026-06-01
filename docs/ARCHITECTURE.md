@@ -42,6 +42,8 @@ flowchart LR
 
 Every discovered entity is linked back to `zero_programs`. This is required because the same hostname can appear in more than one program and because notifications/reports must be scoped to the bug bounty target, not just a raw URL.
 
+Entities produced by a task also carry `last_scan_run_id` or `scan_run_id` where the schema supports it. Change events use the same scan id, which lets the API answer what changed in a specific execution without guessing from timestamps.
+
 ## Execution Model
 
 Zero scans multiple programs concurrently through `zero run due`, starting with `ZERO_TARGET_PARALLELISM=4`. A program is due when it is active and its `last_scan_finished_at` is missing or older than `scan_interval_hours`. Inside each program, external tools use moderate defaults and batching:

@@ -5,6 +5,7 @@ import "encoding/json"
 type ScopeAsset struct {
 	ID                string
 	ProgramID         string
+	LastScanRunID     string
 	Platform          string
 	Handle            string
 	AssetType         string
@@ -39,12 +40,13 @@ type DomainScopeRule struct {
 }
 
 type Subdomain struct {
-	ID           string
-	ProgramID    string
-	ScopeAssetID string
-	RootDomain   string
-	FQDN         string
-	Source       string
+	ID            string
+	ProgramID     string
+	ScopeAssetID  string
+	LastScanRunID string
+	RootDomain    string
+	FQDN          string
+	Source        string
 }
 
 const (
@@ -63,20 +65,21 @@ type ProbeTarget struct {
 }
 
 type HTTPService struct {
-	ID           string
-	ProgramID    string
-	SubdomainID  string
-	URL          string
-	Scheme       string
-	Host         string
-	Port         *int
-	StatusCode   *int
-	Title        string
-	Webserver    string
-	Technologies []string
-	FaviconHash  string
-	TLS          json.RawMessage
-	Raw          json.RawMessage
+	ID            string
+	ProgramID     string
+	SubdomainID   string
+	LastScanRunID string
+	URL           string
+	Scheme        string
+	Host          string
+	Port          *int
+	StatusCode    *int
+	Title         string
+	Webserver     string
+	Technologies  []string
+	FaviconHash   string
+	TLS           json.RawMessage
+	Raw           json.RawMessage
 }
 
 type NucleiTarget struct {
@@ -88,6 +91,7 @@ type NucleiTarget struct {
 type NucleiResult struct {
 	ProgramID     string
 	HTTPServiceID string
+	ScanRunID     string
 	TemplateID    string
 	TemplatePath  string
 	MatchedAt     string
@@ -115,6 +119,7 @@ type ReportFinding struct {
 
 type ReportDraft struct {
 	ProgramID  string
+	ScanRunID  string
 	ReportKey  string
 	Title      string
 	Severity   string
