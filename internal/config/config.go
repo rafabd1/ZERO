@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	DatabaseURL       string
+	DatabaseMaxConns  int
 	AutoMigrate       bool
 	Supabase          SupabaseConfig
 	TargetParallelism int
@@ -51,6 +52,8 @@ type ToolConfig struct {
 	DNSXResolvers           string
 	DNSXRate                int
 	HTTPXBin                string
+	HTTPXTimeout            int
+	HTTPXThreads            int
 	WebanalyzeBin           string
 	WebanalyzeApps          string
 	WebanalyzeWorkers       int
@@ -121,6 +124,8 @@ func Load() (Config, error) {
 	v.SetDefault("tools.dnsx_resolvers", "")
 	v.SetDefault("tools.dnsx_rate", 200)
 	v.SetDefault("tools.httpx_bin", "httpx")
+	v.SetDefault("tools.httpx_timeout", 4)
+	v.SetDefault("tools.httpx_threads", 20)
 	v.SetDefault("tools.webanalyze_bin", "webanalyze")
 	v.SetDefault("tools.webanalyze_apps", "")
 	v.SetDefault("tools.webanalyze_workers", 4)
@@ -137,7 +142,7 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
 	v.SetDefault("tools.timeout", "20m")
-	v.SetDefault("target_parallelism", 6)
+	v.SetDefault("target_parallelism", 8)
 	v.SetDefault("schedule.full", "0 15 3 */3 * *")
 	v.SetDefault("schedule.scope_sync", "0 15 3 * * *")
 	v.SetDefault("schedule.enum", "0 45 3 * * *")
@@ -149,11 +154,13 @@ func Load() (Config, error) {
 	v.SetDefault("worker.run_on_startup", true)
 	v.SetDefault("worker.recover_running_scans", true)
 	v.SetDefault("database.auto_migrate", true)
+	v.SetDefault("database.max_conns", 1)
 	v.SetDefault("data.stale_after_hours", 168)
 
 	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
 	_ = v.BindEnv("database.auto_migrate", "ZERO_AUTO_MIGRATE")
+	_ = v.BindEnv("database.max_conns", "ZERO_DATABASE_MAX_CONNS")
 	_ = v.BindEnv("supabase_url", "ZERO_SUPABASE_URL")
 	_ = v.BindEnv("supabase_anon_key", "ZERO_SUPABASE_ANON_KEY")
 	_ = v.BindEnv("supabase_service_role_key", "ZERO_SUPABASE_SERVICE_ROLE_KEY")
@@ -170,6 +177,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.dnsx_resolvers", "ZERO_DNSX_RESOLVERS")
 	_ = v.BindEnv("tools.dnsx_rate", "ZERO_DNSX_RATE")
 	_ = v.BindEnv("tools.httpx_bin", "ZERO_HTTPX_BIN")
+	_ = v.BindEnv("tools.httpx_timeout", "ZERO_HTTPX_TIMEOUT")
+	_ = v.BindEnv("tools.httpx_threads", "ZERO_HTTPX_THREADS")
 	_ = v.BindEnv("tools.webanalyze_bin", "ZERO_WEBANALYZE_BIN")
 	_ = v.BindEnv("tools.webanalyze_apps", "ZERO_WEBANALYZE_APPS")
 	_ = v.BindEnv("tools.webanalyze_workers", "ZERO_WEBANALYZE_WORKERS")
@@ -205,6 +214,7 @@ func Load() (Config, error) {
 
 	return Config{
 		DatabaseURL:       v.GetString("database_url"),
+		DatabaseMaxConns:  clampInt(v.GetInt("database.max_conns"), 1, 10),
 		AutoMigrate:       v.GetBool("database.auto_migrate"),
 		TargetParallelism: clampInt(v.GetInt("target_parallelism"), 1, 16),
 		Supabase: SupabaseConfig{
@@ -230,6 +240,8 @@ func Load() (Config, error) {
 			DNSXResolvers:           v.GetString("tools.dnsx_resolvers"),
 			DNSXRate:                v.GetInt("tools.dnsx_rate"),
 			HTTPXBin:                v.GetString("tools.httpx_bin"),
+			HTTPXTimeout:            clampInt(v.GetInt("tools.httpx_timeout"), 1, 60),
+			HTTPXThreads:            clampInt(v.GetInt("tools.httpx_threads"), 1, 200),
 			WebanalyzeBin:           v.GetString("tools.webanalyze_bin"),
 			WebanalyzeApps:          v.GetString("tools.webanalyze_apps"),
 			WebanalyzeWorkers:       v.GetInt("tools.webanalyze_workers"),

@@ -5,6 +5,7 @@
 To run the first real scan, Zero needs:
 
 - `ZERO_DATABASE_URL`: Supabase Postgres connection string with `sslmode=require`.
+- `ZERO_DATABASE_MAX_CONNS`: max pgx pool connections per Zero process. Default: 1. Keep this low when using Supabase session pooler because parallel scans run many short-lived task processes.
 - HackerOne API credentials:
   - `ZERO_H1_USERNAME`
   - `ZERO_H1_TOKEN`
@@ -35,7 +36,7 @@ To run the first real scan, Zero needs:
 
 Default per-target scan interval: 72 hours.
 
-Default target parallelism: 6 programs at the same time.
+Default target parallelism: 8 programs at the same time.
 
 Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_programs.max_parallel_tasks`.
 
@@ -56,6 +57,8 @@ enum subfinder --program-id ... -> probe dnsx --program-id ... -> probe httpx --
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
 
 Each external tool call is bounded by `ZERO_TOOL_TIMEOUT` and defaults to 20 minutes. When a tool times out inside `zero run once`, `zero run due`, `zero run manual`, or `zero tools nuclei-update`, Zero stops that step, marks the current scan run as failed when applicable, and emits a Discord operational alert if `ZERO_DISCORD_WEBHOOK_URL` is configured. The alert includes the alert type, program, step command, configured timeout, and error text. The Docker entrypoint also bounds the optional startup Nuclei template update with the same timeout so the container can continue booting if template refresh stalls.
+
+`ZERO_HTTPX_TIMEOUT` controls the per-request timeout passed to httpx with `-timeout`; it defaults to 4 seconds. `ZERO_HTTPX_THREADS` controls httpx internal worker threads with `-threads`; it defaults to 20. These are separate from `ZERO_TOOL_TIMEOUT`, which bounds the whole httpx process for a program.
 
 Nuclei templates are updated on container startup when `ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP=true` and by the worker schedule `ZERO_SCHEDULE_NUCLEI_TEMPLATES` (default: `0 5 3 * * *`). They are not updated before every program scan because template updates are global, network-dependent, and can add avoidable latency/noise to target processing.
 
@@ -103,7 +106,7 @@ This validates the pipeline without turning a local setup check into a broad sca
 
 Use `zero run once` only when you want the full configured global pipeline without per-step smoke-test limits. Use `zero run due` for the normal continuous per-program execution model.
 
-Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--skip-cves`, `--cve-limit`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
+Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--httpx-timeout`, `--httpx-threads`, `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--skip-cves`, `--cve-limit`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
 
 ## Discord Notifications
 
@@ -153,6 +156,8 @@ ZERO_NUCLEI_TEMPLATE_DIR="/home/zero/nuclei-templates"
 ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP=true
 ZERO_NUCLEI_FROM_CVES=true
 ZERO_NUCLEI_CVE_LIMIT=100
+ZERO_HTTPX_TIMEOUT=4
+ZERO_HTTPX_THREADS=20
 ZERO_SUBFINDER_PROVIDER_CONFIG="/home/zero/.config/subfinder/provider-config.yaml"
 ZERO_SUBFINDER_SOURCES="shodan,bevigil,virustotal,securitytrails"
 ZERO_SUBFINDER_RATE_LIMITS="shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s"

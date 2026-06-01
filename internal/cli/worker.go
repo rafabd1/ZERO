@@ -44,7 +44,7 @@ func newWorkerCommand() *cobra.Command {
 				return err
 			}
 			if err := addJob("scan-requests", "*/30 * * * * *", func() {
-				if err := runQueuedScanRequests(cmd, cfg.DatabaseURL); err != nil {
+				if err := runQueuedScanRequests(cmd, cfg.DatabaseURL, cfg.DatabaseMaxConns); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "scan request processing failed: %v\n", err)
 				}
 			}); err != nil {
@@ -78,12 +78,12 @@ func newWorkerCommand() *cobra.Command {
 	}
 }
 
-func runQueuedScanRequests(cmd *cobra.Command, databaseURL string) error {
+func runQueuedScanRequests(cmd *cobra.Command, databaseURL string, databaseMaxConns int) error {
 	if databaseURL == "" {
 		return fmt.Errorf("ZERO_DATABASE_URL is required")
 	}
 	ctx := commandContext()
-	repo, err := db.Open(ctx, databaseURL)
+	repo, err := db.OpenWithMaxConns(ctx, databaseURL, databaseMaxConns)
 	if err != nil {
 		return err
 	}

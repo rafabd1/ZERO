@@ -65,7 +65,7 @@ func openRepository(ctx context.Context, cfg config.Config) *db.Repository {
 	if cfg.AutoMigrate {
 		cobra.CheckErr(db.Migrate(ctx, cfg.DatabaseURL))
 	}
-	repo, err := db.Open(ctx, cfg.DatabaseURL)
+	repo, err := db.OpenWithMaxConns(ctx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
 	cobra.CheckErr(err)
 	return repo
 }

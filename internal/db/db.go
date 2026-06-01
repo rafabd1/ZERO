@@ -17,9 +17,16 @@ type Repository struct {
 }
 
 func Open(ctx context.Context, databaseURL string) (*Repository, error) {
+	return OpenWithMaxConns(ctx, databaseURL, 1)
+}
+
+func OpenWithMaxConns(ctx context.Context, databaseURL string, maxConns int) (*Repository, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	if maxConns > 0 {
+		cfg.MaxConns = int32(maxConns)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -39,7 +46,7 @@ func (r *Repository) Close() {
 }
 
 func Migrate(ctx context.Context, databaseURL string) error {
-	repo, err := Open(ctx, databaseURL)
+	repo, err := OpenWithMaxConns(ctx, databaseURL, 1)
 	if err != nil {
 		return err
 	}

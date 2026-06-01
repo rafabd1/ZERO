@@ -23,6 +23,8 @@ type manualRunOptions struct {
 	SubfinderLimit    int
 	DNSXLimit         int
 	HTTPXLimit        int
+	HTTPXTimeout      int
+	HTTPXThreads      int
 	WebanalyzeLimit   int
 	CVELimit          int
 	WebanalyzeApps    string
@@ -101,6 +103,8 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.SubfinderLimit, "subfinder-limit", 0, "manual subfinder root limit")
 	cmd.Flags().IntVar(&opts.DNSXLimit, "dnsx-limit", 0, "manual dnsx host limit")
 	cmd.Flags().IntVar(&opts.HTTPXLimit, "httpx-limit", 0, "manual httpx target limit")
+	cmd.Flags().IntVar(&opts.HTTPXTimeout, "httpx-timeout", 0, "manual httpx per-request timeout seconds")
+	cmd.Flags().IntVar(&opts.HTTPXThreads, "httpx-threads", 0, "manual httpx worker threads")
 	cmd.Flags().IntVar(&opts.WebanalyzeLimit, "webanalyze-limit", 0, "manual Webanalyze service limit")
 	cmd.Flags().IntVar(&opts.CVELimit, "cve-limit", 0, "manual passive CVE technology limit")
 	cmd.Flags().StringVar(&opts.WebanalyzeApps, "webanalyze-apps", "", "custom Webanalyze apps file for this run only")
@@ -150,6 +154,8 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		step := []string{"probe", "httpx"}
 		step = appendProgramFlag(step, opts.ProgramID)
 		step = appendIntFlag(step, "--limit", opts.HTTPXLimit)
+		step = appendIntFlag(step, "--timeout", opts.HTTPXTimeout)
+		step = appendIntFlag(step, "--threads", opts.HTTPXThreads)
 		steps = append(steps, step)
 	}
 	if !opts.SkipEnrich {

@@ -9,6 +9,8 @@ import (
 
 func newProbeCommand() *cobra.Command {
 	var httpxLimit int
+	var httpxTimeout int
+	var httpxThreads int
 	var dnsxLimit int
 	var dnsxProgramID string
 	var programID string
@@ -70,6 +72,7 @@ func newProbeCommand() *cobra.Command {
 				WithScanRunID(scanID).
 				WithProgramID(programID).
 				WithLimit(httpxLimit).
+				WithRequestPolicy(firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout), firstPositive(httpxThreads, cfg.Tools.HTTPXThreads)).
 				WithTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			if err != nil {
@@ -79,6 +82,8 @@ func newProbeCommand() *cobra.Command {
 				"hosts":      result.Hosts,
 				"services":   result.Services,
 				"tool":       "httpx",
+				"timeout":    firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout),
+				"threads":    firstPositive(httpxThreads, cfg.Tools.HTTPXThreads),
 				"program_id": programID,
 			}); err != nil {
 				return err
@@ -90,6 +95,8 @@ func newProbeCommand() *cobra.Command {
 	dnsx.Flags().IntVar(&dnsxLimit, "limit", 0, "limit number of hosts to resolve")
 	dnsx.Flags().StringVar(&dnsxProgramID, "program-id", "", "limit DNS validation to one program id")
 	httpx.Flags().IntVar(&httpxLimit, "limit", 0, "limit number of hosts to probe")
+	httpx.Flags().IntVar(&httpxTimeout, "timeout", 0, "override httpx per-request timeout seconds")
+	httpx.Flags().IntVar(&httpxThreads, "threads", 0, "override httpx worker threads")
 	httpx.Flags().StringVar(&programID, "program-id", "", "limit probing to one program id")
 	cmd.AddCommand(dnsx, httpx)
 	return cmd

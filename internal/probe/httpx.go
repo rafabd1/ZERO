@@ -16,12 +16,14 @@ import (
 )
 
 type HTTPXRunner struct {
-	repo      *db.Repository
-	bin       string
-	scanRunID string
-	programID string
-	limit     int
-	timeout   time.Duration
+	repo       *db.Repository
+	bin        string
+	scanRunID  string
+	programID  string
+	limit      int
+	timeout    time.Duration
+	reqTimeout int
+	threads    int
 }
 
 type HTTPXResult struct {
@@ -62,6 +64,16 @@ func (r *HTTPXRunner) WithTimeout(timeout time.Duration) *HTTPXRunner {
 	return r
 }
 
+func (r *HTTPXRunner) WithRequestPolicy(reqTimeout, threads int) *HTTPXRunner {
+	if reqTimeout > 0 {
+		r.reqTimeout = reqTimeout
+	}
+	if threads > 0 {
+		r.threads = threads
+	}
+	return r
+}
+
 func (r *HTTPXRunner) WithProgramID(programID string) *HTTPXRunner {
 	r.programID = programID
 	return r
@@ -97,16 +109,7 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	}
 
 	result := HTTPXResult{Hosts: len(byHost)}
-	args := []string{
-		"-silent",
-		"-json",
-		"-tech-detect",
-		"-status-code",
-		"-title",
-		"-web-server",
-		"-favicon",
-		"-tls-probe",
-	}
+	args := buildHTTPXArgs(r.reqTimeout, r.threads)
 	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		var parsed httpxLine
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
@@ -126,6 +129,26 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		return nil
 	})
 	return result, err
+}
+
+func buildHTTPXArgs(reqTimeout, threads int) []string {
+	args := []string{
+		"-silent",
+		"-json",
+		"-tech-detect",
+		"-status-code",
+		"-title",
+		"-web-server",
+		"-favicon",
+		"-tls-probe",
+	}
+	if reqTimeout > 0 {
+		args = append(args, "-timeout", strconv.Itoa(reqTimeout))
+	}
+	if threads > 0 {
+		args = append(args, "-threads", strconv.Itoa(threads))
+	}
+	return args
 }
 
 func (h httpxLine) toServices(byHost map[string][]db.ProbeTarget, scanRunID string) ([]db.HTTPService, error) {
