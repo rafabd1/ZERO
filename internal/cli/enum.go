@@ -22,6 +22,10 @@ func newEnumCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
+			scanID, err := startScanRun(ctx, repo, "enum")
+			if err != nil {
+				return err
+			}
 			runner := enumeration.NewSubfinderRunner(repo, cfg.Tools.SubfinderBin).
 				WithProviderConfig(cfg.Tools.SubfinderProviderConfig).
 				WithSources(cfg.Tools.SubfinderSources).
@@ -29,6 +33,13 @@ func newEnumCommand() *cobra.Command {
 				WithLimit(subfinderLimit)
 			result, err := runner.Run(ctx)
 			if err != nil {
+				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+			}
+			if err := finishScanRun(ctx, repo, scanID, nil, result.Roots, result.Subdomains, map[string]any{
+				"roots":      result.Roots,
+				"subdomains": result.Subdomains,
+				"tool":       "subfinder",
+			}); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "processed %d roots and upserted %d subdomains\n", result.Roots, result.Subdomains)

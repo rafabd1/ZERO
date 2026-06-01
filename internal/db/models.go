@@ -91,3 +91,27 @@ type NucleiResult struct {
 	EvidenceHash  string
 	Raw           json.RawMessage
 }
+
+type ReportFinding struct {
+	ID            string
+	ProgramID     string
+	ProgramHandle string
+	ProgramURL    string
+	ServiceURL    string
+	ServiceHost   string
+	Severity      string
+	Confidence    int
+	Evidence      json.RawMessage
+	FirstSeenAt   string
+}
+
+type ReportDraft struct {
+	ProgramID  string
+	ReportKey  string
+	Title      string
+	Severity   string
+	Confidence int
+	Body       string
+	FindingIDs []string
+	Metadata   map[string]any
+}

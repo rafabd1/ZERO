@@ -34,6 +34,14 @@ Default target parallelism: 4 programs at the same time.
 
 Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_programs.max_parallel_tasks`.
 
+The main continuous execution path is `zero worker`, which schedules `zero run once` using `ZERO_SCHEDULE_FULL`. `zero run once` executes:
+
+```text
+sync h1 -> enum subfinder -> probe httpx -> analyze cves(policy/intel) -> analyze nuclei -> report generate
+```
+
+The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
+
 ## Data Lifecycle
 
 Zero should not blindly delete missing data. Missing assets should be marked inactive only after enough scan evidence shows they are gone. New or changed entities are written to `zero_change_events`, and reports/Discord notifications should use that table to avoid repeating old results.
@@ -47,6 +55,8 @@ zero sync h1
 zero enum subfinder --limit 2
 zero probe httpx --limit 50
 zero analyze nuclei --limit 5 --template-id CVE-2025-20362
+zero report generate --limit 50
+zero run once
 zero api
 ```
 

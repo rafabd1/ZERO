@@ -45,20 +45,11 @@ nuclei -l urls.txt \
 
 The exact flags can evolve with testing, but the principle should remain: CVE-tagged templates, severity above low, moderate concurrency, deduped JSONL output, and per-program attribution.
 
-## CVE Intelligence
+## CVE Validation
 
-Recommended sources:
+Zero does not emit passive CVE findings from `httpx` fingerprints. Fingerprints are stored as target intelligence for operator context and later Proteus/Codex triage.
 
-- CISA KEV for known exploited vulnerabilities.
-- NVD for CVE metadata and CVSS.
-- OSV for package ecosystems where package identity/version is available.
-- Nuclei template metadata for practical HTTP detection hints.
-
-Matching rule of thumb:
-
-- Version-confirmed technology plus affected range: high confidence.
-- Product-only fingerprint with no version: observation or low confidence.
-- Nuclei positive result: high confidence only if the request/response evidence is meaningful and target behavior is in scope.
+Reportable CVE candidates come from Nuclei results. Confidence is based on Nuclei evidence quality and severity, not on a passive keyword match against CVE databases.
 
 ## Role Split
 
@@ -66,4 +57,4 @@ Matching rule of thumb:
 
 `nuclei` is validation. It answers "does a known probe produce vulnerability-specific evidence?".
 
-The passive CVE matcher should use `httpx` observations to prioritize likely vulnerable products. Nuclei should then be used to raise confidence where a relevant template exists.
+Reports are generated from new Nuclei-backed findings only. The `httpx` observations remain useful because they explain what the target looked like when the validation happened.

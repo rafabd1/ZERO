@@ -17,12 +17,11 @@
 - Normalize technology names with a small alias table.
 - Add batch insert/upsert paths for first scans with large scopes and large subdomain lists.
 
-## Phase 3: Vulnerability Matching
+## Phase 3: Vulnerability Validation
 
-- Pull CISA KEV and NVD feeds into `zero_vulnerability_records`.
-- Add matcher for version-confirmed technologies.
-- Add Nuclei template index correlation.
+- Keep `httpx` fingerprints as target intelligence only.
 - Add optimized Nuclei runner with `tags=cve`, severity `medium,high,critical`, per-program URL batches, and moderate rate/concurrency defaults.
+- Create candidate findings from new Nuclei results.
 - Score findings by severity, confidence, exploit maturity, and evidence quality.
 
 ## Phase 4: Reporting

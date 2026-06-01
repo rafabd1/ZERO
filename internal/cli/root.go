@@ -31,6 +31,8 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newEnumCommand())
 	root.AddCommand(newProbeCommand())
 	root.AddCommand(newAnalyzeCommand())
+	root.AddCommand(newReportCommand())
+	root.AddCommand(newRunCommand())
 	root.AddCommand(newWorkerCommand())
 	root.AddCommand(newAPICommand())
 

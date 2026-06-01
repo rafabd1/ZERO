@@ -25,19 +25,11 @@ func newWorkerCommand() *cobra.Command {
 				return err
 			}
 
-			if err := addJob("scope-sync", cfg.Schedule.ScopeSync, func() { runChild(cmd, "sync", "h1") }); err != nil {
-				return err
-			}
-			if err := addJob("enum", cfg.Schedule.Enum, func() { runChild(cmd, "enum", "subfinder") }); err != nil {
-				return err
-			}
-			if err := addJob("probe", cfg.Schedule.Probe, func() { runChild(cmd, "probe", "httpx") }); err != nil {
-				return err
-			}
-			if err := addJob("cve", cfg.Schedule.CVE, func() { runChild(cmd, "analyze", "cves") }); err != nil {
-				return err
-			}
-			if err := addJob("nuclei", cfg.Schedule.Nuclei, func() { runChild(cmd, "analyze", "nuclei") }); err != nil {
+			if err := addJob("full-pipeline", cfg.Schedule.Full, func() {
+				if err := runPipeline(cmd); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "full pipeline failed: %v\n", err)
+				}
+			}); err != nil {
 				return err
 			}
 
@@ -51,11 +43,18 @@ func newWorkerCommand() *cobra.Command {
 }
 
 func runChild(parent *cobra.Command, args ...string) {
+	if err := runChildE(parent, args...); err != nil {
+		fmt.Fprintf(parent.ErrOrStderr(), "task %v failed: %v\n", args, err)
+	}
+}
+
+func runChildE(parent *cobra.Command, args ...string) error {
 	child := newRootCommand()
 	child.SetArgs(args)
 	child.SetOut(parent.OutOrStdout())
 	child.SetErr(parent.ErrOrStderr())
 	if err := child.Execute(); err != nil {
-		fmt.Fprintf(parent.ErrOrStderr(), "task %v failed: %v\n", args, err)
+		return fmt.Errorf("task %v failed: %w", args, err)
 	}
+	return nil
 }

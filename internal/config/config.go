@@ -57,6 +57,7 @@ type APIConfig struct {
 }
 
 type ScheduleConfig struct {
+	Full      string
 	ScopeSync string
 	Enum      string
 	Probe     string
@@ -87,6 +88,7 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
+	v.SetDefault("schedule.full", "0 15 3 */3 * *")
 	v.SetDefault("schedule.scope_sync", "0 15 3 * * *")
 	v.SetDefault("schedule.enum", "0 45 3 * * *")
 	v.SetDefault("schedule.probe", "0 30 4 * * *")
@@ -116,6 +118,7 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
 	_ = v.BindEnv("tools.nuclei_bulk_size", "ZERO_NUCLEI_BULK_SIZE")
+	_ = v.BindEnv("schedule.full", "ZERO_SCHEDULE_FULL")
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
 	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
 
@@ -150,6 +153,7 @@ func Load() (Config, error) {
 			NucleiBulkSize:          v.GetInt("tools.nuclei_bulk_size"),
 		},
 		Schedule: ScheduleConfig{
+			Full:      v.GetString("schedule.full"),
 			ScopeSync: v.GetString("schedule.scope_sync"),
 			Enum:      v.GetString("schedule.enum"),
 			Probe:     v.GetString("schedule.probe"),

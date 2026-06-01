@@ -7,11 +7,11 @@ The project is intentionally conservative: a CVE candidate should be emitted onl
 ## Pipeline
 
 1. Scope sync: imports HackerOne scopes through the `sw33tLie/bbscope` Go poller.
-2. Enumeration: expands wildcard and URL-host scope assets with `subfinder`.
-3. Probing: fingerprints alive HTTP services with `httpx`.
-4. Passive intelligence: stores target intel and matches strong technology/version evidence to CVE/KEV/advisory sources.
+2. Enumeration: expands in-scope wildcard assets with `subfinder`.
+3. Probing: fingerprints alive discovered subdomains and exact URL/domain scope assets with `httpx`.
+4. Target intel: stores `httpx` status/title/webserver/TLS/favicon/tech observations for triage context.
 5. Active validation: runs optimized `nuclei` CVE templates only where useful.
-6. Reporting: deduplicates prior reports and emits new candidates grouped by severity and confidence.
+6. Reporting: deduplicates prior reports and emits new Nuclei-validated candidates grouped by severity and confidence.
 
 ## Quick Start
 
@@ -22,6 +22,8 @@ go run ./cmd/zero migrate up
 go run ./cmd/zero sync h1
 go run ./cmd/zero enum subfinder
 go run ./cmd/zero probe httpx
+go run ./cmd/zero analyze nuclei
+go run ./cmd/zero report generate
 ```
 
 For Docker:
@@ -29,6 +31,12 @@ For Docker:
 ```bash
 docker compose --profile tools run --rm migrate
 docker compose up -d zero
+```
+
+The container runs `zero worker` by default. The worker schedules the full continuous pipeline through `ZERO_SCHEDULE_FULL`, and the same sequence can be run manually with:
+
+```bash
+zero run once
 ```
 
 ## Required Tools
@@ -40,7 +48,7 @@ docker compose up -d zero
 - `httpx` for alive checks and technology fingerprinting
 - `nuclei` for final active validation of CVE candidates
 
-`httpx` is target intel, not proof of vulnerability. It gives stable JSON, status/title/webserver/TLS/favicon/tech data in one pass. `nuclei` is kept as the active validator and should default to CVE templates with severity above low, moderate rate limits, and per-target batching.
+`httpx` is target intel, not proof of vulnerability. It gives stable JSON, status/title/webserver/TLS/favicon/tech data in one pass. `nuclei` is the CVE validator and should default to CVE templates with severity above low, moderate rate limits, and per-target batching.
 
 ## Current Status
 
@@ -50,6 +58,7 @@ This commit establishes the base project:
 - Supabase/Postgres schema.
 - Direct HackerOne scope sync through the bbscope library.
 - `subfinder` and `httpx` task runners.
-- Nuclei/result/report schema and design docs.
+- Nuclei result ingestion and candidate finding creation.
+- New-only report generation from unreported findings.
 
-The CVE matcher is deliberately not pretending to be complete yet. Matching web technologies to CVEs without version evidence creates noisy reports; the first implementation should prioritize confirmed versions, CISA KEV, Nuclei CVE templates, deduplication, and "new results only" reporting.
+Passive CVE matching is intentionally disabled. Fingerprints from `httpx` are kept as asset intelligence; reportable CVE candidates come from Nuclei validation.

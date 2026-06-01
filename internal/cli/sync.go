@@ -25,6 +25,10 @@ func newSyncCommand() *cobra.Command {
 				return fmt.Errorf("ZERO_H1_USERNAME and ZERO_H1_TOKEN are required")
 			}
 
+			scanID, err := startScanRun(ctx, repo, "scope")
+			if err != nil {
+				return err
+			}
 			svc := scope.NewService(repo)
 			result, err := svc.SyncHackerOne(ctx, scope.HackerOneOptions{
 				Username:    cfg.HackerOne.Username,
@@ -34,6 +38,13 @@ func newSyncCommand() *cobra.Command {
 				Categories:  cfg.Scope.Categories,
 			})
 			if err != nil {
+				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+			}
+			if err := finishScanRun(ctx, repo, scanID, nil, result.Programs, result.Assets, map[string]any{
+				"programs": result.Programs,
+				"assets":   result.Assets,
+				"source":   "hackerone",
+			}); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "synced %d HackerOne programs and %d scope assets\n", result.Programs, result.Assets)

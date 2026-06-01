@@ -10,8 +10,8 @@ flowchart LR
   SF --> DB
   DB --> HX["httpx"]
   HX --> DB
-  DB --> INTEL["passive CVE/KEV matching"]
-  INTEL --> NUCLEI["nuclei validation"]
+  DB --> INTEL["target intel context"]
+  INTEL --> NUCLEI["nuclei CVE validation"]
   NUCLEI --> DB
   DB --> REPORT["new-only deduped reports"]
 ```
@@ -51,17 +51,18 @@ Zero should scan multiple programs concurrently, starting with `ZERO_TARGET_PARA
 - Active out-of-scope `domain`, `url`, and `wildcard` assets override broad in-scope wildcards during enumeration and probing.
 - `httpx` probes two target classes: discovered wildcard subdomains and exact `domain`/`url` scope hosts. Exact scope hosts are not expanded into roots.
 - `httpx` stores target intel for alive services and technology observations.
-- `nuclei` runs after probing and only against alive URLs.
-- Report generation emits only changes/new findings since the previous successful scan.
+- `nuclei` runs after probing and only against alive URLs; it is the CVE validation source.
+- Report generation emits only new, unreported findings and attaches a stable `report_id` for deduplication.
 
 ## Scheduler
 
 The worker uses second-enabled cron expressions:
 
+- `ZERO_SCHEDULE_FULL`
 - `ZERO_SCHEDULE_SCOPE_SYNC`
 - `ZERO_SCHEDULE_ENUM`
 - `ZERO_SCHEDULE_PROBE`
 - `ZERO_SCHEDULE_CVE`
 - `ZERO_SCHEDULE_NUCLEI`
 
-Default ordering runs scope sync before enumeration, enumeration before probing, passive CVE analysis after probing, and Nuclei validation after passive analysis.
+The primary worker job is the full pipeline scheduled by `ZERO_SCHEDULE_FULL`: scope sync before enumeration, enumeration before probing, Nuclei validation after probing, and report generation after Nuclei. The `httpx` fingerprint phase is target intel only; passive CVE matching is intentionally disabled to avoid noisy unvalidated reports.

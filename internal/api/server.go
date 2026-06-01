@@ -130,6 +130,122 @@ func (s *Server) routes() {
 		ORDER BY f.first_seen_at DESC
 		LIMIT 500
 	`))
+	s.mux.HandleFunc("GET /v1/reports", s.query(`
+		SELECT jsonb_build_object(
+			'id', r.id,
+			'program_id', r.program_id,
+			'report_key', r.report_key,
+			'title', r.title,
+			'severity', r.severity,
+			'confidence', r.confidence,
+			'finding_ids', r.finding_ids,
+			'created_at', r.created_at,
+			'metadata', r.metadata
+		)
+		FROM zero_reports r
+		ORDER BY r.created_at DESC
+		LIMIT 500
+	`))
+	s.mux.HandleFunc("GET /v1/reports/latest", s.query(`
+		SELECT jsonb_build_object(
+			'id', r.id,
+			'program_id', r.program_id,
+			'report_key', r.report_key,
+			'title', r.title,
+			'severity', r.severity,
+			'confidence', r.confidence,
+			'body_markdown', r.body_markdown,
+			'finding_ids', r.finding_ids,
+			'created_at', r.created_at,
+			'metadata', r.metadata
+		)
+		FROM zero_reports r
+		ORDER BY r.created_at DESC
+		LIMIT 50
+	`))
+	s.mux.HandleFunc("GET /v1/scans/latest", s.query(`
+		SELECT jsonb_build_object(
+			'id', sr.id,
+			'program_id', sr.program_id,
+			'run_type', sr.run_type,
+			'status', sr.status,
+			'started_at', sr.started_at,
+			'finished_at', sr.finished_at,
+			'input_count', sr.input_count,
+			'inserted_count', sr.inserted_count,
+			'updated_count', sr.updated_count,
+			'unchanged_count', sr.unchanged_count,
+			'error', sr.error,
+			'stats', sr.stats
+		)
+		FROM zero_scan_runs sr
+		ORDER BY sr.started_at DESC
+		LIMIT 25
+	`))
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/latest-scan", func(w http.ResponseWriter, r *http.Request) {
+		programID := r.PathValue("program_id")
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', sr.id,
+				'program_id', sr.program_id,
+				'run_type', sr.run_type,
+				'status', sr.status,
+				'started_at', sr.started_at,
+				'finished_at', sr.finished_at,
+				'input_count', sr.input_count,
+				'inserted_count', sr.inserted_count,
+				'updated_count', sr.updated_count,
+				'unchanged_count', sr.unchanged_count,
+				'error', sr.error,
+				'stats', sr.stats
+			)
+			FROM zero_scan_runs sr
+			WHERE sr.program_id = $1::uuid
+			ORDER BY sr.started_at DESC
+			LIMIT 1
+		`, programID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if len(rows) == 0 {
+			writeError(w, http.StatusNotFound, "latest scan not found")
+			return
+		}
+		writeRawJSON(w, rows[0])
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/findings", func(w http.ResponseWriter, r *http.Request) {
+		programID := r.PathValue("program_id")
+		status := r.URL.Query().Get("status")
+		if status == "" {
+			status = "new"
+		}
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', f.id,
+				'program_id', f.program_id,
+				'http_service_id', f.http_service_id,
+				'nuclei_result_id', f.nuclei_result_id,
+				'severity', f.severity,
+				'confidence', f.confidence,
+				'status', f.status,
+				'evidence', f.evidence,
+				'report_id', f.report_id,
+				'first_seen_at', f.first_seen_at,
+				'last_seen_at', f.last_seen_at
+			)
+			FROM zero_candidate_findings f
+			WHERE f.program_id = $1::uuid
+			  AND f.status = $2
+			ORDER BY f.first_seen_at DESC
+			LIMIT 500
+		`, programID, status)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	})
 }
 
 func (s *Server) query(sql string) http.HandlerFunc {
@@ -154,6 +270,12 @@ func writeRawJSONArray(w http.ResponseWriter, rows []json.RawMessage) {
 		_, _ = w.Write(row)
 	}
 	_, _ = w.Write([]byte("]"))
+}
+
+func writeRawJSON(w http.ResponseWriter, row json.RawMessage) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(row)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
