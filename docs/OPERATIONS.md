@@ -87,8 +87,8 @@ zero report generate --limit 50
 zero report export-triage --limit 50 --output triage-bundles.jsonl
 zero notify discord --dry-run
 zero run due --dry-run --limit 4
-zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --nuclei-from-cves --nuclei-cve-limit 10 --nuclei-limit 20
-zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --nuclei-template ./templates/custom-cve.yaml --nuclei-severity high,critical --nuclei-rate-limit 40 --nuclei-concurrency 10 --nuclei-limit 20
+zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --cve-limit 5 --nuclei-from-cves --nuclei-cve-limit 10 --nuclei-limit 20
+zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --cve-limit 5 --nuclei-template ./templates/custom-cve.yaml --nuclei-severity high,critical --nuclei-rate-limit 40 --nuclei-concurrency 10 --nuclei-limit 20
 zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --nuclei-template-id CVE-2025-20362 --nuclei-timeout 10 --nuclei-retries 1 --nuclei-limit 20
 zero run schedule --run-after 30m --program-id <uuid> --skip-sync --nuclei-from-cves --nuclei-cve-limit 20
 zero api
@@ -98,7 +98,7 @@ This validates the pipeline without turning a local setup check into a broad sca
 
 Use `zero run once` only when you want the full configured global pipeline without per-step smoke-test limits. Use `zero run due` for the normal continuous per-program execution model.
 
-Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
+Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--skip-cves`, `--cve-limit`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
 
 ## Discord Notifications
 

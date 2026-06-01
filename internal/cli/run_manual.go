@@ -16,6 +16,7 @@ type manualRunOptions struct {
 	SkipDNS           bool
 	SkipProbe         bool
 	SkipEnrich        bool
+	SkipCVEs          bool
 	SkipNuclei        bool
 	SkipReport        bool
 	SkipNotify        bool
@@ -23,6 +24,7 @@ type manualRunOptions struct {
 	DNSXLimit         int
 	HTTPXLimit        int
 	WebanalyzeLimit   int
+	CVELimit          int
 	WebanalyzeApps    string
 	WebanalyzeWorkers int
 	WebanalyzeCrawl   int
@@ -92,6 +94,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().BoolVar(&opts.SkipDNS, "skip-dns", false, "skip dnsx resolution")
 	cmd.Flags().BoolVar(&opts.SkipProbe, "skip-probe", false, "skip httpx")
 	cmd.Flags().BoolVar(&opts.SkipEnrich, "skip-enrich", false, "skip Webanalyze enrichment")
+	cmd.Flags().BoolVar(&opts.SkipCVEs, "skip-cves", false, "skip passive CVE matching")
 	cmd.Flags().BoolVar(&opts.SkipNuclei, "skip-nuclei", false, "skip Nuclei validation")
 	cmd.Flags().BoolVar(&opts.SkipReport, "skip-report", false, "skip report generation")
 	cmd.Flags().BoolVar(&opts.SkipNotify, "skip-notify", false, "skip Discord notification")
@@ -99,6 +102,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.DNSXLimit, "dnsx-limit", 0, "manual dnsx host limit")
 	cmd.Flags().IntVar(&opts.HTTPXLimit, "httpx-limit", 0, "manual httpx target limit")
 	cmd.Flags().IntVar(&opts.WebanalyzeLimit, "webanalyze-limit", 0, "manual Webanalyze service limit")
+	cmd.Flags().IntVar(&opts.CVELimit, "cve-limit", 0, "manual passive CVE technology limit")
 	cmd.Flags().StringVar(&opts.WebanalyzeApps, "webanalyze-apps", "", "custom Webanalyze apps file for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeWorkers, "webanalyze-workers", 0, "custom Webanalyze workers for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeCrawl, "webanalyze-crawl", -1, "custom Webanalyze crawl depth for this run only")
@@ -155,6 +159,12 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		if opts.WebanalyzeCrawl >= 0 {
 			step = append(step, "--crawl", fmt.Sprint(opts.WebanalyzeCrawl))
 		}
+		steps = append(steps, step)
+	}
+	if !opts.SkipCVEs {
+		step := []string{"analyze", "cves"}
+		step = appendProgramFlag(step, opts.ProgramID)
+		step = appendIntFlag(step, "--limit", opts.CVELimit)
 		steps = append(steps, step)
 	}
 	if !opts.SkipNuclei {
