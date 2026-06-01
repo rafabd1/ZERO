@@ -38,6 +38,8 @@ The main continuous execution path is `zero worker`, which schedules `zero run d
 
 By default the worker also runs this due-program planner immediately on container startup (`ZERO_RUN_ON_STARTUP=true`). This makes the container self-starting after deploy/restart instead of waiting for the next cron tick.
 
+Commands that open the database run idempotent migrations first when `ZERO_AUTO_MIGRATE=true`. Migration execution uses a Postgres advisory transaction lock, so the worker and API containers can start together safely.
+
 For each due program, Zero executes:
 
 ```text
@@ -49,6 +51,8 @@ The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron
 ## Data Lifecycle
 
 Zero should not blindly delete missing data. Missing assets should be marked inactive only after enough scan evidence shows they are gone. New or changed entities are written to `zero_change_events`, and reports/Discord notifications should use that table to avoid repeating old results.
+
+Current change events are emitted for newly inserted scope assets, subdomains, HTTP services, technology observations, Nuclei results, and candidate findings. They are deduped by stable evidence hash and can be read from `/v1/changes` or `/v1/programs/{program_id}/changes`.
 
 On worker startup, `ZERO_RECOVER_RUNNING_SCANS=true` marks interrupted `zero_scan_runs.status='running'` rows as failed with recovery metadata. Since the program's `last_scan_finished_at` is not advanced by an interrupted run, that program remains due and the startup run can continue from the persisted database state.
 
@@ -78,6 +82,10 @@ Use `zero run once` only when you want the full configured global pipeline witho
 `zero notify discord` sends only reports that do not have a successful `zero_discord_notifications` row for the report dedupe key. Failed notifications are stored and can be retried; successful notifications are not sent again.
 
 If `ZERO_DISCORD_WEBHOOK_URL` is empty, the command is a safe no-op. Use `--dry-run` to count pending reports without creating notification rows or sending webhooks.
+
+## Docker Services
+
+`docker compose up -d zero api` starts the continuous worker and read API. The API service overrides `ZERO_API_ADDR` to `0.0.0.0:8080` inside the container and publishes it on `127.0.0.1:8080` on the host. Keep `ZERO_API_TOKEN` set when exposing the API beyond localhost.
 
 ## Subfinder Providers
 

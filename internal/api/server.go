@@ -182,6 +182,7 @@ func (s *Server) routes() {
 		ORDER BY sr.started_at DESC
 		LIMIT 25
 	`))
+	s.mux.HandleFunc("GET /v1/changes", s.changes(""))
 	s.mux.HandleFunc("GET /v1/notifications/discord", s.query(`
 		SELECT jsonb_build_object(
 			'id', n.id,
@@ -230,6 +231,86 @@ func (s *Server) routes() {
 		}
 		writeRawJSON(w, rows[0])
 	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/changes", func(w http.ResponseWriter, r *http.Request) {
+		s.changes(r.PathValue("program_id"))(w, r)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/assets", func(w http.ResponseWriter, r *http.Request) {
+		programID := r.PathValue("program_id")
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', a.id,
+				'program_id', a.program_id,
+				'asset_type', a.asset_type,
+				'target_normalized', a.target_normalized,
+				'in_scope', a.in_scope,
+				'eligible_for_bounty', a.eligible_for_bounty,
+				'active', a.active,
+				'first_seen_at', a.first_seen_at,
+				'last_seen_at', a.last_seen_at
+			)
+			FROM zero_scope_assets a
+			WHERE a.program_id = $1::uuid
+			ORDER BY a.last_seen_at DESC
+			LIMIT 500
+		`, programID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/services", func(w http.ResponseWriter, r *http.Request) {
+		programID := r.PathValue("program_id")
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', s.id,
+				'program_id', s.program_id,
+				'url', s.url,
+				'host', s.host,
+				'status_code', s.status_code,
+				'title', s.title,
+				'webserver', s.webserver,
+				'technologies', s.technologies,
+				'first_seen_at', s.first_seen_at,
+				'last_seen_at', s.last_seen_at
+			)
+			FROM zero_http_services s
+			WHERE s.program_id = $1::uuid
+			ORDER BY s.last_seen_at DESC
+			LIMIT 500
+		`, programID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/nuclei-results", func(w http.ResponseWriter, r *http.Request) {
+		programID := r.PathValue("program_id")
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', n.id,
+				'program_id', n.program_id,
+				'http_service_id', n.http_service_id,
+				'template_id', n.template_id,
+				'matched_at', n.matched_at,
+				'severity', n.severity,
+				'cves', n.cves,
+				'tags', n.tags,
+				'first_seen_at', n.first_seen_at,
+				'last_seen_at', n.last_seen_at
+			)
+			FROM zero_nuclei_results n
+			WHERE n.program_id = $1::uuid
+			ORDER BY n.first_seen_at DESC
+			LIMIT 500
+		`, programID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	})
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/findings", func(w http.ResponseWriter, r *http.Request) {
 		programID := r.PathValue("program_id")
 		status := r.URL.Query().Get("status")
@@ -262,6 +343,36 @@ func (s *Server) routes() {
 		}
 		writeRawJSONArray(w, rows)
 	})
+}
+
+func (s *Server) changes(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		since := strings.TrimSpace(r.URL.Query().Get("since"))
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', c.id,
+				'program_id', c.program_id,
+				'scan_run_id', c.scan_run_id,
+				'entity_type', c.entity_type,
+				'entity_id', c.entity_id,
+				'entity_key', c.entity_key,
+				'change_type', c.change_type,
+				'old_value', c.old_value,
+				'new_value', c.new_value,
+				'occurred_at', c.occurred_at
+			)
+			FROM zero_change_events c
+			WHERE ($1 = '' OR c.program_id::text = $1)
+			  AND ($2 = '' OR c.occurred_at > $2::timestamptz)
+			ORDER BY c.occurred_at DESC
+			LIMIT 500
+		`, programID, since)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	}
 }
 
 func (s *Server) query(sql string) http.HandlerFunc {

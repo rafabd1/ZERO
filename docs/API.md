@@ -22,9 +22,10 @@ GET /v1/services
 GET /v1/nuclei-results
 GET /v1/findings
 GET /v1/scans/latest
+GET /v1/changes?since=...
 GET /v1/notifications/discord
 GET /v1/programs/{program_id}/latest-scan
-GET /v1/programs/{program_id}/changes?since_scan_id=...
+GET /v1/programs/{program_id}/changes?since=...
 GET /v1/programs/{program_id}/assets
 GET /v1/programs/{program_id}/services
 GET /v1/programs/{program_id}/nuclei-results
@@ -35,7 +36,9 @@ GET /v1/reports/latest
 Responses should be paginated. Findings and Nuclei results should support filters for severity, confidence, status, and time range.
 
 Current implementation includes `GET /healthz`, `GET /v1/programs`, `GET /v1/assets`, `GET /v1/services`, `GET /v1/nuclei-results`, and `GET /v1/findings`.
-Current implementation also includes `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, and `GET /v1/programs/{program_id}/findings?status=new`.
+Current implementation also includes `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/changes?since=...`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, `GET /v1/programs/{program_id}/changes?since=...`, `GET /v1/programs/{program_id}/assets`, `GET /v1/programs/{program_id}/services`, `GET /v1/programs/{program_id}/nuclei-results`, and `GET /v1/programs/{program_id}/findings?status=new`.
+
+The `since` query parameter accepts a Postgres-compatible timestamp and returns events with `occurred_at` greater than that value.
 
 ## Notification Flow
 

@@ -6,6 +6,22 @@ services:
     command: ["worker"]
     restart: unless-stopped
 
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      ZERO_API_ADDR: "0.0.0.0:8080"
+    command: ["api"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   migrate:
     build: .
     env_file:

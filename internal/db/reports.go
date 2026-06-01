@@ -86,7 +86,8 @@ func (r *Repository) CreateReport(ctx context.Context, draft ReportDraft) (strin
 
 	_, err = r.pool.Exec(ctx, `
 		UPDATE zero_candidate_findings
-		SET report_id = $1::uuid
+		SET report_id = $1::uuid,
+			status = 'reported'
 		WHERE id = ANY($2::text[]::uuid[])
 		  AND report_id IS NULL
 	`, id, draft.FindingIDs)

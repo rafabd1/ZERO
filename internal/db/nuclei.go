@@ -57,6 +57,24 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 	if err != nil {
 		return "", false, fmt.Errorf("upsert nuclei result: %w", err)
 	}
+	if inserted {
+		if err := r.RecordChangeEvent(ctx, ChangeEvent{
+			ProgramID:  result.ProgramID,
+			EntityType: "nuclei_result",
+			EntityID:   id,
+			EntityKey:  result.TemplateID + ":" + result.MatchedAt + ":" + result.EvidenceHash,
+			ChangeType: "added",
+			NewValue: map[string]any{
+				"template_id": result.TemplateID,
+				"matched_at":  result.MatchedAt,
+				"severity":    result.Severity,
+				"cves":        result.CVEs,
+				"tags":        result.Tags,
+			},
+		}); err != nil {
+			return "", false, err
+		}
+	}
 	return id, inserted, nil
 }
 
@@ -90,6 +108,25 @@ func (r *Repository) UpsertCandidateFindingFromNuclei(ctx context.Context, nucle
 	`, result.ProgramID, nullString(result.HTTPServiceID), nucleiResultID, result.Severity, confidence, evidenceHash, string(evidence)).Scan(&id, &inserted)
 	if err != nil {
 		return "", false, fmt.Errorf("upsert candidate finding from nuclei: %w", err)
+	}
+	if inserted {
+		if err := r.RecordChangeEvent(ctx, ChangeEvent{
+			ProgramID:  result.ProgramID,
+			EntityType: "candidate_finding",
+			EntityID:   id,
+			EntityKey:  evidenceHash,
+			ChangeType: "added",
+			NewValue: map[string]any{
+				"nuclei_result_id": nucleiResultID,
+				"template_id":      result.TemplateID,
+				"matched_at":       result.MatchedAt,
+				"severity":         result.Severity,
+				"confidence":       confidence,
+				"cves":             result.CVEs,
+			},
+		}); err != nil {
+			return "", false, err
+		}
 	}
 	return id, inserted, nil
 }

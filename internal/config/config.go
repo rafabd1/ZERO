@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	DatabaseURL       string
+	AutoMigrate       bool
 	Supabase          SupabaseConfig
 	TargetParallelism int
 
@@ -110,9 +111,11 @@ func Load() (Config, error) {
 	v.SetDefault("api.addr", "127.0.0.1:8080")
 	v.SetDefault("worker.run_on_startup", true)
 	v.SetDefault("worker.recover_running_scans", true)
+	v.SetDefault("database.auto_migrate", true)
 
 	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
+	_ = v.BindEnv("database.auto_migrate", "ZERO_AUTO_MIGRATE")
 	_ = v.BindEnv("supabase_url", "ZERO_SUPABASE_URL")
 	_ = v.BindEnv("supabase_anon_key", "ZERO_SUPABASE_ANON_KEY")
 	_ = v.BindEnv("supabase_service_role_key", "ZERO_SUPABASE_SERVICE_ROLE_KEY")
@@ -143,6 +146,7 @@ func Load() (Config, error) {
 
 	return Config{
 		DatabaseURL:       v.GetString("database_url"),
+		AutoMigrate:       v.GetBool("database.auto_migrate"),
 		TargetParallelism: clampInt(v.GetInt("target_parallelism"), 1, 16),
 		Supabase: SupabaseConfig{
 			URL:            v.GetString("supabase_url"),

@@ -31,7 +31,7 @@ For Docker:
 
 ```bash
 docker compose --profile tools run --rm migrate
-docker compose up -d zero
+docker compose up -d zero api
 ```
 
 The container runs `zero worker` by default. The worker schedules due-program scans through `ZERO_SCHEDULE_FULL`, honoring each program's `scan_interval_hours` and `ZERO_TARGET_PARALLELISM`. The same due-program planner can be inspected safely with:
@@ -43,6 +43,8 @@ zero run due --dry-run --limit 4
 Use `zero run once` only when you intentionally want the unbounded global pipeline.
 
 On startup, the worker marks interrupted `running` scan runs as failed/recovered and immediately runs the due-program planner by default. Set `ZERO_RUN_ON_STARTUP=false` only when you want cron-only execution.
+
+The Compose API service binds `zero api` to `127.0.0.1:8080` on the host and exposes `/healthz`, latest scans, reports, changes, and findings.
 
 Discord delivery is opt-in through `ZERO_DISCORD_WEBHOOK_URL`. Without a webhook, notification delivery is a safe no-op and reports remain available through the API.
 

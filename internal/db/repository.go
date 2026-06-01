@@ -109,6 +109,7 @@ func (r *Repository) UpsertScopeAsset(ctx context.Context, asset ScopeAsset) (st
 	}
 	meta, _ := json.Marshal(asset.Metadata)
 	var id string
+	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_scope_assets(
 			program_id, platform, handle, asset_type, target_raw, target_normalized,
@@ -122,11 +123,29 @@ func (r *Repository) UpsertScopeAsset(ctx context.Context, asset ScopeAsset) (st
 			active = true,
 			last_seen_at = now(),
 			metadata = zero_scope_assets.metadata || excluded.metadata
-		RETURNING id
+		RETURNING id, (xmax = 0) AS inserted
 	`, asset.ProgramID, asset.Platform, asset.Handle, asset.AssetType, asset.TargetRaw, asset.TargetNormalized,
-		asset.Description, asset.InScope, asset.EligibleForBounty, asset.Source, string(meta)).Scan(&id)
+		asset.Description, asset.InScope, asset.EligibleForBounty, asset.Source, string(meta)).Scan(&id, &inserted)
 	if err != nil {
 		return "", fmt.Errorf("upsert scope asset: %w", err)
+	}
+	if inserted {
+		if err := r.RecordChangeEvent(ctx, ChangeEvent{
+			ProgramID:  asset.ProgramID,
+			EntityType: "scope_asset",
+			EntityID:   id,
+			EntityKey:  asset.AssetType + ":" + asset.TargetNormalized + ":" + fmt.Sprint(asset.InScope),
+			ChangeType: "added",
+			NewValue: map[string]any{
+				"asset_type":          asset.AssetType,
+				"target_normalized":   asset.TargetNormalized,
+				"in_scope":            asset.InScope,
+				"eligible_for_bounty": asset.EligibleForBounty,
+				"source":              asset.Source,
+			},
+		}); err != nil {
+			return "", err
+		}
 	}
 	return id, nil
 }
@@ -155,17 +174,43 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 				active = true,
 				last_seen_at = now(),
 				metadata = zero_scope_assets.metadata || excluded.metadata
+			RETURNING id::text, (xmax = 0) AS inserted
 		`, asset.ProgramID, asset.Platform, asset.Handle, asset.AssetType, asset.TargetRaw, asset.TargetNormalized,
 			asset.Description, asset.InScope, asset.EligibleForBounty, asset.Source, string(meta))
 	}
 
 	results := r.pool.SendBatch(ctx, batch)
-	defer results.Close()
 
-	for range assets {
-		if _, err := results.Exec(); err != nil {
+	events := make([]ChangeEvent, 0)
+	for i, asset := range assets {
+		var id string
+		var inserted bool
+		if err := results.QueryRow().Scan(&id, &inserted); err != nil {
 			return 0, fmt.Errorf("batch upsert scope assets: %w", err)
 		}
+		if inserted {
+			events = append(events, ChangeEvent{
+				ProgramID:  asset.ProgramID,
+				EntityType: "scope_asset",
+				EntityID:   id,
+				EntityKey:  asset.AssetType + ":" + asset.TargetNormalized + ":" + fmt.Sprint(asset.InScope),
+				ChangeType: "added",
+				NewValue: map[string]any{
+					"asset_type":          asset.AssetType,
+					"target_normalized":   asset.TargetNormalized,
+					"in_scope":            asset.InScope,
+					"eligible_for_bounty": asset.EligibleForBounty,
+					"source":              asset.Source,
+					"batch_index":         i,
+				},
+			})
+		}
+	}
+	if err := results.Close(); err != nil {
+		return 0, fmt.Errorf("batch upsert scope assets: %w", err)
+	}
+	if err := r.RecordChangeEvents(ctx, events); err != nil {
+		return 0, err
 	}
 	return len(assets), nil
 }
@@ -213,6 +258,7 @@ func (r *Repository) ListDomainRoots(ctx context.Context, programID string) ([]D
 
 func (r *Repository) UpsertSubdomain(ctx context.Context, sub Subdomain) (string, error) {
 	var id string
+	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_subdomains(program_id, scope_asset_id, root_domain, fqdn, source)
 		VALUES ($1,$2,$3,$4,$5)
@@ -222,10 +268,26 @@ func (r *Repository) UpsertSubdomain(ctx context.Context, sub Subdomain) (string
 			source = excluded.source,
 			active = true,
 			last_seen_at = now()
-		RETURNING id
-	`, sub.ProgramID, nullString(sub.ScopeAssetID), sub.RootDomain, sub.FQDN, sub.Source).Scan(&id)
+		RETURNING id, (xmax = 0) AS inserted
+	`, sub.ProgramID, nullString(sub.ScopeAssetID), sub.RootDomain, sub.FQDN, sub.Source).Scan(&id, &inserted)
 	if err != nil {
 		return "", fmt.Errorf("upsert subdomain: %w", err)
+	}
+	if inserted {
+		if err := r.RecordChangeEvent(ctx, ChangeEvent{
+			ProgramID:  sub.ProgramID,
+			EntityType: "subdomain",
+			EntityID:   id,
+			EntityKey:  sub.FQDN,
+			ChangeType: "added",
+			NewValue: map[string]any{
+				"root_domain": sub.RootDomain,
+				"fqdn":        sub.FQDN,
+				"source":      sub.Source,
+			},
+		}); err != nil {
+			return "", err
+		}
 	}
 	return id, nil
 }
@@ -403,6 +465,7 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 	}
 
 	var id string
+	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_http_services(
 			program_id, subdomain_id, url, scheme, host, port, status_code, title, webserver,
@@ -423,27 +486,69 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 			raw = excluded.raw,
 			active = true,
 			last_seen_at = now()
-		RETURNING id
+		RETURNING id, (xmax = 0) AS inserted
 	`, service.ProgramID, nullString(service.SubdomainID), service.URL, service.Scheme, service.Host, service.Port, service.StatusCode,
-		service.Title, service.Webserver, string(tech), service.FaviconHash, string(service.TLS), string(service.Raw)).Scan(&id)
+		service.Title, service.Webserver, string(tech), service.FaviconHash, string(service.TLS), string(service.Raw)).Scan(&id, &inserted)
 	if err != nil {
 		return "", fmt.Errorf("upsert http service: %w", err)
+	}
+	if inserted {
+		if err := r.RecordChangeEvent(ctx, ChangeEvent{
+			ProgramID:  service.ProgramID,
+			EntityType: "http_service",
+			EntityID:   id,
+			EntityKey:  service.URL,
+			ChangeType: "added",
+			NewValue: map[string]any{
+				"url":           service.URL,
+				"host":          service.Host,
+				"status_code":   service.StatusCode,
+				"title":         service.Title,
+				"webserver":     service.Webserver,
+				"technologies":  service.Technologies,
+				"favicon_hash":  service.FaviconHash,
+				"subdomain_id":  service.SubdomainID,
+				"probe_version": "httpx",
+			},
+		}); err != nil {
+			return "", err
+		}
 	}
 
 	for _, name := range service.Technologies {
 		if strings.TrimSpace(name) == "" {
 			continue
 		}
-		_, err := r.pool.Exec(ctx, `
+		var techID string
+		var techInserted bool
+		err := r.pool.QueryRow(ctx, `
 			INSERT INTO zero_technology_observations(program_id, http_service_id, name, source, confidence, evidence)
 			VALUES ($1,$2,$3,'httpx',60,jsonb_build_object('url',$4::text))
 			ON CONFLICT(http_service_id, lower(name), version, source) DO UPDATE SET
 				last_seen_at = now(),
 				confidence = GREATEST(zero_technology_observations.confidence, excluded.confidence),
 				evidence = zero_technology_observations.evidence || excluded.evidence
-		`, service.ProgramID, id, name, service.URL)
+			RETURNING id::text, (xmax = 0) AS inserted
+		`, service.ProgramID, id, name, service.URL).Scan(&techID, &techInserted)
 		if err != nil {
 			return "", fmt.Errorf("upsert technology observation: %w", err)
+		}
+		if techInserted {
+			if err := r.RecordChangeEvent(ctx, ChangeEvent{
+				ProgramID:  service.ProgramID,
+				EntityType: "technology",
+				EntityID:   techID,
+				EntityKey:  service.URL + ":" + strings.ToLower(strings.TrimSpace(name)),
+				ChangeType: "added",
+				NewValue: map[string]any{
+					"url":     service.URL,
+					"name":    name,
+					"source":  "httpx",
+					"service": id,
+				},
+			}); err != nil {
+				return "", err
+			}
 		}
 	}
 

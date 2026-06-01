@@ -36,7 +36,7 @@ flowchart LR
 - `zero_vulnerability_records`: CVE/KEV/advisory/template records.
 - `zero_nuclei_results`: active validation hits from Nuclei, deduped by program/template/match/evidence.
 - `zero_candidate_findings`: deduplicated candidate matches.
-- `zero_change_events`: append-only record of added/updated/removed entities per scan.
+- `zero_change_events`: append-only record of added/updated/removed entities. New scope assets, subdomains, services, technologies, Nuclei hits, and candidate findings emit deduped change events.
 - `zero_scan_runs`: execution history, counts, status, and per-run stats.
 - `zero_reports`: generated report artifacts.
 
@@ -54,6 +54,7 @@ Zero scans multiple programs concurrently through `zero run due`, starting with 
 - `httpx` probes two target classes: discovered wildcard subdomains and exact `domain`/`url` scope hosts. Exact scope hosts are not expanded into roots.
 - `httpx` stores target intel for alive services and technology observations.
 - `nuclei` runs after probing and only against alive URLs; it is the CVE validation source.
+- Newly inserted entities write stable `zero_change_events` rows so operators and API clients can inspect what changed without replaying old observations.
 - Report generation emits only new, unreported findings and attaches a stable `report_id` for deduplication.
 - Discord notification delivery reads new reports, stores delivery state in `zero_discord_notifications`, and never sends a report twice after a successful send.
 

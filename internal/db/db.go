@@ -63,6 +63,10 @@ func Migrate(ctx context.Context, databaseURL string) error {
 	}
 	defer tx.Rollback(ctx)
 
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('zero_migrations', 0))`); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+
 	for _, name := range names {
 		sqlBytes, err := migrationFiles.ReadFile("migrations/" + name)
 		if err != nil {

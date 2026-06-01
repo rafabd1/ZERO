@@ -59,6 +59,9 @@ func openRepository(ctx context.Context, cfg config.Config) *db.Repository {
 	if cfg.DatabaseURL == "" {
 		cobra.CheckErr("ZERO_DATABASE_URL is required")
 	}
+	if cfg.AutoMigrate {
+		cobra.CheckErr(db.Migrate(ctx, cfg.DatabaseURL))
+	}
 	repo, err := db.Open(ctx, cfg.DatabaseURL)
 	cobra.CheckErr(err)
 	return repo
