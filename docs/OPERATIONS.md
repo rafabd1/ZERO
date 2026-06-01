@@ -17,9 +17,12 @@ To run the first real scan, Zero needs:
   - `ZERO_SUBFINDER_BEVIGIL_API_KEY`
   - `ZERO_SUBFINDER_VIRUSTOTAL_API_KEY`
   - `ZERO_SUBFINDER_SECURITYTRAILS_API_KEY`
+- Optional NVD API key:
+  - `ZERO_NVD_API_KEY` reduces NVD rate-limit delays during passive CVE matching.
 - External tools installed or available in Docker:
   - `subfinder`
   - `httpx`
+  - `webanalyze`
   - `nuclei`
 - Discord integration:
   - `ZERO_DISCORD_WEBHOOK_URL`
@@ -40,10 +43,12 @@ By default the worker also runs this due-program planner immediately on containe
 
 Commands that open the database run idempotent migrations first when `ZERO_AUTO_MIGRATE=true`. Migration execution uses a Postgres advisory transaction lock, so the worker and API containers can start together safely.
 
+Custom one-off scans can be launched immediately with `zero run manual` or queued for the worker with `zero run schedule`. Queued requests are stored in `zero_scan_requests`, picked up every 30 seconds, and executed with the request-specific parameters instead of mutating global `.env` defaults.
+
 For each due program, Zero executes:
 
 ```text
-enum subfinder --program-id ... -> probe httpx --program-id ... -> analyze cves --program-id ... -> analyze nuclei --program-id ... -> report generate --program-id ... -> notify discord --program-id ...
+enum subfinder --program-id ... -> probe httpx --program-id ... -> enrich webanalyze --program-id ... -> analyze cves --program-id ... -> analyze nuclei --program-id ... -> report generate --program-id ... -> notify discord --program-id ...
 ```
 
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
@@ -68,16 +73,24 @@ Use limits when validating external tools:
 zero sync h1
 zero enum subfinder --limit 2
 zero probe httpx --limit 50
+zero enrich webanalyze --limit 50
+zero analyze cves --limit 1
+zero analyze nuclei --from-cves --limit 5 --cve-limit 10
 zero analyze nuclei --limit 5 --template-id CVE-2025-20362
 zero report generate --limit 50
 zero notify discord --dry-run
 zero run due --dry-run --limit 4
+zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --nuclei-from-cves --nuclei-cve-limit 10 --nuclei-limit 20
+zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --nuclei-template-id CVE-2025-20362 --nuclei-limit 20
+zero run schedule --run-after 30m --program-id <uuid> --skip-sync --nuclei-from-cves --nuclei-cve-limit 20
 zero api
 ```
 
 This validates the pipeline without turning a local setup check into a broad scan.
 
 Use `zero run once` only when you want the full configured global pipeline without per-step smoke-test limits. Use `zero run due` for the normal continuous per-program execution model.
+
+Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
 
 ## Discord Notifications
 
@@ -107,7 +120,11 @@ The Docker defaults are:
 ```env
 ZERO_SUBFINDER_BIN="subfinder"
 ZERO_HTTPX_BIN="httpx"
+ZERO_WEBANALYZE_BIN="webanalyze"
+ZERO_WEBANALYZE_APPS="/usr/local/share/webanalyze/technologies.json"
 ZERO_NUCLEI_BIN="nuclei"
+ZERO_NUCLEI_FROM_CVES=true
+ZERO_NUCLEI_CVE_LIMIT=100
 ZERO_SUBFINDER_PROVIDER_CONFIG="/home/zero/.config/subfinder/provider-config.yaml"
 ZERO_SUBFINDER_SOURCES="shodan,bevigil,virustotal,securitytrails"
 ZERO_SUBFINDER_RATE_LIMITS="shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s"

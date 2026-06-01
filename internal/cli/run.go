@@ -37,6 +37,8 @@ func newRunCommand() *cobra.Command {
 	due.Flags().BoolVar(&dueDryRun, "dry-run", false, "list due programs without syncing or scanning")
 	due.Flags().BoolVar(&skipSync, "skip-sync", false, "skip HackerOne scope sync before selecting due programs")
 	cmd.AddCommand(due)
+	addManualRunCommand(cmd)
+	addScheduledRunCommand(cmd)
 	return cmd
 }
 
@@ -45,6 +47,7 @@ func runPipeline(parent *cobra.Command) error {
 		{"sync", "h1"},
 		{"enum", "subfinder"},
 		{"probe", "httpx"},
+		{"enrich", "webanalyze"},
 		{"analyze", "cves"},
 		{"analyze", "nuclei"},
 		{"report", "generate"},
@@ -141,6 +144,7 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 	steps := [][]string{
 		{"enum", "subfinder", "--program-id", program.ID},
 		{"probe", "httpx", "--program-id", program.ID},
+		{"enrich", "webanalyze", "--program-id", program.ID},
 		{"analyze", "cves", "--program-id", program.ID},
 		{"analyze", "nuclei", "--program-id", program.ID},
 		{"report", "generate", "--program-id", program.ID},

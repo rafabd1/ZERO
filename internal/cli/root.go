@@ -30,6 +30,7 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newSyncCommand())
 	root.AddCommand(newEnumCommand())
 	root.AddCommand(newProbeCommand())
+	root.AddCommand(newEnrichCommand())
 	root.AddCommand(newAnalyzeCommand())
 	root.AddCommand(newReportCommand())
 	root.AddCommand(newNotifyCommand())

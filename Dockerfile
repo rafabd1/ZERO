@@ -5,6 +5,12 @@ COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
 RUN go build -trimpath -ldflags="-s -w" -o /out/zero ./cmd/zero
+ARG WEBANALYZE_VERSION=0.4.1
+RUN go install github.com/rverton/webanalyze/cmd/webanalyze@v${WEBANALYZE_VERSION} && \
+    mkdir -p /out/webanalyze && \
+    cd /out/webanalyze && \
+    /go/bin/webanalyze -update -silent && \
+    cp /go/bin/webanalyze /out/webanalyze/webanalyze
 
 FROM alpine:3.21
 
@@ -32,6 +38,8 @@ RUN set -eux; \
     rm -rf /tmp/subfinder /tmp/subfinder.zip /tmp/httpx /tmp/httpx.zip /tmp/nuclei /tmp/nuclei.zip
 
 COPY --from=build /out/zero /usr/local/bin/zero
+COPY --from=build /out/webanalyze/webanalyze /usr/local/bin/webanalyze
+COPY --from=build /out/webanalyze/technologies.json /usr/local/share/webanalyze/technologies.json
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -41,6 +49,8 @@ WORKDIR /home/zero
 
 ENV ZERO_SUBFINDER_BIN=/usr/local/bin/subfinder
 ENV ZERO_HTTPX_BIN=/usr/local/bin/httpx
+ENV ZERO_WEBANALYZE_BIN=/usr/local/bin/webanalyze
+ENV ZERO_WEBANALYZE_APPS=/usr/local/share/webanalyze/technologies.json
 ENV ZERO_NUCLEI_BIN=/usr/local/bin/nuclei
 ENV ZERO_SUBFINDER_PROVIDER_CONFIG=/home/zero/.config/subfinder/provider-config.yaml
 

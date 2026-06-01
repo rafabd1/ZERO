@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/rafabd1/ZERO/internal/intel"
 	"github.com/rafabd1/ZERO/internal/validate"
 	"github.com/spf13/cobra"
 )
@@ -10,7 +12,11 @@ import (
 func newAnalyzeCommand() *cobra.Command {
 	var nucleiLimit int
 	var nucleiTemplateID string
+	var nucleiFromCVEs bool
+	var nucleiAllCVETemplates bool
+	var nucleiCVELimit int
 	var cvesProgramID string
+	var cvesLimit int
 	var nucleiProgramID string
 	cmd := &cobra.Command{
 		Use:   "analyze",
@@ -29,15 +35,29 @@ func newAnalyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := finishScanRun(ctx, repo, scanID, nil, 0, 0, map[string]any{
-				"passive_cve_matching": "disabled",
-				"httpx_role":           "target-intel",
+			result, err := intel.NewNVDRunner(repo, cfg.Intel.NVDAPIKey).
+				WithProgramID(cvesProgramID).
+				WithScanRunID(scanID).
+				WithLimit(cvesLimit).
+				Run(ctx)
+			if err != nil {
+				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+			}
+			if err := finishScanRun(ctx, repo, scanID, nil, result.Technologies, result.Inserted, map[string]any{
+				"passive_cve_matching": "intel-only",
+				"technologies":         result.Technologies,
+				"cves":                 result.CVEs,
+				"inserted":             result.Inserted,
+				"matches":              result.Matches,
+				"inserted_matches":     result.InsertedMatches,
+				"template_eligible":    result.TemplateEligible,
 				"program_id":           cvesProgramID,
+				"source":               "nvd",
 				"validator":            "nuclei",
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "passive CVE matching is disabled; httpx fingerprints are stored as intel and Nuclei is the CVE validation/reporting source")
+			fmt.Fprintf(cmd.OutOrStdout(), "queried %d versioned technologies against NVD, observed %d CVE records, inserted %d records, linked %d tech/CVE matches and marked %d as Nuclei-template eligible; no findings are generated without active validation\n", result.Technologies, result.CVEs, result.Inserted, result.Matches, result.TemplateEligible)
 			return nil
 		},
 	})
@@ -58,6 +78,30 @@ func newAnalyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			fromCVEs := (cfg.Tools.NucleiFromCVEs || nucleiFromCVEs) && !nucleiAllCVETemplates && templateIDs == ""
+			if fromCVEs {
+				cveLimit := nucleiCVELimit
+				if cveLimit <= 0 {
+					cveLimit = cfg.Tools.NucleiCVELimit
+				}
+				ids, err := repo.ListCVETemplateIDsFromMatches(ctx, nucleiProgramID, cfg.Tools.NucleiSeverities, cveLimit)
+				if err != nil {
+					return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+				}
+				if len(ids) == 0 {
+					if err := finishScanRun(ctx, repo, scanID, nil, 0, 0, map[string]any{
+						"program_id": nucleiProgramID,
+						"tool":       "nuclei",
+						"from_cves":  true,
+						"skipped":    "no passive CVE/template candidates",
+					}); err != nil {
+						return err
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), "nuclei skipped: no medium/high/critical passive CVE template candidates for this scope")
+					return nil
+				}
+				templateIDs = strings.Join(ids, ",")
+			}
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
 				WithPolicy(cfg.Tools.NucleiTags, cfg.Tools.NucleiSeverities, templateIDs, cfg.Tools.NucleiRate, cfg.Tools.NucleiC, cfg.Tools.NucleiBulkSize).
 				WithScanRunID(scanID).
@@ -74,6 +118,8 @@ func newAnalyzeCommand() *cobra.Command {
 				"inserted_findings": result.FindingsInserted,
 				"program_id":        nucleiProgramID,
 				"tool":              "nuclei",
+				"from_cves":         fromCVEs,
+				"template_ids":      templateIDs,
 			}); err != nil {
 				return err
 			}
@@ -81,9 +127,13 @@ func newAnalyzeCommand() *cobra.Command {
 			return nil
 		},
 	})
-	cmd.Commands()[0].Flags().StringVar(&cvesProgramID, "program-id", "", "record intel policy for one program id")
+	cmd.Commands()[0].Flags().StringVar(&cvesProgramID, "program-id", "", "query passive CVE intel for one program id")
+	cmd.Commands()[0].Flags().IntVar(&cvesLimit, "limit", 25, "maximum versioned technologies to query")
 	cmd.Commands()[1].Flags().IntVar(&nucleiLimit, "limit", 0, "limit number of URLs to validate")
 	cmd.Commands()[1].Flags().StringVar(&nucleiTemplateID, "template-id", "", "run only matching Nuclei template id(s)")
+	cmd.Commands()[1].Flags().BoolVar(&nucleiFromCVEs, "from-cves", false, "run only Nuclei template ids linked from passive CVE matching")
+	cmd.Commands()[1].Flags().BoolVar(&nucleiAllCVETemplates, "all-cve-templates", false, "ignore passive CVE matches and run configured tag/template policy")
+	cmd.Commands()[1].Flags().IntVar(&nucleiCVELimit, "cve-limit", 0, "maximum passive CVE template ids to pass to Nuclei")
 	cmd.Commands()[1].Flags().StringVar(&nucleiProgramID, "program-id", "", "limit Nuclei validation to one program id")
 	return cmd
 }

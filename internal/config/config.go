@@ -21,6 +21,7 @@ type Config struct {
 	API       APIConfig
 	Notify    NotifyConfig
 	Worker    WorkerConfig
+	Intel     IntelConfig
 }
 
 type SupabaseConfig struct {
@@ -46,10 +47,16 @@ type ToolConfig struct {
 	SubfinderSources        string
 	SubfinderRateLimits     string
 	HTTPXBin                string
+	WebanalyzeBin           string
+	WebanalyzeApps          string
+	WebanalyzeWorkers       int
+	WebanalyzeCrawl         int
 	NucleiBin               string
+	NucleiFromCVEs          bool
 	NucleiTags              string
 	NucleiSeverities        string
 	NucleiTemplateIDs       string
+	NucleiCVELimit          int
 	NucleiRate              int
 	NucleiC                 int
 	NucleiBulkSize          int
@@ -67,6 +74,10 @@ type NotifyConfig struct {
 type WorkerConfig struct {
 	RunOnStartup        bool
 	RecoverRunningScans bool
+}
+
+type IntelConfig struct {
+	NVDAPIKey string
 }
 
 type ScheduleConfig struct {
@@ -94,10 +105,16 @@ func Load() (Config, error) {
 	v.SetDefault("tools.subfinder_sources", "shodan,bevigil,virustotal,securitytrails")
 	v.SetDefault("tools.subfinder_rate_limits", "shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s")
 	v.SetDefault("tools.httpx_bin", "httpx")
+	v.SetDefault("tools.webanalyze_bin", "webanalyze")
+	v.SetDefault("tools.webanalyze_apps", "")
+	v.SetDefault("tools.webanalyze_workers", 4)
+	v.SetDefault("tools.webanalyze_crawl", 0)
 	v.SetDefault("tools.nuclei_bin", "nuclei")
+	v.SetDefault("tools.nuclei_from_cves", true)
 	v.SetDefault("tools.nuclei_tags", "cve")
 	v.SetDefault("tools.nuclei_severities", "medium,high,critical")
 	v.SetDefault("tools.nuclei_template_ids", "")
+	v.SetDefault("tools.nuclei_cve_limit", 100)
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
@@ -129,10 +146,16 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.subfinder_sources", "ZERO_SUBFINDER_SOURCES")
 	_ = v.BindEnv("tools.subfinder_rate_limits", "ZERO_SUBFINDER_RATE_LIMITS")
 	_ = v.BindEnv("tools.httpx_bin", "ZERO_HTTPX_BIN")
+	_ = v.BindEnv("tools.webanalyze_bin", "ZERO_WEBANALYZE_BIN")
+	_ = v.BindEnv("tools.webanalyze_apps", "ZERO_WEBANALYZE_APPS")
+	_ = v.BindEnv("tools.webanalyze_workers", "ZERO_WEBANALYZE_WORKERS")
+	_ = v.BindEnv("tools.webanalyze_crawl", "ZERO_WEBANALYZE_CRAWL")
 	_ = v.BindEnv("tools.nuclei_bin", "ZERO_NUCLEI_BIN")
+	_ = v.BindEnv("tools.nuclei_from_cves", "ZERO_NUCLEI_FROM_CVES")
 	_ = v.BindEnv("tools.nuclei_tags", "ZERO_NUCLEI_TAGS")
 	_ = v.BindEnv("tools.nuclei_severities", "ZERO_NUCLEI_SEVERITIES")
 	_ = v.BindEnv("tools.nuclei_template_ids", "ZERO_NUCLEI_TEMPLATE_IDS")
+	_ = v.BindEnv("tools.nuclei_cve_limit", "ZERO_NUCLEI_CVE_LIMIT")
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
 	_ = v.BindEnv("tools.nuclei_bulk_size", "ZERO_NUCLEI_BULK_SIZE")
@@ -143,6 +166,7 @@ func Load() (Config, error) {
 	_ = v.BindEnv("notify.discord_webhook_url", "ZERO_DISCORD_WEBHOOK_URL")
 	_ = v.BindEnv("worker.run_on_startup", "ZERO_RUN_ON_STARTUP")
 	_ = v.BindEnv("worker.recover_running_scans", "ZERO_RECOVER_RUNNING_SCANS")
+	_ = v.BindEnv("intel.nvd_api_key", "ZERO_NVD_API_KEY")
 
 	return Config{
 		DatabaseURL:       v.GetString("database_url"),
@@ -168,10 +192,16 @@ func Load() (Config, error) {
 			SubfinderSources:        v.GetString("tools.subfinder_sources"),
 			SubfinderRateLimits:     v.GetString("tools.subfinder_rate_limits"),
 			HTTPXBin:                v.GetString("tools.httpx_bin"),
+			WebanalyzeBin:           v.GetString("tools.webanalyze_bin"),
+			WebanalyzeApps:          v.GetString("tools.webanalyze_apps"),
+			WebanalyzeWorkers:       v.GetInt("tools.webanalyze_workers"),
+			WebanalyzeCrawl:         v.GetInt("tools.webanalyze_crawl"),
 			NucleiBin:               v.GetString("tools.nuclei_bin"),
+			NucleiFromCVEs:          v.GetBool("tools.nuclei_from_cves"),
 			NucleiTags:              v.GetString("tools.nuclei_tags"),
 			NucleiSeverities:        v.GetString("tools.nuclei_severities"),
 			NucleiTemplateIDs:       v.GetString("tools.nuclei_template_ids"),
+			NucleiCVELimit:          v.GetInt("tools.nuclei_cve_limit"),
 			NucleiRate:              v.GetInt("tools.nuclei_rate"),
 			NucleiC:                 v.GetInt("tools.nuclei_c"),
 			NucleiBulkSize:          v.GetInt("tools.nuclei_bulk_size"),
@@ -194,6 +224,9 @@ func Load() (Config, error) {
 		Worker: WorkerConfig{
 			RunOnStartup:        v.GetBool("worker.run_on_startup"),
 			RecoverRunningScans: v.GetBool("worker.recover_running_scans"),
+		},
+		Intel: IntelConfig{
+			NVDAPIKey: v.GetString("intel.nvd_api_key"),
 		},
 	}, nil
 }

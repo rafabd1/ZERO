@@ -40,6 +40,28 @@ CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_program_started
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_status
 	ON zero_scan_runs(status, run_type, started_at DESC);
 
+CREATE TABLE IF NOT EXISTS zero_scan_requests (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	program_id uuid REFERENCES zero_programs(id) ON DELETE CASCADE,
+	name text NOT NULL DEFAULT '',
+	status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','canceled')),
+	requested_by text NOT NULL DEFAULT 'cli',
+	run_after timestamptz NOT NULL DEFAULT now(),
+	params jsonb NOT NULL DEFAULT '{}'::jsonb,
+	attempt_count integer NOT NULL DEFAULT 0,
+	started_at timestamptz,
+	finished_at timestamptz,
+	locked_at timestamptz,
+	error text NOT NULL DEFAULT '',
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_due
+	ON zero_scan_requests(status, run_after, created_at);
+CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_program
+	ON zero_scan_requests(program_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS zero_scope_assets (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	program_id uuid NOT NULL REFERENCES zero_programs(id) ON DELETE CASCADE,
@@ -146,6 +168,28 @@ CREATE TABLE IF NOT EXISTS zero_vulnerability_records (
 	first_seen_at timestamptz NOT NULL DEFAULT now(),
 	last_seen_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS zero_technology_vulnerability_matches (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	program_id uuid NOT NULL REFERENCES zero_programs(id) ON DELETE CASCADE,
+	vulnerability_id uuid NOT NULL REFERENCES zero_vulnerability_records(id) ON DELETE CASCADE,
+	last_scan_run_id uuid REFERENCES zero_scan_runs(id) ON DELETE SET NULL,
+	technology_name text NOT NULL,
+	technology_version text NOT NULL DEFAULT '',
+	source_observation text NOT NULL DEFAULT '',
+	source_query text NOT NULL DEFAULT '',
+	confidence integer NOT NULL DEFAULT 0 CHECK (confidence >= 0 AND confidence <= 100),
+	evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+	first_seen_at timestamptz NOT NULL DEFAULT now(),
+	last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_zero_technology_vulnerability_matches_unique
+	ON zero_technology_vulnerability_matches(program_id, vulnerability_id, lower(technology_name), technology_version, source_query);
+CREATE INDEX IF NOT EXISTS idx_zero_technology_vulnerability_matches_program
+	ON zero_technology_vulnerability_matches(program_id, confidence DESC, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_technology_vulnerability_matches_vuln
+	ON zero_technology_vulnerability_matches(vulnerability_id);
 
 CREATE TABLE IF NOT EXISTS zero_nuclei_results (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

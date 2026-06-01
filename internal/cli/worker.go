@@ -15,6 +15,11 @@ func newWorkerCommand() *cobra.Command {
 		Short: "Run scheduled monitoring tasks.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := loadConfig()
+			if cfg.AutoMigrate {
+				if err := db.Migrate(commandContext(), cfg.DatabaseURL); err != nil {
+					return err
+				}
+			}
 			c := cron.New(cron.WithSeconds())
 			if cfg.Worker.RecoverRunningScans {
 				if err := recoverWorkerState(cmd, cfg.DatabaseURL); err != nil {
@@ -38,6 +43,13 @@ func newWorkerCommand() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+			if err := addJob("scan-requests", "*/30 * * * * *", func() {
+				if err := runQueuedScanRequests(cmd, cfg.DatabaseURL); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "scan request processing failed: %v\n", err)
+				}
+			}); err != nil {
+				return err
+			}
 
 			c.Start()
 			if cfg.Worker.RunOnStartup {
@@ -55,6 +67,45 @@ func newWorkerCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func runQueuedScanRequests(cmd *cobra.Command, databaseURL string) error {
+	if databaseURL == "" {
+		return fmt.Errorf("ZERO_DATABASE_URL is required")
+	}
+	ctx := commandContext()
+	repo, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		return err
+	}
+	defer repo.Close()
+	requests, err := repo.ClaimDueScanRequests(ctx, 3)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, request := range requests {
+		opts, err := manualRunOptionsFromJSON(request.Params)
+		if err == nil && opts.ProgramID == "" {
+			opts.ProgramID = request.ProgramID
+		}
+		if err == nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "zero scan request starting: %s %s\n", request.ID, request.Name)
+			err = runManualPipeline(cmd, opts)
+		}
+		if finishErr := repo.FinishScanRequest(ctx, request.ID, err); finishErr != nil && err == nil {
+			err = finishErr
+		}
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "zero scan request failed %s: %v\n", request.ID, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "zero scan request finished: %s\n", request.ID)
+	}
+	return firstErr
 }
 
 func recoverWorkerState(cmd *cobra.Command, databaseURL string) error {

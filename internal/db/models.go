@@ -26,6 +26,13 @@ type Program struct {
 	ScanIntervalHours int
 }
 
+type ScanRequest struct {
+	ID        string
+	ProgramID string
+	Name      string
+	Params    json.RawMessage
+}
+
 type DomainRoot struct {
 	ScopeAssetID string
 	ProgramID    string
@@ -80,6 +87,55 @@ type HTTPService struct {
 	FaviconHash   string
 	TLS           json.RawMessage
 	Raw           json.RawMessage
+}
+
+type WebTechTarget struct {
+	ProgramID     string
+	HTTPServiceID string
+	LastScanRunID string
+	URL           string
+}
+
+type TechnologyObservation struct {
+	ProgramID     string
+	HTTPServiceID string
+	LastScanRunID string
+	Name          string
+	Version       string
+	Source        string
+	Confidence    int
+	Evidence      map[string]any
+}
+
+type VersionedTechnology struct {
+	ProgramID     string
+	HTTPServiceID string
+	LastScanRunID string
+	Name          string
+	Version       string
+	Source        string
+}
+
+type VulnerabilityRecord struct {
+	VulnID     string
+	Source     string
+	Summary    string
+	Severity   string
+	CVSSScore  *float64
+	References []string
+	Raw        json.RawMessage
+}
+
+type TechnologyVulnerabilityMatch struct {
+	ProgramID         string
+	VulnerabilityID   string
+	LastScanRunID     string
+	TechnologyName    string
+	TechnologyVersion string
+	SourceObservation string
+	SourceQuery       string
+	Confidence        int
+	Evidence          map[string]any
 }
 
 type NucleiTarget struct {

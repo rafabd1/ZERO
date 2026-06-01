@@ -98,6 +98,8 @@ func (s *Server) routes() {
 		ORDER BY s.last_seen_at DESC
 		LIMIT 500
 	`))
+	s.mux.HandleFunc("GET /v1/technologies", s.technologies(""))
+	s.mux.HandleFunc("GET /v1/technology-vulnerabilities", s.technologyVulnerabilities(""))
 	s.mux.HandleFunc("GET /v1/nuclei-results", s.query(`
 		SELECT jsonb_build_object(
 			'id', n.id,
@@ -186,6 +188,26 @@ func (s *Server) routes() {
 		FROM zero_scan_runs sr
 		ORDER BY sr.started_at DESC
 		LIMIT 25
+	`))
+	s.mux.HandleFunc("GET /v1/scan-requests", s.query(`
+		SELECT jsonb_build_object(
+			'id', r.id,
+			'program_id', r.program_id,
+			'name', r.name,
+			'status', r.status,
+			'requested_by', r.requested_by,
+			'run_after', r.run_after,
+			'attempt_count', r.attempt_count,
+			'started_at', r.started_at,
+			'finished_at', r.finished_at,
+			'error', r.error,
+			'params', r.params,
+			'created_at', r.created_at,
+			'updated_at', r.updated_at
+		)
+		FROM zero_scan_requests r
+		ORDER BY r.created_at DESC
+		LIMIT 100
 	`))
 	s.mux.HandleFunc("GET /v1/changes", s.changes(""))
 	s.mux.HandleFunc("GET /v1/notifications/discord", s.query(`
@@ -292,6 +314,12 @@ func (s *Server) routes() {
 		}
 		writeRawJSONArray(w, rows)
 	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/technologies", func(w http.ResponseWriter, r *http.Request) {
+		s.technologies(r.PathValue("program_id"))(w, r)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/technology-vulnerabilities", func(w http.ResponseWriter, r *http.Request) {
+		s.technologyVulnerabilities(r.PathValue("program_id"))(w, r)
+	})
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/nuclei-results", func(w http.ResponseWriter, r *http.Request) {
 		programID := r.PathValue("program_id")
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
@@ -351,6 +379,69 @@ func (s *Server) routes() {
 		}
 		writeRawJSONArray(w, rows)
 	})
+}
+
+func (s *Server) technologies(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', t.id,
+				'program_id', t.program_id,
+				'http_service_id', t.http_service_id,
+				'last_scan_run_id', t.last_scan_run_id,
+				'name', t.name,
+				'version', t.version,
+				'source', t.source,
+				'confidence', t.confidence,
+				'evidence', t.evidence,
+				'first_seen_at', t.first_seen_at,
+				'last_seen_at', t.last_seen_at
+			)
+			FROM zero_technology_observations t
+			WHERE ($1 = '' OR t.program_id::text = $1)
+			ORDER BY t.last_seen_at DESC
+			LIMIT 500
+		`, programID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	}
+}
+
+func (s *Server) technologyVulnerabilities(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', m.id,
+				'program_id', m.program_id,
+				'vulnerability_id', v.vuln_id,
+				'technology_name', m.technology_name,
+				'technology_version', m.technology_version,
+				'source_observation', m.source_observation,
+				'source_query', m.source_query,
+				'confidence', m.confidence,
+				'severity', v.severity,
+				'cvss_score', v.cvss_score,
+				'summary', v.summary,
+				'references', v.references_json,
+				'evidence', m.evidence,
+				'first_seen_at', m.first_seen_at,
+				'last_seen_at', m.last_seen_at
+			)
+			FROM zero_technology_vulnerability_matches m
+			JOIN zero_vulnerability_records v ON v.id = m.vulnerability_id
+			WHERE ($1 = '' OR m.program_id::text = $1)
+			ORDER BY m.last_seen_at DESC, m.confidence DESC
+			LIMIT 500
+		`, programID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	}
 }
 
 func (s *Server) changes(programID string) http.HandlerFunc {

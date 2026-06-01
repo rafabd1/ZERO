@@ -10,8 +10,10 @@ The project is intentionally conservative: a CVE candidate should be emitted onl
 2. Enumeration: expands in-scope wildcard assets with `subfinder`.
 3. Probing: fingerprints alive discovered subdomains and exact URL/domain scope assets with `httpx`.
 4. Target intel: stores `httpx` status/title/webserver/TLS/favicon/tech observations for triage context.
-5. Active validation: runs optimized `nuclei` CVE templates only where useful.
-6. Reporting: deduplicates prior reports and emits new Nuclei-validated candidates grouped by severity and confidence.
+5. Enrichment: fingerprints alive services with Webanalyze/Wappalyzer definitions and stores versioned technology observations when available.
+6. Passive CVE intel: queries NVD for versioned technologies, links plausible CVEs to the program, and keeps them as non-reportable intel.
+7. Active validation: runs optimized `nuclei` CVE templates selected from the passive CVE links when possible.
+8. Reporting: deduplicates prior reports and emits new Nuclei-validated candidates grouped by severity and confidence.
 
 ## Quick Start
 
@@ -22,6 +24,8 @@ go run ./cmd/zero migrate up
 go run ./cmd/zero sync h1
 go run ./cmd/zero enum subfinder
 go run ./cmd/zero probe httpx
+go run ./cmd/zero enrich webanalyze
+go run ./cmd/zero analyze cves
 go run ./cmd/zero analyze nuclei
 go run ./cmd/zero report generate
 go run ./cmd/zero notify discord --dry-run
@@ -55,9 +59,14 @@ Discord delivery is opt-in through `ZERO_DISCORD_WEBHOOK_URL`. Without a webhook
 - HackerOne API username/token in `ZERO_H1_USERNAME` and `ZERO_H1_TOKEN`
 - `subfinder` for passive subdomain enumeration
 - `httpx` for alive checks and technology fingerprinting
+- `webanalyze` for Wappalyzer-style technology enrichment
 - `nuclei` for final active validation of CVE candidates
 
-`httpx` is target intel, not proof of vulnerability. It gives stable JSON, status/title/webserver/TLS/favicon/tech data in one pass. `nuclei` is the CVE validator and should default to CVE templates with severity above low, moderate rate limits, and per-target batching.
+`httpx` is target intel, not proof of vulnerability. It gives stable JSON, status/title/webserver/TLS/favicon/tech data in one pass. Webanalyze expands technology/version coverage. NVD matches are passive intel only. `nuclei` is the CVE validator and defaults to template IDs derived from medium/high/critical passive CVE matches, moderate rate limits, and per-target batching.
+
+Use `zero run manual` for one-off scans with custom parameters, for example a custom Webanalyze technologies file, CVE-derived Nuclei templates, or a specific Nuclei template ID. These flags apply only to that run and do not change the global worker configuration.
+
+Use `zero run schedule --run-after 30m ...` to queue the same custom scan parameters for the worker. Queued requests are visible through `/v1/scan-requests`.
 
 ## Current Status
 
@@ -67,7 +76,7 @@ This commit establishes the base project:
 - Supabase/Postgres schema.
 - Direct HackerOne scope sync through the bbscope library.
 - `subfinder` and `httpx` task runners.
-- Nuclei result ingestion and candidate finding creation.
+- Webanalyze enrichment, NVD CVE matching, and Nuclei result ingestion.
 - New-only report generation from unreported findings.
 
-Passive CVE matching is intentionally disabled. Fingerprints from `httpx` are kept as asset intelligence; reportable CVE candidates come from Nuclei validation.
+Passive CVE matching never creates findings by itself. Fingerprints from `httpx` and Webanalyze are kept as asset intelligence; reportable CVE candidates come from Nuclei validation.

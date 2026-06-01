@@ -527,38 +527,19 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 		if strings.TrimSpace(name) == "" {
 			continue
 		}
-		var techID string
-		var techInserted bool
-		err := r.pool.QueryRow(ctx, `
-			INSERT INTO zero_technology_observations(program_id, http_service_id, last_scan_run_id, name, source, confidence, evidence)
-			VALUES ($1,$2,NULLIF($3, '')::uuid,$4,'httpx',60,jsonb_build_object('url',$5::text))
-			ON CONFLICT(http_service_id, lower(name), version, source) DO UPDATE SET
-				last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_technology_observations.last_scan_run_id),
-				last_seen_at = now(),
-				confidence = GREATEST(zero_technology_observations.confidence, excluded.confidence),
-				evidence = zero_technology_observations.evidence || excluded.evidence
-			RETURNING id::text, (xmax = 0) AS inserted
-		`, service.ProgramID, id, service.LastScanRunID, name, service.URL).Scan(&techID, &techInserted)
+		_, _, err := r.UpsertTechnologyObservation(ctx, TechnologyObservation{
+			ProgramID:     service.ProgramID,
+			HTTPServiceID: id,
+			LastScanRunID: service.LastScanRunID,
+			Name:          name,
+			Source:        "httpx",
+			Confidence:    60,
+			Evidence: map[string]any{
+				"url": service.URL,
+			},
+		})
 		if err != nil {
 			return "", fmt.Errorf("upsert technology observation: %w", err)
-		}
-		if techInserted {
-			if err := r.RecordChangeEvent(ctx, ChangeEvent{
-				ProgramID:  service.ProgramID,
-				ScanRunID:  service.LastScanRunID,
-				EntityType: "technology",
-				EntityID:   techID,
-				EntityKey:  service.URL + ":" + strings.ToLower(strings.TrimSpace(name)),
-				ChangeType: "added",
-				NewValue: map[string]any{
-					"url":     service.URL,
-					"name":    name,
-					"source":  "httpx",
-					"service": id,
-				},
-			}); err != nil {
-				return "", err
-			}
 		}
 	}
 
