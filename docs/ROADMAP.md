@@ -30,7 +30,7 @@
 - Deduplicate by stable `evidence_hash`.
 - Suppress prior reports and dismissed findings.
 - Export candidate bundles for Proteus/Codex manual triage.
-- Add Discord notification delivery for new findings only.
+- Discord notification delivery for new findings only.
 
 ## Phase 4.5: API
 

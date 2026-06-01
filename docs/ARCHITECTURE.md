@@ -14,6 +14,7 @@ flowchart LR
   INTEL --> NUCLEI["nuclei CVE validation"]
   NUCLEI --> DB
   DB --> REPORT["new-only deduped reports"]
+  REPORT --> DISCORD["Discord notification"]
 ```
 
 ## Components
@@ -53,6 +54,7 @@ Zero should scan multiple programs concurrently, starting with `ZERO_TARGET_PARA
 - `httpx` stores target intel for alive services and technology observations.
 - `nuclei` runs after probing and only against alive URLs; it is the CVE validation source.
 - Report generation emits only new, unreported findings and attaches a stable `report_id` for deduplication.
+- Discord notification delivery reads new reports, stores delivery state in `zero_discord_notifications`, and never sends a report twice after a successful send.
 
 ## Scheduler
 
@@ -65,4 +67,4 @@ The worker uses second-enabled cron expressions:
 - `ZERO_SCHEDULE_CVE`
 - `ZERO_SCHEDULE_NUCLEI`
 
-The primary worker job is the full pipeline scheduled by `ZERO_SCHEDULE_FULL`: scope sync before enumeration, enumeration before probing, Nuclei validation after probing, and report generation after Nuclei. The `httpx` fingerprint phase is target intel only; passive CVE matching is intentionally disabled to avoid noisy unvalidated reports.
+The primary worker job is the full pipeline scheduled by `ZERO_SCHEDULE_FULL`: scope sync before enumeration, enumeration before probing, Nuclei validation after probing, report generation after Nuclei, and Discord notification after reports. The `httpx` fingerprint phase is target intel only; passive CVE matching is intentionally disabled to avoid noisy unvalidated reports.

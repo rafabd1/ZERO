@@ -21,7 +21,7 @@ To run the first real scan, Zero needs:
   - `subfinder`
   - `httpx`
   - `nuclei`
-- Later Discord integration:
+- Discord integration:
   - `ZERO_DISCORD_WEBHOOK_URL`
 - API protection:
   - `ZERO_API_TOKEN`
@@ -37,7 +37,7 @@ Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_pr
 The main continuous execution path is `zero worker`, which schedules `zero run once` using `ZERO_SCHEDULE_FULL`. `zero run once` executes:
 
 ```text
-sync h1 -> enum subfinder -> probe httpx -> analyze cves(policy/intel) -> analyze nuclei -> report generate
+sync h1 -> enum subfinder -> probe httpx -> analyze cves(policy/intel) -> analyze nuclei -> report generate -> notify discord
 ```
 
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
@@ -56,11 +56,19 @@ zero enum subfinder --limit 2
 zero probe httpx --limit 50
 zero analyze nuclei --limit 5 --template-id CVE-2025-20362
 zero report generate --limit 50
-zero run once
+zero notify discord --dry-run
 zero api
 ```
 
 This validates the pipeline without turning a local setup check into a broad scan.
+
+Use `zero run once` only when you want the full configured pipeline without per-step smoke-test limits.
+
+## Discord Notifications
+
+`zero notify discord` sends only reports that do not have a successful `zero_discord_notifications` row for the report dedupe key. Failed notifications are stored and can be retried; successful notifications are not sent again.
+
+If `ZERO_DISCORD_WEBHOOK_URL` is empty, the command is a safe no-op. Use `--dry-run` to count pending reports without creating notification rows or sending webhooks.
 
 ## Subfinder Providers
 

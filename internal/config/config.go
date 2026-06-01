@@ -17,6 +17,7 @@ type Config struct {
 	Tools     ToolConfig
 	Schedule  ScheduleConfig
 	API       APIConfig
+	Notify    NotifyConfig
 }
 
 type SupabaseConfig struct {
@@ -54,6 +55,10 @@ type ToolConfig struct {
 type APIConfig struct {
 	Addr  string
 	Token string
+}
+
+type NotifyConfig struct {
+	DiscordWebhookURL string
 }
 
 type ScheduleConfig struct {
@@ -121,6 +126,7 @@ func Load() (Config, error) {
 	_ = v.BindEnv("schedule.full", "ZERO_SCHEDULE_FULL")
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
 	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
+	_ = v.BindEnv("notify.discord_webhook_url", "ZERO_DISCORD_WEBHOOK_URL")
 
 	return Config{
 		DatabaseURL: v.GetString("database_url"),
@@ -163,6 +169,9 @@ func Load() (Config, error) {
 		API: APIConfig{
 			Addr:  v.GetString("api.addr"),
 			Token: v.GetString("api.token"),
+		},
+		Notify: NotifyConfig{
+			DiscordWebhookURL: v.GetString("notify.discord_webhook_url"),
 		},
 	}, nil
 }

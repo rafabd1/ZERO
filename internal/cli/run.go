@@ -29,6 +29,7 @@ func runPipeline(parent *cobra.Command) error {
 		{"analyze", "cves"},
 		{"analyze", "nuclei"},
 		{"report", "generate"},
+		{"notify", "discord"},
 	}
 	for _, step := range steps {
 		fmt.Fprintf(parent.OutOrStdout(), "zero pipeline step: %v\n", step)

@@ -182,6 +182,22 @@ func (s *Server) routes() {
 		ORDER BY sr.started_at DESC
 		LIMIT 25
 	`))
+	s.mux.HandleFunc("GET /v1/notifications/discord", s.query(`
+		SELECT jsonb_build_object(
+			'id', n.id,
+			'program_id', n.program_id,
+			'report_id', n.report_id,
+			'finding_id', n.finding_id,
+			'dedupe_key', n.dedupe_key,
+			'status', n.status,
+			'error', n.error,
+			'created_at', n.created_at,
+			'sent_at', n.sent_at
+		)
+		FROM zero_discord_notifications n
+		ORDER BY n.created_at DESC
+		LIMIT 100
+	`))
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/latest-scan", func(w http.ResponseWriter, r *http.Request) {
 		programID := r.PathValue("program_id")
 		rows, err := s.repo.QueryJSONRows(r.Context(), `

@@ -115,3 +115,17 @@ type ReportDraft struct {
 	FindingIDs []string
 	Metadata   map[string]any
 }
+
+type DiscordReport struct {
+	ReportID      string
+	ProgramID     string
+	ProgramHandle string
+	ProgramURL    string
+	ReportKey     string
+	Title         string
+	Severity      string
+	Confidence    int
+	BodyMarkdown  string
+	FindingIDs    []string
+	CreatedAt     string
+}

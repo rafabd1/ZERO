@@ -24,6 +24,7 @@ go run ./cmd/zero enum subfinder
 go run ./cmd/zero probe httpx
 go run ./cmd/zero analyze nuclei
 go run ./cmd/zero report generate
+go run ./cmd/zero notify discord --dry-run
 ```
 
 For Docker:
@@ -38,6 +39,8 @@ The container runs `zero worker` by default. The worker schedules the full conti
 ```bash
 zero run once
 ```
+
+Discord delivery is opt-in through `ZERO_DISCORD_WEBHOOK_URL`. Without a webhook, notification delivery is a safe no-op and reports remain available through the API.
 
 ## Required Tools
 
