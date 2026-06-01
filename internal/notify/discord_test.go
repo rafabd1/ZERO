@@ -126,3 +126,16 @@ func TestBuildOperationalAlertPayload(t *testing.T) {
 		t.Fatalf("step field = %q; want command step", embed.Fields[2].Value)
 	}
 }
+
+func TestDiscordNotifierRoutesReportsByValidation(t *testing.T) {
+	notifier := NewDiscordNotifier(nil, "https://discord.test/passive", "https://discord.test/validated")
+
+	passive := notifier.webhookURLForReport(db.DiscordReport{Potential: 2})
+	if passive != "https://discord.test/passive" {
+		t.Fatalf("passive webhook = %q", passive)
+	}
+	validated := notifier.webhookURLForReport(db.DiscordReport{Confirmed: 1, Potential: 1})
+	if validated != "https://discord.test/validated" {
+		t.Fatalf("validated webhook = %q", validated)
+	}
+}

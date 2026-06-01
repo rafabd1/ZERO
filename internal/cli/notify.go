@@ -25,7 +25,7 @@ func newNotifyCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
-			result, err := notify.NewDiscordNotifier(repo, cfg.Notify.DiscordWebhookURL).
+			result, err := notify.NewDiscordNotifier(repo, cfg.Notify.DiscordPassiveWebhookURL, cfg.Notify.DiscordValidatedWebhookURL).
 				WithProgramID(programID).
 				WithLimit(limit).
 				WithDryRun(dryRun).
@@ -35,7 +35,7 @@ func newNotifyCommand() *cobra.Command {
 			}
 			state := ""
 			if result.Disabled {
-				state = " (disabled: ZERO_DISCORD_WEBHOOK_URL is empty)"
+				state = " (disabled: no report webhook is configured)"
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "discord notifications checked %d reports, sent %d, skipped %d, failed %d%s\n", result.Reports, result.Sent, result.Skipped, result.Failed, state)
 			return nil

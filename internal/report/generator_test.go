@@ -56,6 +56,7 @@ func TestBuildDraftLabelsPassiveCVEAsUnconfirmed(t *testing.T) {
 			Evidence: json.RawMessage(`{
 				"source":"nvd-passive",
 				"validation_status":"potential_unconfirmed",
+				"nuclei_validation_reason":"no_matching_local_nuclei_templates",
 				"cves":["CVE-2099-0002"],
 				"technology_name":"Apache HTTP Server",
 				"technology_version":"2.4.49",
@@ -68,7 +69,7 @@ func TestBuildDraftLabelsPassiveCVEAsUnconfirmed(t *testing.T) {
 	draft := buildDraft(findings)
 	for _, want := range []string{
 		"potential/unconfirmed passive CVE match",
-		"no confirming Nuclei result",
+		"no matching local template was available",
 		"CVE-2099-0002",
 		"Apache HTTP Server 2.4.49",
 	} {

@@ -23,7 +23,7 @@ func alertOnTimeout(ctx context.Context, cmd *cobra.Command, cfg config.Config, 
 		Error:         err.Error(),
 		Timeout:       cfg.Tools.ToolTimeout.String(),
 	}
-	if sendErr := notify.SendOperationalAlert(ctx, cfg.Notify.DiscordWebhookURL, alert); sendErr != nil {
+	if sendErr := notify.SendOperationalAlert(ctx, cfg.Notify.DiscordAlertWebhookURL, alert); sendErr != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "failed to send operational alert: %v\n", sendErr)
 	}
 }

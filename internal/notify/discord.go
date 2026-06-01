@@ -13,12 +13,13 @@ import (
 )
 
 type DiscordNotifier struct {
-	repo       *db.Repository
-	webhookURL string
-	client     *http.Client
-	programID  string
-	limit      int
-	dryRun     bool
+	repo                *db.Repository
+	passiveWebhookURL   string
+	validatedWebhookURL string
+	client              *http.Client
+	programID           string
+	limit               int
+	dryRun              bool
 }
 
 type DiscordResult struct {
@@ -39,12 +40,13 @@ type OperationalAlert struct {
 	Timeout       string
 }
 
-func NewDiscordNotifier(repo *db.Repository, webhookURL string) *DiscordNotifier {
+func NewDiscordNotifier(repo *db.Repository, passiveWebhookURL, validatedWebhookURL string) *DiscordNotifier {
 	return &DiscordNotifier{
-		repo:       repo,
-		webhookURL: strings.TrimSpace(webhookURL),
-		client:     &http.Client{Timeout: 15 * time.Second},
-		limit:      25,
+		repo:                repo,
+		passiveWebhookURL:   strings.TrimSpace(passiveWebhookURL),
+		validatedWebhookURL: strings.TrimSpace(validatedWebhookURL),
+		client:              &http.Client{Timeout: 15 * time.Second},
+		limit:               25,
 	}
 }
 
@@ -74,7 +76,7 @@ func (n *DiscordNotifier) Run(ctx context.Context) (DiscordResult, error) {
 	if len(reports) == 0 {
 		return result, nil
 	}
-	if n.webhookURL == "" && !n.dryRun {
+	if n.passiveWebhookURL == "" && n.validatedWebhookURL == "" && !n.dryRun {
 		result.Disabled = true
 		result.Skipped = len(reports)
 		return result, nil
@@ -82,6 +84,11 @@ func (n *DiscordNotifier) Run(ctx context.Context) (DiscordResult, error) {
 
 	for _, report := range reports {
 		if n.dryRun {
+			result.Skipped++
+			continue
+		}
+		webhookURL := n.webhookURLForReport(report)
+		if webhookURL == "" {
 			result.Skipped++
 			continue
 		}
@@ -93,7 +100,7 @@ func (n *DiscordNotifier) Run(ctx context.Context) (DiscordResult, error) {
 			result.Skipped++
 			continue
 		}
-		if err := n.send(ctx, report); err != nil {
+		if err := n.send(ctx, webhookURL, report); err != nil {
 			result.Failed++
 			_ = n.repo.FinishDiscordNotification(ctx, notificationID, "failed", err.Error())
 			return result, err
@@ -133,13 +140,20 @@ func SendOperationalAlert(ctx context.Context, webhookURL string, alert Operatio
 	return nil
 }
 
-func (n *DiscordNotifier) send(ctx context.Context, report db.DiscordReport) error {
+func (n *DiscordNotifier) webhookURLForReport(report db.DiscordReport) string {
+	if report.Confirmed > 0 {
+		return n.validatedWebhookURL
+	}
+	return n.passiveWebhookURL
+}
+
+func (n *DiscordNotifier) send(ctx context.Context, webhookURL string, report db.DiscordReport) error {
 	for _, payload := range buildDiscordPayloads(report) {
 		body, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.webhookURL, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 		if err != nil {
 			return err
 		}

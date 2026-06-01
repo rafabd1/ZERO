@@ -52,6 +52,7 @@ func newAnalyzeCommand() *cobra.Command {
 				WithProgramID(cvesProgramID).
 				WithScanRunID(scanID).
 				WithLimit(cvesLimit).
+				WithMinYear(cfg.Intel.CVEMinYear).
 				Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
@@ -67,6 +68,7 @@ func newAnalyzeCommand() *cobra.Command {
 				"program_id":           cvesProgramID,
 				"source":               "nvd",
 				"validator":            "nuclei",
+				"cve_min_year":         cfg.Intel.CVEMinYear,
 			}); err != nil {
 				return err
 			}
@@ -107,16 +109,17 @@ func newAnalyzeCommand() *cobra.Command {
 				if cveLimit <= 0 {
 					cveLimit = cfg.Tools.NucleiCVELimit
 				}
-				ids, err := repo.ListCVETemplateIDsFromMatches(ctx, nucleiProgramID, severities, cveLimit)
+				ids, err := repo.ListCVETemplateIDsFromMatches(ctx, nucleiProgramID, severities, cveLimit, cfg.Intel.CVEMinYear)
 				if err != nil {
 					return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 				}
 				if len(ids) == 0 {
 					if err := finishScanRun(ctx, repo, scanID, nil, 0, 0, map[string]any{
-						"program_id": nucleiProgramID,
-						"tool":       "nuclei",
-						"from_cves":  true,
-						"skipped":    "no passive CVE/template candidates",
+						"program_id":   nucleiProgramID,
+						"tool":         "nuclei",
+						"from_cves":    true,
+						"cve_min_year": cfg.Intel.CVEMinYear,
+						"skipped":      "no passive CVE/template candidates",
 					}); err != nil {
 						return err
 					}
@@ -148,6 +151,7 @@ func newAnalyzeCommand() *cobra.Command {
 				"from_cves":         fromCVEs,
 				"template_ids":      templateIDs,
 				"template_paths":    nucleiTemplatePath,
+				"cve_min_year":      cfg.Intel.CVEMinYear,
 				"tags":              tags,
 				"severities":        severities,
 				"rate":              rate,

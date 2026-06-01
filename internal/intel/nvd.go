@@ -22,6 +22,7 @@ type NVDRunner struct {
 	aliases   TechnologyAliases
 	limit     int
 	perQuery  int
+	minYear   int
 	client    *http.Client
 }
 
@@ -41,6 +42,7 @@ func NewNVDRunner(repo *db.Repository, apiKey string) *NVDRunner {
 		aliases:  DefaultTechnologyAliases(),
 		limit:    25,
 		perQuery: 20,
+		minYear:  2018,
 		client:   &http.Client{Timeout: 20 * time.Second},
 	}
 }
@@ -65,6 +67,13 @@ func (r *NVDRunner) WithScanRunID(scanRunID string) *NVDRunner {
 func (r *NVDRunner) WithLimit(limit int) *NVDRunner {
 	if limit > 0 {
 		r.limit = limit
+	}
+	return r
+}
+
+func (r *NVDRunner) WithMinYear(year int) *NVDRunner {
+	if year >= 0 {
+		r.minYear = year
 	}
 	return r
 }
@@ -157,6 +166,9 @@ func (r *NVDRunner) search(ctx context.Context, tech db.VersionedTechnology, key
 	}
 	candidates := make([]nvdCandidate, 0, len(parsed.Vulnerabilities))
 	for _, item := range parsed.Vulnerabilities {
+		if r.minYear > 0 && cveYear(item.CVE.ID) < r.minYear {
+			continue
+		}
 		confidence, evidence := matchConfidence(tech, item.CVE, keyword, r.aliases)
 		if confidence < 40 {
 			continue
@@ -177,6 +189,18 @@ func (r *NVDRunner) search(ctx context.Context, tech db.VersionedTechnology, key
 		})
 	}
 	return candidates, nil
+}
+
+func cveYear(id string) int {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if !strings.HasPrefix(id, "CVE-") || len(id) < 9 {
+		return 0
+	}
+	year, err := strconv.Atoi(id[4:8])
+	if err != nil {
+		return 0
+	}
+	return year
 }
 
 type nvdResponse struct {

@@ -67,7 +67,7 @@ func (r *Repository) ListUnreportedFindings(ctx context.Context, programID strin
 	return findings, rows.Err()
 }
 
-func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, programID, scanRunID string, limit int) (int, error) {
+func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, programID, scanRunID string, limit, cveMinYear int) (int, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -87,6 +87,15 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 				v.cvss_score,
 				v.summary,
 				v.references_json,
+				COALESCE(ns.stats->>'skipped', '') AS nuclei_skipped,
+				COALESCE(ns.error, '') AS nuclei_error,
+				CASE
+					WHEN ns.id IS NULL THEN 'nuclei_not_run'
+					WHEN COALESCE(ns.stats->>'skipped', '') = 'no matching local Nuclei templates' THEN 'no_matching_local_nuclei_templates'
+					WHEN COALESCE(ns.stats->>'skipped', '') = 'no passive CVE/template candidates' THEN 'no_passive_cve_template_candidates'
+					WHEN COALESCE(ns.error, '') <> '' THEN 'nuclei_error'
+					ELSE 'no_confirming_result'
+				END AS nuclei_validation_reason,
 				LEAST(GREATEST(m.confidence, 45), 65) AS report_confidence,
 				'passive:' || encode(digest(
 					m.program_id::text || ':' || m.http_service_id::text || ':' || v.vuln_id || ':' ||
@@ -96,10 +105,25 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 			FROM zero_technology_vulnerability_matches m
 			JOIN zero_vulnerability_records v ON v.id = m.vulnerability_id
 			JOIN zero_http_services s ON s.id = m.http_service_id AND s.active = true
+			LEFT JOIN LATERAL (
+				SELECT sr.id, sr.status, sr.error, sr.stats
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = m.program_id
+				  AND sr.run_type = 'nuclei'
+				ORDER BY sr.started_at DESC
+				LIMIT 1
+			) ns ON true
 			WHERE m.http_service_id IS NOT NULL
 			  AND m.confidence >= 80
 			  AND m.evidence->>'strategy' = 'nvd-cpe'
 			  AND lower(v.severity) IN ('medium', 'high', 'critical')
+			  AND (
+				$4 <= 0
+				OR CASE
+					WHEN v.vuln_id ~ '^CVE-[0-9]{4}-' THEN substring(v.vuln_id from 5 for 4)::int
+					ELSE 0
+				END >= $4
+			  )
 			  AND ($1 = '' OR m.program_id::text = $1)
 			  AND NOT EXISTS (
 				SELECT 1
@@ -137,7 +161,10 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 				jsonb_build_object(
 					'source', 'nvd-passive',
 					'validation_status', 'potential_unconfirmed',
-					'nuclei_validation', 'no_confirming_result',
+					'nuclei_validation', nuclei_validation_reason,
+					'nuclei_validation_reason', nuclei_validation_reason,
+					'nuclei_skipped', nuclei_skipped,
+					'nuclei_error', nuclei_error,
 					'cves', jsonb_build_array(vuln_id),
 					'cvss_score', cvss_score,
 					'summary', summary,
@@ -175,7 +202,7 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 			ON CONFLICT(evidence_hash) DO NOTHING
 		)
 		SELECT count(*) FILTER (WHERE inserted) FROM upserted
-	`, programID, scanRunID, limit).Scan(&inserted)
+	`, programID, scanRunID, limit, cveMinYear).Scan(&inserted)
 	if err != nil {
 		return 0, fmt.Errorf("upsert unconfirmed passive findings: %w", err)
 	}

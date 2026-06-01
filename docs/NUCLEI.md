@@ -47,6 +47,8 @@ Nuclei depends on templates. It is strong when a relevant template exists and we
 
 Passive matching is not just a free-text lookup. NVD CPE evidence and version ranges are preferred when present; keyword matching is kept as lower-confidence fallback. Active Nuclei hits become high-confidence candidate findings. Medium/high/critical passive CVE matches can also be promoted during report generation as `potential_unconfirmed` entries when the same service has no confirming Nuclei result for that CVE.
 
+`ZERO_CVE_MIN_YEAR` defaults to `2018` and applies to NVD passive matching, CVE-derived Nuclei template selection, and passive/unconfirmed report generation. If no eligible CVE remains after this year filter, Zero does not generate a passive report for that candidate set.
+
 ## Stored Fields
 
 Each Nuclei result is linked to:

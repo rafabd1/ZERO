@@ -33,7 +33,7 @@ func newReportCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := report.NewGenerator(repo).WithScanRunID(scanID).WithProgramID(programID).WithLimit(limit).Run(ctx)
+			result, err := report.NewGenerator(repo).WithScanRunID(scanID).WithProgramID(programID).WithLimit(limit).WithCVEMinYear(cfg.Intel.CVEMinYear).Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 			}
@@ -43,6 +43,7 @@ func newReportCommand() *cobra.Command {
 				"reports":          result.Reports,
 				"inserted":         result.Inserted,
 				"program_id":       programID,
+				"cve_min_year":     cfg.Intel.CVEMinYear,
 			}); err != nil {
 				return err
 			}

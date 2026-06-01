@@ -55,6 +55,8 @@ func (s *Server) routes() {
 			'program_url', program_url,
 			'active', active,
 			'scan_interval_hours', scan_interval_hours,
+			'max_parallel_tasks', max_parallel_tasks,
+			'parallelism_scope', 'reserved; current scheduler uses ZERO_TARGET_PARALLELISM globally',
 			'last_scan_started_at', last_scan_started_at,
 			'last_scan_finished_at', last_scan_finished_at,
 			'first_seen_at', first_seen_at,
@@ -87,6 +89,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/nuclei-results", s.nucleiResults(""))
 	s.mux.HandleFunc("GET /v1/findings", s.findings(""))
 	s.mux.HandleFunc("GET /v1/reports", s.reports(""))
+	s.mux.HandleFunc("GET /v1/stats", s.globalStats)
 	s.mux.HandleFunc("GET /v1/reports/latest", s.query(`
 		SELECT jsonb_build_object(
 			'id', r.id,
@@ -194,6 +197,7 @@ func (s *Server) routes() {
 		}
 		writeRawJSON(w, rows[0])
 	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/stats", s.programStats)
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/changes", func(w http.ResponseWriter, r *http.Request) {
 		s.changes(r.PathValue("program_id"))(w, r)
 	})
@@ -238,6 +242,143 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/findings", func(w http.ResponseWriter, r *http.Request) {
 		s.findings(r.PathValue("program_id"))(w, r)
 	})
+}
+
+func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'programs', jsonb_build_object(
+				'total', count(*),
+				'active', count(*) FILTER (WHERE active),
+				'scanned', count(*) FILTER (WHERE active AND last_scan_finished_at IS NOT NULL),
+				'never_scanned', count(*) FILTER (WHERE active AND last_scan_finished_at IS NULL),
+				'due', count(*) FILTER (
+					WHERE active
+					  AND (
+						last_scan_finished_at IS NULL
+						OR last_scan_finished_at < now() - (scan_interval_hours * interval '1 hour')
+					  )
+				)
+			),
+			'scan_runs', jsonb_build_object(
+				'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running'),
+				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded'),
+				'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed'),
+				'total', (SELECT count(*) FROM zero_scan_runs)
+			),
+			'assets', jsonb_build_object(
+				'active_scope_assets', (SELECT count(*) FROM zero_scope_assets WHERE active),
+				'active_in_scope_assets', (SELECT count(*) FROM zero_scope_assets WHERE active AND in_scope),
+				'active_bounty_assets', (SELECT count(*) FROM zero_scope_assets WHERE active AND eligible_for_bounty),
+				'active_subdomains', (SELECT count(*) FROM zero_subdomains WHERE active),
+				'active_http_services', (SELECT count(*) FROM zero_http_services WHERE active),
+				'active_technologies', (SELECT count(*) FROM zero_technology_observations WHERE active)
+			),
+			'findings', jsonb_build_object(
+				'total', (SELECT count(*) FROM zero_candidate_findings),
+				'new', (SELECT count(*) FROM zero_candidate_findings WHERE status = 'new'),
+				'reported', (SELECT count(*) FROM zero_candidate_findings WHERE status = 'reported'),
+				'nuclei_confirmed', (SELECT count(*) FROM zero_candidate_findings WHERE nuclei_result_id IS NOT NULL),
+				'passive_unconfirmed', (SELECT count(*) FROM zero_candidate_findings WHERE nuclei_result_id IS NULL)
+			),
+			'nuclei_results', (SELECT count(*) FROM zero_nuclei_results),
+			'reports', (SELECT count(*) FROM zero_reports),
+			'generated_at', now()
+		)
+		FROM zero_programs
+	`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusNotFound, "stats not found")
+		return
+	}
+	writeRawJSON(w, rows[0])
+}
+
+func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
+	programID := r.PathValue("program_id")
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'program', jsonb_build_object(
+				'id', p.id,
+				'platform', p.platform,
+				'handle', p.handle,
+				'program_url', p.program_url,
+				'active', p.active,
+				'scan_interval_hours', p.scan_interval_hours,
+				'max_parallel_tasks', p.max_parallel_tasks,
+				'parallelism_scope', 'reserved; current scheduler uses ZERO_TARGET_PARALLELISM globally',
+				'last_scan_started_at', p.last_scan_started_at,
+				'last_scan_finished_at', p.last_scan_finished_at,
+				'is_due', p.active AND (
+					p.last_scan_finished_at IS NULL
+					OR p.last_scan_finished_at < now() - (p.scan_interval_hours * interval '1 hour')
+				)
+			),
+			'scan_runs', jsonb_build_object(
+				'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running'),
+				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded'),
+				'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed'),
+				'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id),
+				'by_type', COALESCE((
+					SELECT jsonb_object_agg(run_type, count ORDER BY run_type)
+					FROM (
+						SELECT run_type, count(*) AS count
+						FROM zero_scan_runs
+						WHERE program_id = p.id
+						GROUP BY run_type
+					) x
+				), '{}'::jsonb)
+			),
+			'assets', jsonb_build_object(
+				'active_scope_assets', (SELECT count(*) FROM zero_scope_assets WHERE program_id = p.id AND active),
+				'active_in_scope_assets', (SELECT count(*) FROM zero_scope_assets WHERE program_id = p.id AND active AND in_scope),
+				'active_bounty_assets', (SELECT count(*) FROM zero_scope_assets WHERE program_id = p.id AND active AND eligible_for_bounty),
+				'active_subdomains', (SELECT count(*) FROM zero_subdomains WHERE program_id = p.id AND active),
+				'active_http_services', (SELECT count(*) FROM zero_http_services WHERE program_id = p.id AND active),
+				'active_technologies', (SELECT count(*) FROM zero_technology_observations WHERE program_id = p.id AND active)
+			),
+			'findings', jsonb_build_object(
+				'total', (SELECT count(*) FROM zero_candidate_findings WHERE program_id = p.id),
+				'new', (SELECT count(*) FROM zero_candidate_findings WHERE program_id = p.id AND status = 'new'),
+				'reported', (SELECT count(*) FROM zero_candidate_findings WHERE program_id = p.id AND status = 'reported'),
+				'nuclei_confirmed', (SELECT count(*) FROM zero_candidate_findings WHERE program_id = p.id AND nuclei_result_id IS NOT NULL),
+				'passive_unconfirmed', (SELECT count(*) FROM zero_candidate_findings WHERE program_id = p.id AND nuclei_result_id IS NULL)
+			),
+			'nuclei_results', (SELECT count(*) FROM zero_nuclei_results WHERE program_id = p.id),
+			'reports', (SELECT count(*) FROM zero_reports WHERE program_id = p.id),
+			'latest_scan', (
+				SELECT jsonb_build_object(
+					'id', sr.id,
+					'run_type', sr.run_type,
+					'status', sr.status,
+					'started_at', sr.started_at,
+					'finished_at', sr.finished_at,
+					'error', sr.error,
+					'stats', sr.stats
+				)
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = p.id
+				ORDER BY sr.started_at DESC
+				LIMIT 1
+			),
+			'generated_at', now()
+		)
+		FROM zero_programs p
+		WHERE p.id = $1::uuid
+	`, programID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusNotFound, "program stats not found")
+		return
+	}
+	writeRawJSON(w, rows[0])
 }
 
 func (s *Server) services(programID string) http.HandlerFunc {

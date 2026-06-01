@@ -140,7 +140,7 @@ func (r *Repository) UpsertTechnologyVulnerabilityMatch(ctx context.Context, mat
 	return id, inserted, nil
 }
 
-func (r *Repository) ListCVETemplateIDsFromMatches(ctx context.Context, programID, severities string, limit int) ([]string, error) {
+func (r *Repository) ListCVETemplateIDsFromMatches(ctx context.Context, programID, severities string, limit, minYear int) ([]string, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -155,11 +155,18 @@ func (r *Repository) ListCVETemplateIDsFromMatches(ctx context.Context, programI
 		WHERE ($1 = '' OR m.program_id::text = $1)
 		  AND lower(v.severity) = ANY($2::text[])
 		  AND upper(v.vuln_id) LIKE 'CVE-%'
+		  AND (
+			$4 <= 0
+			OR CASE
+				WHEN upper(v.vuln_id) ~ '^CVE-[0-9]{4}-' THEN substring(upper(v.vuln_id) from 5 for 4)::int
+				ELSE 0
+			END >= $4
+		  )
 		  AND m.confidence >= 80
 		  AND m.evidence->>'strategy' = 'nvd-cpe'
 		ORDER BY upper(v.vuln_id)
 		LIMIT $3
-	`, programID, severityList, limit)
+	`, programID, severityList, limit, minYear)
 	if err != nil {
 		return nil, err
 	}

@@ -79,7 +79,10 @@ type APIConfig struct {
 }
 
 type NotifyConfig struct {
-	DiscordWebhookURL string
+	DiscordWebhookURL          string
+	DiscordPassiveWebhookURL   string
+	DiscordValidatedWebhookURL string
+	DiscordAlertWebhookURL     string
 }
 
 type WorkerConfig struct {
@@ -90,6 +93,7 @@ type WorkerConfig struct {
 type IntelConfig struct {
 	NVDAPIKey       string
 	TechAliasesFile string
+	CVEMinYear      int
 }
 
 type DataConfig struct {
@@ -144,7 +148,7 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
 	v.SetDefault("tools.timeout", "20m")
-	v.SetDefault("target_parallelism", 8)
+	v.SetDefault("target_parallelism", 12)
 	v.SetDefault("schedule.full", "0 15 3 */3 * *")
 	v.SetDefault("schedule.scope_sync", "0 15 3 * * *")
 	v.SetDefault("schedule.enum", "0 45 3 * * *")
@@ -158,6 +162,7 @@ func Load() (Config, error) {
 	v.SetDefault("database.auto_migrate", true)
 	v.SetDefault("database.max_conns", 1)
 	v.SetDefault("data.stale_after_hours", 168)
+	v.SetDefault("intel.cve_min_year", 2018)
 
 	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
@@ -209,10 +214,14 @@ func Load() (Config, error) {
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
 	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
 	_ = v.BindEnv("notify.discord_webhook_url", "ZERO_DISCORD_WEBHOOK_URL")
+	_ = v.BindEnv("notify.discord_passive_webhook_url", "ZERO_DISCORD_PASSIVE_WEBHOOK_URL")
+	_ = v.BindEnv("notify.discord_validated_webhook_url", "ZERO_DISCORD_VALIDATED_WEBHOOK_URL")
+	_ = v.BindEnv("notify.discord_alert_webhook_url", "ZERO_DISCORD_ALERT_WEBHOOK_URL")
 	_ = v.BindEnv("worker.run_on_startup", "ZERO_RUN_ON_STARTUP")
 	_ = v.BindEnv("worker.recover_running_scans", "ZERO_RECOVER_RUNNING_SCANS")
 	_ = v.BindEnv("intel.nvd_api_key", "ZERO_NVD_API_KEY")
 	_ = v.BindEnv("intel.tech_aliases_file", "ZERO_TECH_ALIASES_FILE")
+	_ = v.BindEnv("intel.cve_min_year", "ZERO_CVE_MIN_YEAR")
 	_ = v.BindEnv("data.stale_after_hours", "ZERO_STALE_AFTER_HOURS")
 
 	return Config{
@@ -277,7 +286,10 @@ func Load() (Config, error) {
 			Token: v.GetString("api.token"),
 		},
 		Notify: NotifyConfig{
-			DiscordWebhookURL: v.GetString("notify.discord_webhook_url"),
+			DiscordWebhookURL:          v.GetString("notify.discord_webhook_url"),
+			DiscordPassiveWebhookURL:   firstNonEmpty(v.GetString("notify.discord_passive_webhook_url"), v.GetString("notify.discord_webhook_url")),
+			DiscordValidatedWebhookURL: firstNonEmpty(v.GetString("notify.discord_validated_webhook_url"), v.GetString("notify.discord_webhook_url")),
+			DiscordAlertWebhookURL:     firstNonEmpty(v.GetString("notify.discord_alert_webhook_url"), v.GetString("notify.discord_webhook_url")),
 		},
 		Worker: WorkerConfig{
 			RunOnStartup:        v.GetBool("worker.run_on_startup"),
@@ -286,6 +298,7 @@ func Load() (Config, error) {
 		Intel: IntelConfig{
 			NVDAPIKey:       v.GetString("intel.nvd_api_key"),
 			TechAliasesFile: v.GetString("intel.tech_aliases_file"),
+			CVEMinYear:      clampInt(v.GetInt("intel.cve_min_year"), 0, 9999),
 		},
 		Data: DataConfig{
 			StaleAfterHours: v.GetInt("data.stale_after_hours"),

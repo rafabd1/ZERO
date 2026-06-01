@@ -130,3 +130,17 @@ func TestCPEPresenceBlocksUnmatchedKeywordFallback(t *testing.T) {
 		t.Fatalf("expected unmatched vulnerable CPE to block keyword fallback, got %d with evidence %#v", confidence, evidence)
 	}
 }
+
+func TestCVEYear(t *testing.T) {
+	tests := map[string]int{
+		"CVE-2018-17199": 2018,
+		"cve-2025-20362": 2025,
+		"CVE-FAKE-1":     0,
+		"":               0,
+	}
+	for id, want := range tests {
+		if got := cveYear(id); got != want {
+			t.Fatalf("cveYear(%q) = %d; want %d", id, got, want)
+		}
+	}
+}

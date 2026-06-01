@@ -267,7 +267,7 @@ func parseNucleiLine(line string) (db.NucleiResult, error) {
 	if len(cves) == 0 {
 		cves = stringSliceFromAny(parsed.Info.Metadata["cve"])
 	}
-	evidenceHash := hashParts(parsed.TemplateID, parsed.MatchedAt, parsed.Type, line)
+	evidenceHash := hashParts(parsed.TemplateID, parsed.MatchedAt, parsed.Type, parsed.ExtractorName, strings.Join(cves, ","))
 	return db.NucleiResult{
 		TemplateID:    parsed.TemplateID,
 		TemplatePath:  parsed.TemplatePath,

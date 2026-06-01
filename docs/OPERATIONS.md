@@ -20,6 +20,7 @@ To run the first real scan, Zero needs:
   - `ZERO_SUBFINDER_SECURITYTRAILS_API_KEY`
 - Optional NVD API key:
   - `ZERO_NVD_API_KEY` reduces NVD rate-limit delays during passive CVE matching.
+  - `ZERO_CVE_MIN_YEAR` controls the minimum CVE year allowed into passive matching, CVE-derived Nuclei template selection, and passive reports. Default: `2018`.
 - External tools installed or available in Docker:
   - `subfinder`
   - `dnsx`
@@ -28,7 +29,10 @@ To run the first real scan, Zero needs:
   - `nuclei`
 - `ZERO_TOOL_TIMEOUT`: maximum wall-clock time for each external tool invocation. Default: `20m`.
 - Discord integration:
-  - `ZERO_DISCORD_WEBHOOK_URL`
+  - `ZERO_DISCORD_WEBHOOK_URL` legacy fallback and passive-only report channel.
+  - `ZERO_DISCORD_PASSIVE_WEBHOOK_URL` optional explicit passive-only report channel.
+  - `ZERO_DISCORD_VALIDATED_WEBHOOK_URL` Nuclei-confirmed report channel.
+  - `ZERO_DISCORD_ALERT_WEBHOOK_URL` operational alert channel.
 - API protection:
   - `ZERO_API_TOKEN`
 
@@ -36,9 +40,9 @@ To run the first real scan, Zero needs:
 
 Default per-target scan interval: 72 hours.
 
-Default target parallelism: 8 programs at the same time.
+Default target parallelism: 12 programs at the same time.
 
-Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_programs.max_parallel_tasks`.
+Program-level scan cadence lives in `zero_programs.scan_interval_hours`. `zero_programs.max_parallel_tasks` is reserved for a future per-program internal task limiter; the current scheduler processes whole programs concurrently through the global `ZERO_TARGET_PARALLELISM` setting.
 
 The main continuous execution path is `zero worker`, which schedules `zero run due` using `ZERO_SCHEDULE_FULL`. It first refreshes HackerOne scope, then selects active programs whose `last_scan_finished_at` is older than their configured interval, and processes up to `ZERO_TARGET_PARALLELISM` programs concurrently.
 
@@ -56,13 +60,15 @@ enum subfinder --program-id ... -> probe dnsx --program-id ... -> probe httpx --
 
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
 
-Each external tool call is bounded by `ZERO_TOOL_TIMEOUT` and defaults to 20 minutes. When a tool times out inside `zero run once`, `zero run due`, `zero run manual`, or `zero tools nuclei-update`, Zero stops that step, marks the current scan run as failed when applicable, and emits a Discord operational alert if `ZERO_DISCORD_WEBHOOK_URL` is configured. The alert includes the alert type, program, step command, configured timeout, and error text. The Docker entrypoint also bounds the optional startup Nuclei template update with the same timeout so the container can continue booting if template refresh stalls.
+Each external tool call is bounded by `ZERO_TOOL_TIMEOUT` and defaults to 20 minutes. When a tool times out inside `zero run once`, `zero run due`, `zero run manual`, or `zero tools nuclei-update`, Zero stops that step, marks the current scan run as failed when applicable, and emits a Discord operational alert if `ZERO_DISCORD_ALERT_WEBHOOK_URL` or the legacy `ZERO_DISCORD_WEBHOOK_URL` fallback is configured. The alert includes the alert type, program, step command, configured timeout, and error text. The Docker entrypoint also bounds the optional startup Nuclei template update with the same timeout so the container can continue booting if template refresh stalls.
 
 `ZERO_HTTPX_TIMEOUT` controls the per-request timeout passed to httpx with `-timeout`; it defaults to 4 seconds. `ZERO_HTTPX_THREADS` controls httpx internal worker threads with `-threads`; it defaults to 20. These are separate from `ZERO_TOOL_TIMEOUT`, which bounds the whole httpx process for a program.
 
 `ZERO_HTTPX_TLS_PROBE` defaults to `false`. Keep it disabled for broad continuous scans: on real targets such as `valve`, httpx v1.9.0 can emit results quickly but keep the process alive until the global tool timeout when `-tls-probe` is enabled. Use `zero probe httpx --tls-probe` or `zero run manual --httpx-tls-probe` only for targeted certificate/TLS inspection.
 
 Nuclei templates are updated on container startup when `ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP=true` and by the worker schedule `ZERO_SCHEDULE_NUCLEI_TEMPLATES` (default: `0 5 3 * * *`). They are not updated before every program scan because template updates are global, network-dependent, and can add avoidable latency/noise to target processing.
+
+Passive CVE matching defaults to `ZERO_CVE_MIN_YEAR=2018`. CVEs older than this threshold are ignored during NVD matching, excluded from CVE-derived Nuclei template selection, and blocked from passive/unconfirmed report generation even if older records already exist in the database.
 
 ## Data Lifecycle
 
@@ -116,7 +122,7 @@ Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for th
 
 Report notifications label validation status explicitly. Nuclei-backed findings are announced as confirmed by Nuclei; passive CVE candidates without a linked Nuclei result are announced as potential/passive and require manual validation.
 
-If `ZERO_DISCORD_WEBHOOK_URL` is empty, the command is a safe no-op. Use `--dry-run` to count pending reports without creating notification rows or sending webhooks.
+If both report webhooks are empty, the command is a safe no-op. Use `--dry-run` to count pending reports without creating notification rows or sending webhooks. Reports with at least one linked Nuclei result are sent to `ZERO_DISCORD_VALIDATED_WEBHOOK_URL`; passive-only reports are sent to `ZERO_DISCORD_PASSIVE_WEBHOOK_URL`, falling back to `ZERO_DISCORD_WEBHOOK_URL`.
 
 ## Triage Export
 

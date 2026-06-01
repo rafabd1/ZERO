@@ -23,12 +23,14 @@ GET /v1/technologies
 GET /v1/technology-vulnerabilities
 GET /v1/nuclei-results
 GET /v1/findings
+GET /v1/stats
 GET /v1/scans/latest
 GET /v1/scan-requests
 POST /v1/scan-requests
 GET /v1/changes?since=...
 GET /v1/notifications/discord
 GET /v1/programs/{program_id}/latest-scan
+GET /v1/programs/{program_id}/stats
 GET /v1/programs/{program_id}/changes?since=...
 GET /v1/programs/{program_id}/assets
 GET /v1/programs/{program_id}/services
@@ -51,7 +53,7 @@ Hot list endpoints accept pagination/filter query parameters:
 - `q`: host/URL search on services.
 
 Current implementation includes `GET /healthz`, `GET /v1/programs`, `GET /v1/assets`, `GET /v1/services`, `GET /v1/technologies`, `GET /v1/technology-vulnerabilities`, `GET /v1/nuclei-results`, and `GET /v1/findings`.
-Current implementation also includes `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/scan-requests`, `POST /v1/scan-requests`, `GET /v1/changes?since=...`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, `GET /v1/programs/{program_id}/changes?since=...`, `GET /v1/programs/{program_id}/assets`, `GET /v1/programs/{program_id}/services`, `GET /v1/programs/{program_id}/technologies`, `GET /v1/programs/{program_id}/technology-vulnerabilities`, `GET /v1/programs/{program_id}/nuclei-results`, and `GET /v1/programs/{program_id}/findings?status=new`.
+Current implementation also includes `GET /v1/stats`, `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/scan-requests`, `POST /v1/scan-requests`, `GET /v1/changes?since=...`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, `GET /v1/programs/{program_id}/stats`, `GET /v1/programs/{program_id}/changes?since=...`, `GET /v1/programs/{program_id}/assets`, `GET /v1/programs/{program_id}/services`, `GET /v1/programs/{program_id}/technologies`, `GET /v1/programs/{program_id}/technology-vulnerabilities`, `GET /v1/programs/{program_id}/nuclei-results`, and `GET /v1/programs/{program_id}/findings?status=new`.
 
 The `since` query parameter accepts a Postgres-compatible timestamp and returns events with `occurred_at` greater than that value.
 
@@ -63,6 +65,8 @@ Examples:
 GET /v1/findings?status=new&severity=critical&min_confidence=90&limit=25
 GET /v1/nuclei-results?template_id=CVE-2025-20362&limit=50
 GET /v1/services?q=vpn&since=2026-06-01T00:00:00Z
+GET /v1/stats
+GET /v1/programs/00000000-0000-0000-0000-000000000000/stats
 ```
 
 Create a queued custom scan request:
@@ -90,6 +94,6 @@ Content-Type: application/json
 
 1. Scan finishes.
 2. Zero reads new `zero_candidate_findings` and `zero_change_events`.
-3. Report generator creates a deduped summary from new Nuclei-backed findings.
-4. Discord worker sends only unseen reports.
+3. Report generator creates a deduped summary from new Nuclei-backed findings and eligible passive CVE candidates.
+4. Discord worker sends only unseen reports, routing confirmed reports to the validated webhook and passive-only reports to the passive webhook.
 5. `zero_discord_notifications` stores delivery status and dedupe key.

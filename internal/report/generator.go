@@ -13,10 +13,11 @@ import (
 )
 
 type Generator struct {
-	repo      *db.Repository
-	scanRunID string
-	programID string
-	limit     int
+	repo       *db.Repository
+	scanRunID  string
+	programID  string
+	limit      int
+	cveMinYear int
 }
 
 type Result struct {
@@ -27,7 +28,7 @@ type Result struct {
 }
 
 func NewGenerator(repo *db.Repository) *Generator {
-	return &Generator{repo: repo, limit: 500}
+	return &Generator{repo: repo, limit: 500, cveMinYear: 2018}
 }
 
 func (g *Generator) WithLimit(limit int) *Generator {
@@ -47,8 +48,15 @@ func (g *Generator) WithScanRunID(scanRunID string) *Generator {
 	return g
 }
 
+func (g *Generator) WithCVEMinYear(year int) *Generator {
+	if year >= 0 {
+		g.cveMinYear = year
+	}
+	return g
+}
+
 func (g *Generator) Run(ctx context.Context) (Result, error) {
-	passiveInserted, err := g.repo.UpsertUnconfirmedPassiveFindings(ctx, g.programID, g.scanRunID, g.limit)
+	passiveInserted, err := g.repo.UpsertUnconfirmedPassiveFindings(ctx, g.programID, g.scanRunID, g.limit, g.cveMinYear)
 	if err != nil {
 		return Result{}, err
 	}
@@ -172,7 +180,12 @@ func writeEvidence(b *strings.Builder, raw json.RawMessage) {
 		if source != "" {
 			fmt.Fprintf(b, " from `%s`", source)
 		}
-		b.WriteString("; no confirming Nuclei result is linked yet.\n")
+		reason := nucleiValidationReason(evidence)
+		if reason != "" {
+			fmt.Fprintf(b, "; %s.\n", reason)
+		} else {
+			b.WriteString("; no confirming Nuclei result is linked yet.\n")
+		}
 	}
 	if templateID, ok := evidence["template_id"].(string); ok && templateID != "" {
 		fmt.Fprintf(b, "- Nuclei template: `%s`\n", templateID)
@@ -195,6 +208,30 @@ func writeEvidence(b *strings.Builder, raw json.RawMessage) {
 	}
 	if summary, ok := evidence["summary"].(string); ok && summary != "" {
 		fmt.Fprintf(b, "- CVE summary: %s\n", summary)
+	}
+}
+
+func nucleiValidationReason(evidence map[string]any) string {
+	reason, _ := evidence["nuclei_validation_reason"].(string)
+	if reason == "" {
+		reason, _ = evidence["nuclei_validation"].(string)
+	}
+	switch reason {
+	case "no_matching_local_nuclei_templates":
+		return "Nuclei was not able to validate because no matching local template was available"
+	case "no_passive_cve_template_candidates":
+		return "Nuclei was not run for this CVE because no local template candidate was selected"
+	case "nuclei_not_run":
+		return "Nuclei has not run for this program since the passive match was observed"
+	case "nuclei_error":
+		if msg, _ := evidence["nuclei_error"].(string); msg != "" {
+			return "Nuclei validation errored: " + msg
+		}
+		return "Nuclei validation errored"
+	case "no_confirming_result":
+		return "Nuclei ran but did not return a confirming result"
+	default:
+		return ""
 	}
 }
 

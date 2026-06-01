@@ -54,7 +54,7 @@ Entities produced by a task also carry `last_scan_run_id` or `scan_run_id` where
 
 ## Execution Model
 
-Zero scans multiple programs concurrently through `zero run due`, starting with `ZERO_TARGET_PARALLELISM=4`. A program is due when it is active and its `last_scan_finished_at` is missing or older than `scan_interval_hours`. Inside each program, external tools use moderate defaults and batching:
+Zero scans multiple programs concurrently through `zero run due`, starting with `ZERO_TARGET_PARALLELISM=12`. A program is due when it is active and its `last_scan_finished_at` is missing or older than `scan_interval_hours`. Inside each program, external tools use moderate defaults and batching:
 
 - Scope sync writes in batches on first import and uses unique constraints for deduplication.
 - Scope sync defaults to bounty programs only. Assets without bounty eligibility are stored as out-of-scope even when the source lists them as in-scope.
@@ -67,7 +67,7 @@ Zero scans multiple programs concurrently through `zero run due`, starting with 
 - `webanalyze` runs after `httpx` against alive services and stores broader Wappalyzer-style technology observations, including versions when detectable. Operators can provide a custom technologies file per manual run without changing global worker configuration.
 - `analyze cves` queries NVD for versioned technology observations, prefers CPE/range evidence where available, falls back to keyword evidence, and stores service-linked CVE matches as passive intelligence.
 - `nuclei` runs after probing/enrichment and only against alive URLs; by default it derives `-id CVE-...` template IDs from medium/high/critical passive matches. Operators can override this with explicit template IDs or the broader tag policy.
-- `report generate` creates confirmed Nuclei-backed reports and also promotes medium/high/critical passive CVE matches to potential/unconfirmed report entries when no Nuclei result confirms that CVE on the same service.
+- `report generate` creates confirmed Nuclei-backed reports and also promotes medium/high/critical passive CVE matches to potential/unconfirmed report entries when no Nuclei result confirms that CVE on the same service. Passive reports include the Nuclei validation reason, such as no local template or no confirming result.
 - Newly inserted entities write stable `zero_change_events` rows so operators and API clients can inspect what changed without replaying old observations.
 - Report generation emits only new, unreported findings and attaches a stable `report_id` for deduplication.
 - Discord notification delivery reads new reports, stores delivery state in `zero_discord_notifications`, and never sends a report twice after a successful send.
