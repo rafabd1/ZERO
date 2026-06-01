@@ -25,6 +25,7 @@ To run the first real scan, Zero needs:
   - `httpx`
   - `webanalyze`
   - `nuclei`
+- `ZERO_TOOL_TIMEOUT`: maximum wall-clock time for each external tool invocation. Default: `20m`.
 - Discord integration:
   - `ZERO_DISCORD_WEBHOOK_URL`
 - API protection:
@@ -53,6 +54,8 @@ enum subfinder --program-id ... -> probe dnsx --program-id ... -> probe httpx --
 ```
 
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
+
+Each external tool call is bounded by `ZERO_TOOL_TIMEOUT` and defaults to 20 minutes. When a tool times out inside `zero run once`, `zero run due`, `zero run manual`, or `zero tools nuclei-update`, Zero stops that step, marks the current scan run as failed when applicable, and emits a Discord operational alert if `ZERO_DISCORD_WEBHOOK_URL` is configured. The alert includes the alert type, program, step command, configured timeout, and error text. The Docker entrypoint also bounds the optional startup Nuclei template update with the same timeout so the container can continue booting if template refresh stalls.
 
 ## Data Lifecycle
 

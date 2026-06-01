@@ -18,11 +18,37 @@ func Require(name string) error {
 	return nil
 }
 
+type TimeoutError struct {
+	Bin     string
+	Args    []string
+	Timeout time.Duration
+}
+
+func (e TimeoutError) Error() string {
+	return fmt.Sprintf("%s timed out after %s", e.Bin, e.Timeout)
+}
+
+func IsTimeout(err error) bool {
+	var timeoutErr TimeoutError
+	return errors.As(err, &timeoutErr)
+}
+
 func RunLines(ctx context.Context, bin string, args []string, stdin io.Reader, onLine func(string) error) error {
+	return RunLinesWithTimeout(ctx, 0, bin, args, stdin, onLine)
+}
+
+func RunLinesWithTimeout(ctx context.Context, timeout time.Duration, bin string, args []string, stdin io.Reader, onLine func(string) error) error {
 	if err := Require(bin); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
+	runCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, bin, args...)
 	if stdin != nil {
 		cmd.Stdin = stdin
 	}
@@ -63,8 +89,11 @@ func RunLines(ctx context.Context, bin string, args []string, stdin io.Reader, o
 		if msg == "" {
 			msg = waitErr.Error()
 		}
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return ctx.Err()
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return TimeoutError{Bin: bin, Args: append([]string(nil), args...), Timeout: timeout}
+		}
+		if errors.Is(runCtx.Err(), context.Canceled) {
+			return runCtx.Err()
 		}
 		return fmt.Errorf("%s failed: %s", bin, msg)
 	}

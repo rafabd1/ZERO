@@ -50,6 +50,7 @@ func newEnrichCommand() *cobra.Command {
 				WithWorkers(workerCount).
 				WithCrawl(crawlDepth).
 				WithLimit(limit).
+				WithTimeout(cfg.Tools.ToolTimeout).
 				Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)

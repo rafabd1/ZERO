@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/rafabd1/ZERO/internal/tools"
@@ -32,6 +33,7 @@ type NucleiRunner struct {
 	scanRunID   string
 	programID   string
 	limit       int
+	toolTimeout time.Duration
 }
 
 type NucleiResult struct {
@@ -109,6 +111,13 @@ func (r *NucleiRunner) WithLimit(limit int) *NucleiRunner {
 	return r
 }
 
+func (r *NucleiRunner) WithToolTimeout(timeout time.Duration) *NucleiRunner {
+	if timeout > 0 {
+		r.toolTimeout = timeout
+	}
+	return r
+}
+
 func (r *NucleiRunner) WithProgramID(programID string) *NucleiRunner {
 	r.programID = strings.TrimSpace(programID)
 	return r
@@ -162,7 +171,7 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		args = append(args, "-tags", r.tags)
 	}
 
-	err = tools.RunLines(ctx, r.bin, args, bufio.NewReader(&input), func(line string) error {
+	err = tools.RunLinesWithTimeout(ctx, r.toolTimeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		parsed, err := parseNucleiLine(line)
 		if err != nil {
 			return err

@@ -66,6 +66,7 @@ type ToolConfig struct {
 	NucleiRate              int
 	NucleiC                 int
 	NucleiBulkSize          int
+	ToolTimeout             time.Duration
 }
 
 type APIConfig struct {
@@ -134,6 +135,7 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
+	v.SetDefault("tools.timeout", "20m")
 	v.SetDefault("target_parallelism", 4)
 	v.SetDefault("schedule.full", "0 15 3 */3 * *")
 	v.SetDefault("schedule.scope_sync", "0 15 3 * * *")
@@ -181,6 +183,7 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
 	_ = v.BindEnv("tools.nuclei_bulk_size", "ZERO_NUCLEI_BULK_SIZE")
+	_ = v.BindEnv("tools.timeout", "ZERO_TOOL_TIMEOUT")
 	_ = v.BindEnv("target_parallelism", "ZERO_TARGET_PARALLELISM")
 	_ = v.BindEnv("schedule.full", "ZERO_SCHEDULE_FULL")
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
@@ -234,6 +237,7 @@ func Load() (Config, error) {
 			NucleiRate:              v.GetInt("tools.nuclei_rate"),
 			NucleiC:                 v.GetInt("tools.nuclei_c"),
 			NucleiBulkSize:          v.GetInt("tools.nuclei_bulk_size"),
+			ToolTimeout:             v.GetDuration("tools.timeout"),
 		},
 		Schedule: ScheduleConfig{
 			Full:      v.GetString("schedule.full"),

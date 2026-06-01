@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/rafabd1/ZERO/internal/sanitize"
@@ -19,6 +20,7 @@ type SubfinderRunner struct {
 	scanRunID      string
 	programID      string
 	limit          int
+	timeout        time.Duration
 }
 
 type SubfinderResult struct {
@@ -51,6 +53,13 @@ func (r *SubfinderRunner) WithRateLimits(rateLimits string) *SubfinderRunner {
 
 func (r *SubfinderRunner) WithLimit(limit int) *SubfinderRunner {
 	r.limit = limit
+	return r
+}
+
+func (r *SubfinderRunner) WithTimeout(timeout time.Duration) *SubfinderRunner {
+	if timeout > 0 {
+		r.timeout = timeout
+	}
 	return r
 }
 
@@ -108,7 +117,7 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 			args = append(args, "-rls", r.rateLimits)
 		}
 		collected := []db.Subdomain{}
-		err := tools.RunLines(ctx, r.bin, args, nil, func(line string) error {
+		err := tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, nil, func(line string) error {
 			fqdn, ok := sanitize.CanonicalDomain(strings.TrimSpace(line))
 			if !ok || !sanitize.MatchesWildcard(fqdn, root.RootDomain) || excluded(exclusions, root.ProgramID, fqdn) {
 				return nil

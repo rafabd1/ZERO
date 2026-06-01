@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/rafabd1/ZERO/internal/sanitize"
@@ -22,6 +23,7 @@ type DNSXRunner struct {
 	scanRunID string
 	programID string
 	limit     int
+	timeout   time.Duration
 }
 
 type DNSXResult struct {
@@ -58,6 +60,13 @@ func (r *DNSXRunner) WithRate(rate int) *DNSXRunner {
 
 func (r *DNSXRunner) WithLimit(limit int) *DNSXRunner {
 	r.limit = limit
+	return r
+}
+
+func (r *DNSXRunner) WithTimeout(timeout time.Duration) *DNSXRunner {
+	if timeout > 0 {
+		r.timeout = timeout
+	}
 	return r
 }
 
@@ -106,7 +115,7 @@ func (r *DNSXRunner) Run(ctx context.Context) (DNSXResult, error) {
 	if r.resolvers != "" {
 		args = append(args, "-r", r.resolvers)
 	}
-	err = tools.RunLines(ctx, r.bin, args, bufio.NewReader(&input), func(line string) error {
+	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		var parsed dnsxLine
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			return fmt.Errorf("parse dnsx json: %w", err)

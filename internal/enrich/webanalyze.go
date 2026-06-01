@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/rafabd1/ZERO/internal/tools"
@@ -22,6 +23,7 @@ type WebanalyzeRunner struct {
 	scanRunID string
 	programID string
 	limit     int
+	timeout   time.Duration
 }
 
 type WebanalyzeResult struct {
@@ -73,6 +75,13 @@ func (r *WebanalyzeRunner) WithLimit(limit int) *WebanalyzeRunner {
 	return r
 }
 
+func (r *WebanalyzeRunner) WithTimeout(timeout time.Duration) *WebanalyzeRunner {
+	if timeout > 0 {
+		r.timeout = timeout
+	}
+	return r
+}
+
 func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	targets, err := r.repo.ListWebTechTargets(ctx, r.programID, r.limit)
 	if err != nil {
@@ -117,7 +126,7 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 		args = append(args, "-apps", r.apps)
 	}
 
-	err = tools.RunLines(ctx, r.bin, args, nil, func(line string) error {
+	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, nil, func(line string) error {
 		parsed, err := parseWebanalyzeLine(line)
 		if err != nil {
 			result.SkippedOutput++

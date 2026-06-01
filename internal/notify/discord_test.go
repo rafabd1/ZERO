@@ -34,3 +34,32 @@ func TestBuildDiscordPayload(t *testing.T) {
 		t.Fatalf("description length = %d; want <= 3900", len(embed.Description))
 	}
 }
+
+func TestBuildOperationalAlertPayload(t *testing.T) {
+	payload := buildOperationalAlertPayload(OperationalAlert{
+		Kind:          "tool_timeout",
+		Title:         "Zero tool timeout",
+		ProgramID:     "program-id",
+		ProgramHandle: "example",
+		Step:          []string{"enum", "subfinder", "--program-id", "program-id"},
+		Error:         "subfinder timed out after 20m0s",
+		Timeout:       "20m0s",
+	})
+
+	if !strings.Contains(payload.Content, "tool_timeout") {
+		t.Fatalf("content = %q; want alert kind", payload.Content)
+	}
+	if len(payload.Embeds) != 1 {
+		t.Fatalf("embeds = %d; want 1", len(payload.Embeds))
+	}
+	embed := payload.Embeds[0]
+	if embed.Color != 0xE67E22 {
+		t.Fatalf("color = %#x; want operational alert color", embed.Color)
+	}
+	if len(embed.Fields) < 5 {
+		t.Fatalf("fields = %d; want kind, program, step, timeout, error", len(embed.Fields))
+	}
+	if !strings.Contains(embed.Fields[2].Value, "enum subfinder") {
+		t.Fatalf("step field = %q; want command step", embed.Fields[2].Value)
+	}
+}

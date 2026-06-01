@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/rafabd1/ZERO/internal/config"
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/spf13/cobra"
 )
@@ -43,6 +44,8 @@ func newRunCommand() *cobra.Command {
 }
 
 func runPipeline(parent *cobra.Command) error {
+	ctx := commandContext()
+	cfg := loadConfig()
 	steps := [][]string{
 		{"sync", "h1"},
 		{"enum", "subfinder"},
@@ -57,6 +60,7 @@ func runPipeline(parent *cobra.Command) error {
 	for _, step := range steps {
 		fmt.Fprintf(parent.OutOrStdout(), "zero pipeline step: %v\n", step)
 		if err := runChildE(parent, step...); err != nil {
+			alertOnTimeout(ctx, parent, cfg, "", "", step, err)
 			return err
 		}
 	}
@@ -76,6 +80,7 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	if !dryRun && !skipSync {
 		fmt.Fprintln(parent.OutOrStdout(), "zero due step: [sync h1]")
 		if err := runChildE(parent, "sync", "h1"); err != nil {
+			alertOnTimeout(ctx, parent, cfg, "", "", []string{"sync", "h1"}, err)
 			return err
 		}
 	}
@@ -115,7 +120,7 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 		go func() {
 			defer wg.Done()
 			for program := range jobs {
-				if err := runProgramPipeline(ctx, parent, repo, program, cfg.Data.StaleAfterHours); err != nil {
+				if err := runProgramPipeline(ctx, parent, repo, program, cfg); err != nil {
 					mu.Lock()
 					if firstErr == nil {
 						firstErr = err
@@ -133,7 +138,7 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	return firstErr
 }
 
-func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program, staleAfterHours int) error {
+func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program, cfg config.Config) error {
 	fmt.Fprintf(parent.OutOrStdout(), "zero program pipeline starting: %s/%s %s\n", program.Platform, program.Handle, program.ID)
 	if err := repo.MarkProgramScanStarted(ctx, program.ID); err != nil {
 		return err
@@ -155,13 +160,15 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 	for _, step := range steps {
 		fmt.Fprintf(parent.OutOrStdout(), "zero program step %s/%s: %v\n", program.Platform, program.Handle, step)
 		if err := runChildE(parent, step...); err != nil {
+			alertOnTimeout(ctx, parent, cfg, program.ID, program.Handle, step, err)
 			return finishScanRun(ctx, repo, scanID, err, 0, 0, map[string]any{
 				"program_id": program.ID,
 				"handle":     program.Handle,
+				"step":       step,
 			})
 		}
 	}
-	stale, err := repo.MarkStaleEntities(ctx, program.ID, staleAfterHours)
+	stale, err := repo.MarkStaleEntities(ctx, program.ID, cfg.Data.StaleAfterHours)
 	if err != nil {
 		return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 	}
@@ -172,7 +179,7 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 		"program_id":          program.ID,
 		"handle":              program.Handle,
 		"steps":               len(steps),
-		"stale_after_hours":   staleAfterHours,
+		"stale_after_hours":   cfg.Data.StaleAfterHours,
 		"stale_subdomains":    stale.Subdomains,
 		"stale_http_services": stale.HTTPServices,
 		"stale_technologies":  stale.Technologies,

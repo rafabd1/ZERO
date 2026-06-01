@@ -122,9 +122,13 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 }
 
 func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
+	ctx := commandContext()
+	cfg := loadConfig()
+
 	if !opts.SkipSync {
 		fmt.Fprintln(parent.OutOrStdout(), "zero manual step: [sync h1]")
 		if err := runChildE(parent, "sync", "h1"); err != nil {
+			alertOnTimeout(ctx, parent, cfg, opts.ProgramID, "", []string{"sync", "h1"}, err)
 			return err
 		}
 	}
@@ -213,6 +217,7 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 	for _, step := range steps {
 		fmt.Fprintf(parent.OutOrStdout(), "zero manual step: %v\n", step)
 		if err := runChildE(parent, step...); err != nil {
+			alertOnTimeout(ctx, parent, cfg, opts.ProgramID, "", step, err)
 			return err
 		}
 	}

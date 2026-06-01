@@ -30,6 +30,8 @@ shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s
 
 `httpx` receives sanitized probe targets after scope filtering: discovered wildcard subdomains plus exact URL/domain hosts from the scope table.
 
+All external tool invocations are bounded by `ZERO_TOOL_TIMEOUT` so a stuck provider, resolver, target, or template cannot pin the worker indefinitely. The Docker/default value is 20 minutes per invocation.
+
 Recommended default:
 
 ```bash
@@ -47,9 +49,9 @@ The exact flags can evolve with testing, but the principle should remain: CVE-ta
 
 ## CVE Validation
 
-Zero does not emit passive CVE findings from `httpx` fingerprints. Fingerprints are stored as target intelligence for operator context and later Proteus/Codex triage.
+Zero stores passive CVE candidates from versioned technology observations as unconfirmed findings. These are useful prioritization signals, not proof.
 
-Reportable CVE candidates come from Nuclei results. Confidence is based on Nuclei evidence quality and severity, not on a passive keyword match against CVE databases.
+Validated CVE findings come from Nuclei results. Confidence is highest when a Nuclei template produces vulnerability-specific evidence. If Nuclei does not confirm a passive CVE candidate, the candidate can still appear in reports as potential/unconfirmed context.
 
 ## Role Split
 
@@ -57,4 +59,4 @@ Reportable CVE candidates come from Nuclei results. Confidence is based on Nucle
 
 `nuclei` is validation. It answers "does a known probe produce vulnerability-specific evidence?".
 
-Reports are generated from new Nuclei-backed findings only. The `httpx` observations remain useful because they explain what the target looked like when the validation happened.
+Reports prioritize new Nuclei-backed findings and can include passive CVE candidates as lower-confidence potential items. The `httpx` and Webanalyze observations remain useful because they explain what the target looked like when the validation happened.

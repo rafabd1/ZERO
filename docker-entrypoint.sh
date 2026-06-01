@@ -18,7 +18,7 @@ mkdir -p "$nuclei_template_dir"
 chown -R zero:zero /home/zero/.config "$nuclei_template_dir" 2>/dev/null || true
 
 if [ "${ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP:-true}" = "true" ] && command -v nuclei >/dev/null 2>&1; then
-  su-exec zero nuclei -update-templates -update-template-dir "$nuclei_template_dir" -silent >/dev/null 2>&1 || true
+  timeout "${ZERO_TOOL_TIMEOUT:-20m}" su-exec zero nuclei -update-templates -update-template-dir "$nuclei_template_dir" -silent >/dev/null 2>&1 || true
 fi
 
 exec su-exec zero zero "$@"

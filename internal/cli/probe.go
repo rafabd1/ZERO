@@ -34,7 +34,8 @@ func newProbeCommand() *cobra.Command {
 				WithProgramID(dnsxProgramID).
 				WithResolvers(cfg.Tools.DNSXResolvers).
 				WithRate(cfg.Tools.DNSXRate).
-				WithLimit(dnsxLimit)
+				WithLimit(dnsxLimit).
+				WithTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
@@ -65,7 +66,11 @@ func newProbeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).WithScanRunID(scanID).WithProgramID(programID).WithLimit(httpxLimit)
+			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).
+				WithScanRunID(scanID).
+				WithProgramID(programID).
+				WithLimit(httpxLimit).
+				WithTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)

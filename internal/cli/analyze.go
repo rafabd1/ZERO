@@ -132,7 +132,8 @@ func newAnalyzeCommand() *cobra.Command {
 				WithRuntime(retries, timeout).
 				WithScanRunID(scanID).
 				WithProgramID(nucleiProgramID).
-				WithLimit(nucleiLimit)
+				WithLimit(nucleiLimit).
+				WithToolTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)

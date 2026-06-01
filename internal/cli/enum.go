@@ -33,7 +33,8 @@ func newEnumCommand() *cobra.Command {
 				WithRateLimits(cfg.Tools.SubfinderRateLimits).
 				WithScanRunID(scanID).
 				WithProgramID(programID).
-				WithLimit(subfinderLimit)
+				WithLimit(subfinderLimit).
+				WithTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)

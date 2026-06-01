@@ -29,6 +29,16 @@ type DiscordResult struct {
 	Disabled bool
 }
 
+type OperationalAlert struct {
+	Kind          string
+	Title         string
+	ProgramID     string
+	ProgramHandle string
+	Step          []string
+	Error         string
+	Timeout       string
+}
+
 func NewDiscordNotifier(repo *db.Repository, webhookURL string) *DiscordNotifier {
 	return &DiscordNotifier{
 		repo:       repo,
@@ -96,6 +106,33 @@ func (n *DiscordNotifier) Run(ctx context.Context) (DiscordResult, error) {
 	return result, nil
 }
 
+func SendOperationalAlert(ctx context.Context, webhookURL string, alert OperationalAlert) error {
+	webhookURL = strings.TrimSpace(webhookURL)
+	if webhookURL == "" {
+		return nil
+	}
+	payload := buildOperationalAlertPayload(alert)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("discord webhook returned HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (n *DiscordNotifier) send(ctx context.Context, report db.DiscordReport) error {
 	payload := buildDiscordPayload(report)
 	body, err := json.Marshal(payload)
@@ -116,6 +153,38 @@ func (n *DiscordNotifier) send(ctx context.Context, report db.DiscordReport) err
 		return fmt.Errorf("discord webhook returned HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func buildOperationalAlertPayload(alert OperationalAlert) discordPayload {
+	kind := firstNonEmpty(alert.Kind, "operational")
+	title := firstNonEmpty(alert.Title, "Zero operational alert")
+	step := strings.Join(alert.Step, " ")
+	if step == "" {
+		step = "unknown"
+	}
+	program := firstNonEmpty(alert.ProgramHandle, alert.ProgramID, "global")
+	content := fmt.Sprintf("Zero alert: `%s` em `%s`.", kind, program)
+	fields := []discordField{
+		{Name: "Kind", Value: truncate(kind, 1000), Inline: true},
+		{Name: "Program", Value: truncate(program, 1000), Inline: true},
+		{Name: "Step", Value: truncate("`"+step+"`", 1000), Inline: false},
+	}
+	if alert.Timeout != "" {
+		fields = append(fields, discordField{Name: "Timeout", Value: truncate(alert.Timeout, 1000), Inline: true})
+	}
+	if alert.Error != "" {
+		fields = append(fields, discordField{Name: "Error", Value: truncate(alert.Error, 1000), Inline: false})
+	}
+	return discordPayload{
+		Content: truncate(content, 1900),
+		Embeds: []discordEmbed{{
+			Title:       truncate(title, 250),
+			Description: "Operational alert emitted by Zero. Inspect scan_runs and container logs before retrying broad execution.",
+			Color:       0xE67E22,
+			Fields:      fields,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}},
+	}
 }
 
 type discordPayload struct {

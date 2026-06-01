@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/rafabd1/ZERO/internal/sanitize"
@@ -20,6 +21,7 @@ type HTTPXRunner struct {
 	scanRunID string
 	programID string
 	limit     int
+	timeout   time.Duration
 }
 
 type HTTPXResult struct {
@@ -50,6 +52,13 @@ func NewHTTPXRunner(repo *db.Repository, bin string) *HTTPXRunner {
 
 func (r *HTTPXRunner) WithLimit(limit int) *HTTPXRunner {
 	r.limit = limit
+	return r
+}
+
+func (r *HTTPXRunner) WithTimeout(timeout time.Duration) *HTTPXRunner {
+	if timeout > 0 {
+		r.timeout = timeout
+	}
 	return r
 }
 
@@ -98,7 +107,7 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		"-favicon",
 		"-tls-probe",
 	}
-	err = tools.RunLines(ctx, r.bin, args, bufio.NewReader(&input), func(line string) error {
+	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		var parsed httpxLine
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			return fmt.Errorf("parse httpx json: %w", err)
