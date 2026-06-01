@@ -80,6 +80,18 @@ func CanonicalDomain(raw string) (string, bool) {
 	return ascii, true
 }
 
+func RegisteredDomain(raw string) (string, bool) {
+	host, ok := CanonicalDomain(raw)
+	if !ok {
+		return "", false
+	}
+	root, err := publicsuffix.EffectiveTLDPlusOne(host)
+	if err != nil {
+		return "", false
+	}
+	return root, true
+}
+
 func IsWithinRoot(domain, root string) bool {
 	d, ok := CanonicalDomain(domain)
 	if !ok {

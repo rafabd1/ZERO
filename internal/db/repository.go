@@ -221,46 +221,117 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 
 func (r *Repository) ListDomainRoots(ctx context.Context, programID string) ([]DomainRoot, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, program_id, target_raw, target_normalized
+		SELECT id, program_id, asset_type, target_raw, target_normalized
 		FROM zero_scope_assets
 		WHERE active = true
 		  AND in_scope = true
-		  AND asset_type = 'wildcard'
+		  AND asset_type IN ('domain', 'url', 'wildcard')
 		  AND ($1 = '' OR program_id::text = $1)
-		ORDER BY target_normalized
+		ORDER BY program_id, target_normalized
 	`, programID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var roots []DomainRoot
-	seen := map[string]bool{}
+	var assets []domainRootAsset
 	for rows.Next() {
-		var root DomainRoot
-		var raw, normalized string
-		if err := rows.Scan(&root.ScopeAssetID, &root.ProgramID, &raw, &normalized); err != nil {
+		var asset domainRootAsset
+		if err := rows.Scan(&asset.ScopeAssetID, &asset.ProgramID, &asset.AssetType, &asset.TargetRaw, &asset.TargetNormalized); err != nil {
 			return nil, err
 		}
-		domain, ok := sanitize.WildcardRootFromScopeTarget(raw)
-		if !ok {
-			domain, ok = sanitize.WildcardRootFromScopeTarget(normalized)
+		assets = append(assets, asset)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return buildDomainRootsFromAssets(assets), nil
+}
+
+type domainRootAsset struct {
+	ScopeAssetID     string
+	ProgramID        string
+	AssetType        string
+	TargetRaw        string
+	TargetNormalized string
+}
+
+func buildDomainRootsFromAssets(assets []domainRootAsset) []DomainRoot {
+	authorizedRoots := map[string]bool{}
+	type wildcardCandidate struct {
+		scopeAssetID string
+		programID    string
+		scopeRoot    string
+		queryRoot    string
+	}
+	candidates := []wildcardCandidate{}
+
+	for _, asset := range assets {
+		switch asset.AssetType {
+		case "wildcard":
+			scopeRoot, ok := wildcardRootFromAsset(asset)
+			if !ok {
+				continue
+			}
+			queryRoot, ok := sanitize.RegisteredDomain(scopeRoot)
+			if !ok {
+				continue
+			}
+			if scopeRoot == queryRoot {
+				authorizedRoots[rootAuthKey(asset.ProgramID, queryRoot)] = true
+			}
+			candidates = append(candidates, wildcardCandidate{
+				scopeAssetID: asset.ScopeAssetID,
+				programID:    asset.ProgramID,
+				scopeRoot:    scopeRoot,
+				queryRoot:    queryRoot,
+			})
+		case "domain", "url":
+			host, ok := sanitize.DomainFromScopeTarget(firstNonEmpty(asset.TargetRaw, asset.TargetNormalized))
+			if !ok {
+				continue
+			}
+			queryRoot, ok := sanitize.RegisteredDomain(host)
+			if ok && host == queryRoot {
+				authorizedRoots[rootAuthKey(asset.ProgramID, queryRoot)] = true
+			}
 		}
-		if !ok {
+	}
+
+	roots := []DomainRoot{}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if !authorizedRoots[rootAuthKey(candidate.programID, candidate.queryRoot)] {
 			continue
 		}
-		if _, ok := sanitize.WildcardRegex(domain); !ok {
+		if _, ok := sanitize.WildcardRegex(candidate.scopeRoot); !ok {
 			continue
 		}
-		root.RootDomain = domain
-		key := root.ProgramID + "\x00" + root.RootDomain
+		key := candidate.programID + "\x00" + candidate.scopeRoot + "\x00" + candidate.queryRoot
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		roots = append(roots, root)
+		roots = append(roots, DomainRoot{
+			ScopeAssetID: candidate.scopeAssetID,
+			ProgramID:    candidate.programID,
+			RootDomain:   candidate.scopeRoot,
+			QueryDomain:  candidate.queryRoot,
+		})
 	}
-	return roots, rows.Err()
+	return roots
+}
+
+func wildcardRootFromAsset(asset domainRootAsset) (string, bool) {
+	root, ok := sanitize.WildcardRootFromScopeTarget(asset.TargetRaw)
+	if !ok {
+		root, ok = sanitize.WildcardRootFromScopeTarget(asset.TargetNormalized)
+	}
+	return root, ok
+}
+
+func rootAuthKey(programID, root string) string {
+	return programID + "\x00" + root
 }
 
 func (r *Repository) UpsertSubdomain(ctx context.Context, sub Subdomain) (string, error) {
@@ -351,6 +422,72 @@ func (r *Repository) UpsertSubdomains(ctx context.Context, subs []Subdomain) (in
 		return 0, err
 	}
 	return len(subs), nil
+}
+
+func (r *Repository) ListInScopeSubdomainAssets(ctx context.Context, programID string) ([]Subdomain, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, program_id, asset_type, target_raw, target_normalized
+		FROM zero_scope_assets
+		WHERE active = true
+		  AND in_scope = true
+		  AND asset_type IN ('domain', 'url')
+		  AND ($1 = '' OR program_id::text = $1)
+		ORDER BY program_id, target_normalized
+	`, programID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	subs := []Subdomain{}
+	seen := map[string]bool{}
+	for rows.Next() {
+		var assetID, programID, assetType, raw, normalized string
+		if err := rows.Scan(&assetID, &programID, &assetType, &raw, &normalized); err != nil {
+			return nil, err
+		}
+		host, root, ok := scopedSubdomainFromTarget(firstNonEmpty(raw, normalized))
+		if !ok {
+			continue
+		}
+		key := programID + "\x00" + host
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		subs = append(subs, Subdomain{
+			ProgramID:    programID,
+			ScopeAssetID: assetID,
+			RootDomain:   root,
+			FQDN:         host,
+			Source:       "scope:" + assetType,
+		})
+	}
+	return subs, rows.Err()
+}
+
+func scopedSubdomainFromTarget(raw string) (string, string, bool) {
+	host, ok := scopedSubdomainHost(raw)
+	if !ok {
+		return "", "", false
+	}
+	root, ok := sanitize.RegisteredDomain(host)
+	if !ok {
+		return "", "", false
+	}
+	return host, root, true
+}
+
+func scopedSubdomainHost(raw string) (string, bool) {
+	host, ok := sanitize.DomainFromScopeTarget(raw)
+	if !ok {
+		return "", false
+	}
+	root, ok := sanitize.RegisteredDomain(host)
+	if !ok || host == root {
+		return "", false
+	}
+	return host, true
 }
 
 func (r *Repository) ListDNSValidationTargets(ctx context.Context, programID string, limit int) ([]Subdomain, error) {

@@ -37,6 +37,7 @@ type DomainRoot struct {
 	ScopeAssetID string
 	ProgramID    string
 	RootDomain   string
+	QueryDomain  string
 }
 
 type DomainScopeRule struct {

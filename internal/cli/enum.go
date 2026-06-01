@@ -40,13 +40,14 @@ func newEnumCommand() *cobra.Command {
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Roots, result.Subdomains, map[string]any{
 				"roots":      result.Roots,
+				"scoped":     result.Scoped,
 				"subdomains": result.Subdomains,
 				"tool":       "subfinder",
 				"program_id": programID,
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "processed %d roots and upserted %d subdomains\n", result.Roots, result.Subdomains)
+			fmt.Fprintf(cmd.OutOrStdout(), "processed %d roots, added %d scoped subdomains and upserted %d total subdomains\n", result.Roots, result.Scoped, result.Subdomains)
 			return nil
 		},
 	}

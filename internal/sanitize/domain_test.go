@@ -49,6 +49,27 @@ func TestWildcardRootFromScopeTargetRequiresExplicitWildcard(t *testing.T) {
 	}
 }
 
+func TestRegisteredDomain(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "normal root", raw: "api.example.com", want: "example.com"},
+		{name: "multi part suffix", raw: "a.b.example.co.uk", want: "example.co.uk"},
+		{name: "private suffix", raw: "app.herokuapp.com", want: "app.herokuapp.com"},
+		{name: "provider subdomain", raw: "sub.heroku.com", want: "heroku.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := RegisteredDomain(tt.raw)
+			if !ok || got != tt.want {
+				t.Fatalf("RegisteredDomain(%q) = %q, %v; want %q, true", tt.raw, got, ok, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsWithinRoot(t *testing.T) {
 	if !IsWithinRoot("a.b.example.com", "example.com") {
 		t.Fatal("expected subdomain to be inside root")

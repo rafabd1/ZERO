@@ -159,7 +159,9 @@ Do not commit provider configs containing real API keys.
 
 After enumeration, each result must match the wildcard regex derived from that exact asset. `*.example.com` accepts `app.example.com` and `a.b.example.com`, but rejects `example.com`, `example.com.evil.test`, and sibling domains.
 
-Enumeration roots are derived only from explicit wildcard assets. `*.sub.heroku.com` sends `sub.heroku.com` to Subfinder; it is not collapsed to `heroku.com`. A plain `sub.heroku.com` domain/url asset is probed exactly and does not authorize child enumeration.
+Enumeration roots are derived only from explicit wildcard assets whose registrable/root domain is also authorized by the program scope. `*.example.com` sends `example.com` to Subfinder. `*.api.example.com` sends `example.com` only if `example.com` or `*.example.com` is also in-scope, then filters results back to `*.api.example.com`. `*.sub.heroku.com` is skipped unless `heroku.com` itself is authorized, so SaaS/provider roots are not enumerated accidentally. A plain `sub.heroku.com` domain/url asset is probed exactly and does not authorize child enumeration.
+
+After Subfinder enumeration, exact in-scope `domain` and `url` assets that are themselves subdomains are also upserted into `zero_subdomains` with the `scope:*` source. This keeps the final deduplicated subdomain list complete even when a scoped host was provided directly by the platform and not rediscovered by Subfinder.
 
 Out-of-scope `domain`, `url`, and `wildcard` assets override broad in-scope wildcards. This keeps assets such as `*.excluded.example.com` or `admin.example.com` from being probed when the program has explicitly excluded them.
 

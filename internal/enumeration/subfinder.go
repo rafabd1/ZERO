@@ -23,6 +23,7 @@ type SubfinderRunner struct {
 
 type SubfinderResult struct {
 	Roots      int
+	Scoped     int
 	Subdomains int
 }
 
@@ -77,8 +78,26 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 	}
 
 	result := SubfinderResult{Roots: len(roots)}
+	scoped, err := r.repo.ListInScopeSubdomainAssets(ctx, r.programID)
+	if err != nil {
+		return result, err
+	}
+	for i := range scoped {
+		scoped[i].LastScanRunID = r.scanRunID
+	}
+	scopedInserted, err := r.repo.UpsertSubdomains(ctx, scoped)
+	if err != nil {
+		return result, err
+	}
+	result.Scoped = scopedInserted
+	result.Subdomains += scopedInserted
+
 	for _, root := range roots {
-		args := []string{"-silent", "-d", root.RootDomain}
+		queryDomain := root.QueryDomain
+		if queryDomain == "" {
+			queryDomain = root.RootDomain
+		}
+		args := []string{"-silent", "-d", queryDomain}
 		if r.providerConfig != "" {
 			args = append(args, "-pc", r.providerConfig)
 		}
@@ -105,7 +124,7 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 			return nil
 		})
 		if err != nil {
-			return result, fmt.Errorf("subfinder %s: %w", root.RootDomain, err)
+			return result, fmt.Errorf("subfinder %s: %w", queryDomain, err)
 		}
 		inserted, err := r.repo.UpsertSubdomains(ctx, collected)
 		if err != nil {
