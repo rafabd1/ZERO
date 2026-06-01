@@ -22,9 +22,12 @@ type NucleiRunner struct {
 	tags        string
 	severities  string
 	templateIDs string
+	templates   string
 	rate        int
 	concurrency int
 	bulkSize    int
+	retries     int
+	timeout     int
 	scanRunID   string
 	programID   string
 	limit       int
@@ -49,6 +52,8 @@ func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
 		rate:        80,
 		concurrency: 20,
 		bulkSize:    5,
+		retries:     1,
+		timeout:     8,
 	}
 }
 
@@ -70,6 +75,23 @@ func (r *NucleiRunner) WithPolicy(tags, severities, templateIDs string, rate, co
 	}
 	if bulkSize > 0 {
 		r.bulkSize = bulkSize
+	}
+	return r
+}
+
+func (r *NucleiRunner) WithTemplates(templates string) *NucleiRunner {
+	if strings.TrimSpace(templates) != "" {
+		r.templates = strings.TrimSpace(templates)
+	}
+	return r
+}
+
+func (r *NucleiRunner) WithRuntime(retries, timeout int) *NucleiRunner {
+	if retries >= 0 {
+		r.retries = retries
+	}
+	if timeout > 0 {
+		r.timeout = timeout
 	}
 	return r
 }
@@ -116,12 +138,14 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		"-rate-limit", strconv.Itoa(r.rate),
 		"-c", strconv.Itoa(r.concurrency),
 		"-bs", strconv.Itoa(r.bulkSize),
-		"-retries", "1",
-		"-timeout", "8",
+		"-retries", strconv.Itoa(r.retries),
+		"-timeout", strconv.Itoa(r.timeout),
 		"-or",
 		"-ot",
 	}
-	if r.templateIDs != "" {
+	if r.templates != "" {
+		args = append(args, "-t", r.templates)
+	} else if r.templateIDs != "" {
 		args = append(args, "-id", r.templateIDs)
 	} else {
 		args = append(args, "-tags", r.tags)

@@ -64,7 +64,7 @@ Discord delivery is opt-in through `ZERO_DISCORD_WEBHOOK_URL`. Without a webhook
 
 `httpx` is target intel, not proof of vulnerability. It gives stable JSON, status/title/webserver/TLS/favicon/tech data in one pass. Webanalyze expands technology/version coverage. NVD matches are passive intel only. `nuclei` is the CVE validator and defaults to template IDs derived from medium/high/critical passive CVE matches, moderate rate limits, and per-target batching.
 
-Use `zero run manual` for one-off scans with custom parameters, for example a custom Webanalyze technologies file, CVE-derived Nuclei templates, or a specific Nuclei template ID. These flags apply only to that run and do not change the global worker configuration.
+Use `zero run manual` for one-off scans with custom parameters, for example a custom Webanalyze technologies file, CVE-derived Nuclei templates, a specific Nuclei template ID, a local Nuclei template path, or per-run rate/concurrency/severity settings. These flags apply only to that run and do not change the global worker configuration.
 
 Use `zero run schedule --run-after 30m ...` to queue the same custom scan parameters for the worker. Queued requests are visible through `/v1/scan-requests`.
 

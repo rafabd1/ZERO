@@ -26,6 +26,14 @@ type manualRunOptions struct {
 	WebanalyzeCrawl   int
 	NucleiLimit       int
 	NucleiTemplateID  string
+	NucleiTemplate    string
+	NucleiTags        string
+	NucleiSeverity    string
+	NucleiRateLimit   int
+	NucleiConcurrency int
+	NucleiBulkSize    int
+	NucleiRetries     int
+	NucleiTimeout     int
 	NucleiFromCVEs    bool
 	NucleiAllCVEs     bool
 	NucleiCVELimit    int
@@ -92,6 +100,14 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.WebanalyzeCrawl, "webanalyze-crawl", -1, "custom Webanalyze crawl depth for this run only")
 	cmd.Flags().IntVar(&opts.NucleiLimit, "nuclei-limit", 0, "manual Nuclei URL limit")
 	cmd.Flags().StringVar(&opts.NucleiTemplateID, "nuclei-template-id", "", "custom Nuclei template id(s) for this run only")
+	cmd.Flags().StringVar(&opts.NucleiTemplate, "nuclei-template", "", "custom Nuclei template file/directory path(s) for this run only")
+	cmd.Flags().StringVar(&opts.NucleiTags, "nuclei-tags", "", "custom Nuclei tags for this run only")
+	cmd.Flags().StringVar(&opts.NucleiSeverity, "nuclei-severity", "", "custom Nuclei severities for this run only")
+	cmd.Flags().IntVar(&opts.NucleiRateLimit, "nuclei-rate-limit", 0, "custom Nuclei rate limit for this run only")
+	cmd.Flags().IntVar(&opts.NucleiConcurrency, "nuclei-concurrency", 0, "custom Nuclei concurrency for this run only")
+	cmd.Flags().IntVar(&opts.NucleiBulkSize, "nuclei-bulk-size", 0, "custom Nuclei bulk size for this run only")
+	cmd.Flags().IntVar(&opts.NucleiRetries, "nuclei-retries", -1, "custom Nuclei retries for this run only")
+	cmd.Flags().IntVar(&opts.NucleiTimeout, "nuclei-timeout", 0, "custom Nuclei timeout seconds for this run only")
 	cmd.Flags().BoolVar(&opts.NucleiFromCVEs, "nuclei-from-cves", false, "derive Nuclei template ids from passive CVE matches for this run only")
 	cmd.Flags().BoolVar(&opts.NucleiAllCVEs, "nuclei-all-cve-templates", false, "run configured Nuclei tag/template policy instead of passive CVE matches")
 	cmd.Flags().IntVar(&opts.NucleiCVELimit, "nuclei-cve-limit", 0, "maximum passive CVE template ids for this run only")
@@ -138,6 +154,22 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		if opts.NucleiTemplateID != "" {
 			step = append(step, "--template-id", opts.NucleiTemplateID)
 		}
+		if opts.NucleiTemplate != "" {
+			step = append(step, "--template-path", opts.NucleiTemplate)
+		}
+		if opts.NucleiTags != "" {
+			step = append(step, "--tags", opts.NucleiTags)
+		}
+		if opts.NucleiSeverity != "" {
+			step = append(step, "--severity", opts.NucleiSeverity)
+		}
+		step = appendIntFlag(step, "--rate-limit", opts.NucleiRateLimit)
+		step = appendIntFlag(step, "--concurrency", opts.NucleiConcurrency)
+		step = appendIntFlag(step, "--bulk-size", opts.NucleiBulkSize)
+		if opts.NucleiRetries >= 0 {
+			step = append(step, "--retries", fmt.Sprint(opts.NucleiRetries))
+		}
+		step = appendIntFlag(step, "--timeout", opts.NucleiTimeout)
 		if opts.NucleiFromCVEs {
 			step = append(step, "--from-cves")
 		}

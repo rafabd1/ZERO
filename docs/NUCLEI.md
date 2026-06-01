@@ -33,7 +33,7 @@ nuclei -l urls.txt \
   -ot
 ```
 
-These are starting values, not a promise that every target tolerates them. Per-program overrides should be supported later.
+These are starting values, not a promise that every target tolerates them. Manual and scheduled custom runs can override template IDs, template paths, tags, severities, rate, concurrency, bulk size, retries, timeout, and target limit without changing global worker defaults.
 
 ## Why This Matters
 
@@ -70,4 +70,5 @@ For targeted validation after passive matching:
 zero analyze cves --limit 25
 zero analyze nuclei --from-cves --limit 20 --cve-limit 50
 zero analyze nuclei --limit 5 --template-id CVE-2025-20362
+zero analyze nuclei --template-path ./templates/custom-cve.yaml --severity high,critical --rate-limit 40 --concurrency 10 --timeout 10
 ```

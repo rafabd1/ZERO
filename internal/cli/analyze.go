@@ -12,6 +12,14 @@ import (
 func newAnalyzeCommand() *cobra.Command {
 	var nucleiLimit int
 	var nucleiTemplateID string
+	var nucleiTemplatePath string
+	var nucleiTags string
+	var nucleiSeverities string
+	var nucleiRate int
+	var nucleiConcurrency int
+	var nucleiBulkSize int
+	var nucleiRetries int
+	var nucleiTimeout int
 	var nucleiFromCVEs bool
 	var nucleiAllCVETemplates bool
 	var nucleiCVELimit int
@@ -74,17 +82,27 @@ func newAnalyzeCommand() *cobra.Command {
 			if nucleiTemplateID != "" {
 				templateIDs = nucleiTemplateID
 			}
+			tags := firstNonEmpty(nucleiTags, cfg.Tools.NucleiTags)
+			severities := firstNonEmpty(nucleiSeverities, cfg.Tools.NucleiSeverities)
+			rate := firstPositive(nucleiRate, cfg.Tools.NucleiRate)
+			concurrency := firstPositive(nucleiConcurrency, cfg.Tools.NucleiC)
+			bulkSize := firstPositive(nucleiBulkSize, cfg.Tools.NucleiBulkSize)
+			retries := nucleiRetries
+			if retries < 0 {
+				retries = 1
+			}
+			timeout := firstPositive(nucleiTimeout, 8)
 			scanID, err := startScanRun(ctx, repo, "nuclei", nucleiProgramID)
 			if err != nil {
 				return err
 			}
-			fromCVEs := (cfg.Tools.NucleiFromCVEs || nucleiFromCVEs) && !nucleiAllCVETemplates && templateIDs == ""
+			fromCVEs := (cfg.Tools.NucleiFromCVEs || nucleiFromCVEs) && !nucleiAllCVETemplates && templateIDs == "" && nucleiTemplatePath == ""
 			if fromCVEs {
 				cveLimit := nucleiCVELimit
 				if cveLimit <= 0 {
 					cveLimit = cfg.Tools.NucleiCVELimit
 				}
-				ids, err := repo.ListCVETemplateIDsFromMatches(ctx, nucleiProgramID, cfg.Tools.NucleiSeverities, cveLimit)
+				ids, err := repo.ListCVETemplateIDsFromMatches(ctx, nucleiProgramID, severities, cveLimit)
 				if err != nil {
 					return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 				}
@@ -103,7 +121,9 @@ func newAnalyzeCommand() *cobra.Command {
 				templateIDs = strings.Join(ids, ",")
 			}
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
-				WithPolicy(cfg.Tools.NucleiTags, cfg.Tools.NucleiSeverities, templateIDs, cfg.Tools.NucleiRate, cfg.Tools.NucleiC, cfg.Tools.NucleiBulkSize).
+				WithPolicy(tags, severities, templateIDs, rate, concurrency, bulkSize).
+				WithTemplates(nucleiTemplatePath).
+				WithRuntime(retries, timeout).
 				WithScanRunID(scanID).
 				WithProgramID(nucleiProgramID).
 				WithLimit(nucleiLimit)
@@ -120,6 +140,14 @@ func newAnalyzeCommand() *cobra.Command {
 				"tool":              "nuclei",
 				"from_cves":         fromCVEs,
 				"template_ids":      templateIDs,
+				"template_paths":    nucleiTemplatePath,
+				"tags":              tags,
+				"severities":        severities,
+				"rate":              rate,
+				"concurrency":       concurrency,
+				"bulk_size":         bulkSize,
+				"retries":           retries,
+				"timeout":           timeout,
 			}); err != nil {
 				return err
 			}
@@ -131,9 +159,36 @@ func newAnalyzeCommand() *cobra.Command {
 	cmd.Commands()[0].Flags().IntVar(&cvesLimit, "limit", 25, "maximum versioned technologies to query")
 	cmd.Commands()[1].Flags().IntVar(&nucleiLimit, "limit", 0, "limit number of URLs to validate")
 	cmd.Commands()[1].Flags().StringVar(&nucleiTemplateID, "template-id", "", "run only matching Nuclei template id(s)")
+	cmd.Commands()[1].Flags().StringVar(&nucleiTemplatePath, "template-path", "", "run Nuclei template file/directory path(s)")
+	cmd.Commands()[1].Flags().StringVar(&nucleiTags, "tags", "", "override Nuclei tags for this run")
+	cmd.Commands()[1].Flags().StringVar(&nucleiSeverities, "severity", "", "override Nuclei severities for this run")
+	cmd.Commands()[1].Flags().IntVar(&nucleiRate, "rate-limit", 0, "override Nuclei rate limit for this run")
+	cmd.Commands()[1].Flags().IntVar(&nucleiConcurrency, "concurrency", 0, "override Nuclei concurrency for this run")
+	cmd.Commands()[1].Flags().IntVar(&nucleiBulkSize, "bulk-size", 0, "override Nuclei bulk size for this run")
+	cmd.Commands()[1].Flags().IntVar(&nucleiRetries, "retries", -1, "override Nuclei retries for this run")
+	cmd.Commands()[1].Flags().IntVar(&nucleiTimeout, "timeout", 0, "override Nuclei timeout seconds for this run")
 	cmd.Commands()[1].Flags().BoolVar(&nucleiFromCVEs, "from-cves", false, "run only Nuclei template ids linked from passive CVE matching")
 	cmd.Commands()[1].Flags().BoolVar(&nucleiAllCVETemplates, "all-cve-templates", false, "ignore passive CVE matches and run configured tag/template policy")
 	cmd.Commands()[1].Flags().IntVar(&nucleiCVELimit, "cve-limit", 0, "maximum passive CVE template ids to pass to Nuclei")
 	cmd.Commands()[1].Flags().StringVar(&nucleiProgramID, "program-id", "", "limit Nuclei validation to one program id")
 	return cmd
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
