@@ -108,25 +108,7 @@ func (s *Server) routes() {
 		ORDER BY r.created_at DESC
 		LIMIT 50
 	`))
-	s.mux.HandleFunc("GET /v1/scans/latest", s.query(`
-		SELECT jsonb_build_object(
-			'id', sr.id,
-			'program_id', sr.program_id,
-			'run_type', sr.run_type,
-			'status', sr.status,
-			'started_at', sr.started_at,
-			'finished_at', sr.finished_at,
-			'input_count', sr.input_count,
-			'inserted_count', sr.inserted_count,
-			'updated_count', sr.updated_count,
-			'unchanged_count', sr.unchanged_count,
-			'error', sr.error,
-			'stats', sr.stats
-		)
-		FROM zero_scan_runs sr
-		ORDER BY sr.started_at DESC
-		LIMIT 25
-	`))
+	s.mux.HandleFunc("GET /v1/scans/latest", s.latestScans)
 	s.mux.HandleFunc("GET /v1/scan-requests", s.query(`
 		SELECT jsonb_build_object(
 			'id', r.id,
@@ -184,6 +166,7 @@ func (s *Server) routes() {
 			)
 			FROM zero_scan_runs sr
 			WHERE sr.program_id = $1::uuid
+			  AND sr.run_type = 'full'
 			ORDER BY sr.started_at DESC
 			LIMIT 1
 		`, programID)
@@ -261,15 +244,23 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 				)
 			),
 			'scan_runs', jsonb_build_object(
-				'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running'),
-				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded'),
-				'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed'),
-				'total', (SELECT count(*) FROM zero_scan_runs),
+				'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running' AND run_type = 'full'),
+				'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE status = 'running' AND run_type = 'full' AND program_id IS NOT NULL),
+				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND run_type = 'full'),
+				'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND run_type = 'full'),
+				'total', (SELECT count(*) FROM zero_scan_runs WHERE run_type = 'full'),
 				'recent_24h', jsonb_build_object(
-					'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running' AND started_at > now() - interval '24 hours'),
-					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND started_at > now() - interval '24 hours'),
-					'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND started_at > now() - interval '24 hours'),
-					'total', (SELECT count(*) FROM zero_scan_runs WHERE started_at > now() - interval '24 hours')
+					'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE status = 'running' AND run_type = 'full' AND program_id IS NOT NULL AND started_at > now() - interval '24 hours'),
+					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'total', (SELECT count(*) FROM zero_scan_runs WHERE run_type = 'full' AND started_at > now() - interval '24 hours')
+				),
+				'task_runs', jsonb_build_object(
+					'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running' AND run_type <> 'full'),
+					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND run_type <> 'full'),
+					'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND run_type <> 'full'),
+					'total', (SELECT count(*) FROM zero_scan_runs WHERE run_type <> 'full')
 				)
 			),
 			'assets', jsonb_build_object(
@@ -325,15 +316,23 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 				)
 			),
 			'scan_runs', jsonb_build_object(
-				'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running'),
-				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded'),
-				'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed'),
-				'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id),
+				'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type = 'full'),
+				'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type = 'full'),
+				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND run_type = 'full'),
+				'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND run_type = 'full'),
+				'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND run_type = 'full'),
 				'recent_24h', jsonb_build_object(
-					'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND started_at > now() - interval '24 hours'),
-					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND started_at > now() - interval '24 hours'),
-					'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND started_at > now() - interval '24 hours'),
-					'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND started_at > now() - interval '24 hours')
+					'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND run_type = 'full' AND started_at > now() - interval '24 hours')
+				),
+				'task_runs', jsonb_build_object(
+					'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type <> 'full'),
+					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND run_type <> 'full'),
+					'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND run_type <> 'full'),
+					'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND run_type <> 'full')
 				),
 				'by_type', COALESCE((
 					SELECT jsonb_object_agg(run_type, count ORDER BY run_type)
@@ -374,6 +373,7 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 				)
 				FROM zero_scan_runs sr
 				WHERE sr.program_id = p.id
+				  AND sr.run_type = 'full'
 				ORDER BY sr.started_at DESC
 				LIMIT 1
 			),
@@ -391,6 +391,40 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRawJSON(w, rows[0])
+}
+
+func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {
+	p := listParamsFromRequest(r, 25)
+	runType := strings.TrimSpace(r.URL.Query().Get("run_type"))
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'id', sr.id,
+			'program_id', sr.program_id,
+			'program_handle', COALESCE(p.handle, ''),
+			'program_platform', COALESCE(p.platform, ''),
+			'program_url', COALESCE(p.program_url, ''),
+			'run_type', sr.run_type,
+			'status', sr.status,
+			'started_at', sr.started_at,
+			'finished_at', sr.finished_at,
+			'input_count', sr.input_count,
+			'inserted_count', sr.inserted_count,
+			'updated_count', sr.updated_count,
+			'unchanged_count', sr.unchanged_count,
+			'error', sr.error,
+			'stats', sr.stats
+		)
+		FROM zero_scan_runs sr
+		LEFT JOIN zero_programs p ON p.id = sr.program_id
+		WHERE ($1 = '' OR sr.run_type = $1)
+		ORDER BY sr.started_at DESC
+		LIMIT $2 OFFSET $3
+	`, runType, p.Limit, p.Offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeRawJSONArray(w, rows)
 }
 
 func (s *Server) services(programID string) http.HandlerFunc {

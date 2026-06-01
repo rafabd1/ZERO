@@ -36,7 +36,7 @@ async function loadAll(showLoading = true) {
     const [stats, programs, scans, findings] = await Promise.all([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/programs"),
-      getJSON("/api/v1/scans/latest"),
+      getJSON("/api/v1/scans/latest?run_type=full"),
       getJSON("/api/v1/findings?limit=100"),
     ]);
     state.stats = stats;
@@ -87,8 +87,8 @@ function renderGlobalStats() {
   setText("subdomains", `${fmt(assets.active_subdomains)} subdomains`);
   setText("findingsTotal", fmt(findings.total));
   setText("findingsSplit", `${fmt(findings.nuclei_confirmed)} confirmed, ${fmt(findings.passive_unconfirmed)} passive`);
-  setText("scansRunning", fmt(scanRuns.running));
-  setText("scansFailed", `${fmt(scanRuns.failed)} historical failed runs`);
+  setText("scansRunning", fmt(scanRuns.running_programs || scanRuns.running));
+  setText("scansFailed", `${fmt(scanRuns.failed)} failed program scans, ${fmt((scanRuns.task_runs || {}).running)} tool tasks running`);
 
   const active = Number(programs.active || 0);
   const scanned = Number(programs.scanned || 0);
@@ -177,7 +177,7 @@ function renderScans() {
   for (const scan of state.scans) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><strong>${escapeHTML(scan.run_type || "unknown")}</strong><small>${escapeHTML(shortID(scan.program_id))}</small></td>
+      <td><strong>${escapeHTML(scan.program_handle || shortID(scan.program_id) || "unknown")}</strong><small>${escapeHTML(scan.program_platform || scan.run_type || "")}</small></td>
       <td>${scanStatusPill(scan.status)}</td>
       <td>${timeAgo(scan.started_at)}</td>
       <td>${escapeHTML(scanSummary(scan))}</td>
@@ -260,10 +260,11 @@ function formatLatestScan(scan) {
 function scanSummary(scan) {
   const stats = scan.stats || {};
   const parts = [];
-  if (scan.input_count !== undefined) parts.push(`in ${scan.input_count}`);
-  if (scan.inserted_count !== undefined) parts.push(`new ${scan.inserted_count}`);
-  if (stats.tool) parts.push(stats.tool);
-  if (stats.skipped) parts.push(`skipped: ${stats.skipped}`);
+  if (scan.finished_at) parts.push(`finished ${timeAgo(scan.finished_at)}`);
+  if (stats.steps) parts.push(`${stats.steps} steps`);
+  if (stats.stale_http_services) parts.push(`${stats.stale_http_services} stale services`);
+  if (stats.handle) parts.push(stats.handle);
+  if (!scan.finished_at && scan.status === "running") parts.push("program pipeline in progress");
   if (scan.error) parts.push(`error`);
   return parts.join(" | ") || "-";
 }
