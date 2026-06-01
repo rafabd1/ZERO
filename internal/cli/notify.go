@@ -15,6 +15,7 @@ func newNotifyCommand() *cobra.Command {
 
 	var limit int
 	var dryRun bool
+	var programID string
 	cmd.AddCommand(&cobra.Command{
 		Use:   "discord",
 		Short: "Send new report notifications to Discord.",
@@ -25,6 +26,7 @@ func newNotifyCommand() *cobra.Command {
 			defer repo.Close()
 
 			result, err := notify.NewDiscordNotifier(repo, cfg.Notify.DiscordWebhookURL).
+				WithProgramID(programID).
 				WithLimit(limit).
 				WithDryRun(dryRun).
 				Run(ctx)
@@ -41,6 +43,7 @@ func newNotifyCommand() *cobra.Command {
 	})
 	cmd.Commands()[0].Flags().IntVar(&limit, "limit", 25, "maximum reports to notify")
 	cmd.Commands()[0].Flags().BoolVar(&dryRun, "dry-run", false, "inspect pending reports without sending or recording notifications")
+	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit notifications to one program id")
 
 	return cmd
 }

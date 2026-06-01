@@ -34,10 +34,12 @@ Default target parallelism: 4 programs at the same time.
 
 Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_programs.max_parallel_tasks`.
 
-The main continuous execution path is `zero worker`, which schedules `zero run once` using `ZERO_SCHEDULE_FULL`. `zero run once` executes:
+The main continuous execution path is `zero worker`, which schedules `zero run due` using `ZERO_SCHEDULE_FULL`. It first refreshes HackerOne scope, then selects active programs whose `last_scan_finished_at` is older than their configured interval, and processes up to `ZERO_TARGET_PARALLELISM` programs concurrently.
+
+For each due program, Zero executes:
 
 ```text
-sync h1 -> enum subfinder -> probe httpx -> analyze cves(policy/intel) -> analyze nuclei -> report generate -> notify discord
+enum subfinder --program-id ... -> probe httpx --program-id ... -> analyze cves --program-id ... -> analyze nuclei --program-id ... -> report generate --program-id ... -> notify discord --program-id ...
 ```
 
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
@@ -57,12 +59,13 @@ zero probe httpx --limit 50
 zero analyze nuclei --limit 5 --template-id CVE-2025-20362
 zero report generate --limit 50
 zero notify discord --dry-run
+zero run due --dry-run --limit 4
 zero api
 ```
 
 This validates the pipeline without turning a local setup check into a broad scan.
 
-Use `zero run once` only when you want the full configured pipeline without per-step smoke-test limits.
+Use `zero run once` only when you want the full configured global pipeline without per-step smoke-test limits. Use `zero run due` for the normal continuous per-program execution model.
 
 ## Discord Notifications
 

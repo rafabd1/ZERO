@@ -6,13 +6,14 @@ import (
 	"fmt"
 )
 
-func (r *Repository) ListNucleiTargets(ctx context.Context) ([]NucleiTarget, error) {
+func (r *Repository) ListNucleiTargets(ctx context.Context, programID string) ([]NucleiTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, program_id, url
 		FROM zero_http_services
 		WHERE active = true
+		  AND ($1 = '' OR program_id::text = $1)
 		ORDER BY program_id, url
-	`)
+	`, programID)
 	if err != nil {
 		return nil, err
 	}

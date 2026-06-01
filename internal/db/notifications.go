@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (r *Repository) ListDiscordReports(ctx context.Context, limit int) ([]DiscordReport, error) {
+func (r *Repository) ListDiscordReports(ctx context.Context, programID string, limit int) ([]DiscordReport, error) {
 	if limit <= 0 {
 		limit = 25
 	}
@@ -33,9 +33,10 @@ func (r *Repository) ListDiscordReports(ctx context.Context, limit int) ([]Disco
 			WHERE n.dedupe_key = 'discord:report:' || r.report_key
 			  AND n.status = 'sent'
 		)
+		  AND ($1 = '' OR r.program_id::text = $1)
 		ORDER BY r.created_at ASC
-		LIMIT $1
-	`, limit)
+		LIMIT $2
+	`, programID, limit)
 	if err != nil {
 		return nil, err
 	}

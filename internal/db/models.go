@@ -17,6 +17,14 @@ type ScopeAsset struct {
 	Metadata          map[string]any
 }
 
+type Program struct {
+	ID                string
+	Platform          string
+	Handle            string
+	ProgramURL        string
+	ScanIntervalHours int
+}
+
 type DomainRoot struct {
 	ScopeAssetID string
 	ProgramID    string

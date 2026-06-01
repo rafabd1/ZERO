@@ -16,6 +16,7 @@ type DiscordNotifier struct {
 	repo       *db.Repository
 	webhookURL string
 	client     *http.Client
+	programID  string
 	limit      int
 	dryRun     bool
 }
@@ -44,13 +45,18 @@ func (n *DiscordNotifier) WithLimit(limit int) *DiscordNotifier {
 	return n
 }
 
+func (n *DiscordNotifier) WithProgramID(programID string) *DiscordNotifier {
+	n.programID = strings.TrimSpace(programID)
+	return n
+}
+
 func (n *DiscordNotifier) WithDryRun(dryRun bool) *DiscordNotifier {
 	n.dryRun = dryRun
 	return n
 }
 
 func (n *DiscordNotifier) Run(ctx context.Context) (DiscordResult, error) {
-	reports, err := n.repo.ListDiscordReports(ctx, n.limit)
+	reports, err := n.repo.ListDiscordReports(ctx, n.programID, n.limit)
 	if err != nil {
 		return DiscordResult{}, err
 	}

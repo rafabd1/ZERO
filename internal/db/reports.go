@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func (r *Repository) ListUnreportedFindings(ctx context.Context, limit int) ([]ReportFinding, error) {
+func (r *Repository) ListUnreportedFindings(ctx context.Context, programID string, limit int) ([]ReportFinding, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -27,6 +27,7 @@ func (r *Repository) ListUnreportedFindings(ctx context.Context, limit int) ([]R
 		LEFT JOIN zero_http_services s ON s.id = f.http_service_id
 		WHERE f.status = 'new'
 		  AND f.report_id IS NULL
+		  AND ($1 = '' OR f.program_id::text = $1)
 		ORDER BY
 			CASE f.severity
 				WHEN 'critical' THEN 1
@@ -37,8 +38,8 @@ func (r *Repository) ListUnreportedFindings(ctx context.Context, limit int) ([]R
 			END,
 			f.confidence DESC,
 			f.first_seen_at ASC
-		LIMIT $1
-	`, limit)
+		LIMIT $2
+	`, programID, limit)
 	if err != nil {
 		return nil, err
 	}

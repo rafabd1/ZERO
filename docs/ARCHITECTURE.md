@@ -44,7 +44,7 @@ Every discovered entity is linked back to `zero_programs`. This is required beca
 
 ## Execution Model
 
-Zero should scan multiple programs concurrently, starting with `ZERO_TARGET_PARALLELISM=4`. Inside each program, external tools should use moderate defaults and batching:
+Zero scans multiple programs concurrently through `zero run due`, starting with `ZERO_TARGET_PARALLELISM=4`. A program is due when it is active and its `last_scan_finished_at` is missing or older than `scan_interval_hours`. Inside each program, external tools use moderate defaults and batching:
 
 - Scope sync writes in batches on first import and uses unique constraints for deduplication.
 - Enumeration accepts only sanitized, valid, in-scope wildcard assets linked to the program. For `*.example.com`, `subfinder` receives `example.com`.
@@ -67,4 +67,4 @@ The worker uses second-enabled cron expressions:
 - `ZERO_SCHEDULE_CVE`
 - `ZERO_SCHEDULE_NUCLEI`
 
-The primary worker job is the full pipeline scheduled by `ZERO_SCHEDULE_FULL`: scope sync before enumeration, enumeration before probing, Nuclei validation after probing, report generation after Nuclei, and Discord notification after reports. The `httpx` fingerprint phase is target intel only; passive CVE matching is intentionally disabled to avoid noisy unvalidated reports.
+The primary worker job is the due-program pipeline scheduled by `ZERO_SCHEDULE_FULL`: global scope sync first, then per-program enumeration, probing, Nuclei validation, report generation, and Discord notification for due programs only. The `httpx` fingerprint phase is target intel only; passive CVE matching is intentionally disabled to avoid noisy unvalidated reports.

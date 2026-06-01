@@ -9,8 +9,9 @@ import (
 )
 
 type Config struct {
-	DatabaseURL string
-	Supabase    SupabaseConfig
+	DatabaseURL       string
+	Supabase          SupabaseConfig
+	TargetParallelism int
 
 	HackerOne HackerOneConfig
 	Scope     ScopeConfig
@@ -93,6 +94,7 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
+	v.SetDefault("target_parallelism", 4)
 	v.SetDefault("schedule.full", "0 15 3 */3 * *")
 	v.SetDefault("schedule.scope_sync", "0 15 3 * * *")
 	v.SetDefault("schedule.enum", "0 45 3 * * *")
@@ -123,13 +125,15 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
 	_ = v.BindEnv("tools.nuclei_bulk_size", "ZERO_NUCLEI_BULK_SIZE")
+	_ = v.BindEnv("target_parallelism", "ZERO_TARGET_PARALLELISM")
 	_ = v.BindEnv("schedule.full", "ZERO_SCHEDULE_FULL")
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
 	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
 	_ = v.BindEnv("notify.discord_webhook_url", "ZERO_DISCORD_WEBHOOK_URL")
 
 	return Config{
-		DatabaseURL: v.GetString("database_url"),
+		DatabaseURL:       v.GetString("database_url"),
+		TargetParallelism: clampInt(v.GetInt("target_parallelism"), 1, 16),
 		Supabase: SupabaseConfig{
 			URL:            v.GetString("supabase_url"),
 			AnonKey:        v.GetString("supabase_anon_key"),
@@ -211,4 +215,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }

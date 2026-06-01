@@ -10,6 +10,8 @@ import (
 func newAnalyzeCommand() *cobra.Command {
 	var nucleiLimit int
 	var nucleiTemplateID string
+	var cvesProgramID string
+	var nucleiProgramID string
 	cmd := &cobra.Command{
 		Use:   "analyze",
 		Short: "Run vulnerability intelligence matching tasks.",
@@ -23,13 +25,14 @@ func newAnalyzeCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "intel")
+			scanID, err := startScanRun(ctx, repo, "intel", cvesProgramID)
 			if err != nil {
 				return err
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, 0, 0, map[string]any{
 				"passive_cve_matching": "disabled",
 				"httpx_role":           "target-intel",
+				"program_id":           cvesProgramID,
 				"validator":            "nuclei",
 			}); err != nil {
 				return err
@@ -51,12 +54,13 @@ func newAnalyzeCommand() *cobra.Command {
 			if nucleiTemplateID != "" {
 				templateIDs = nucleiTemplateID
 			}
-			scanID, err := startScanRun(ctx, repo, "nuclei")
+			scanID, err := startScanRun(ctx, repo, "nuclei", nucleiProgramID)
 			if err != nil {
 				return err
 			}
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
 				WithPolicy(cfg.Tools.NucleiTags, cfg.Tools.NucleiSeverities, templateIDs, cfg.Tools.NucleiRate, cfg.Tools.NucleiC, cfg.Tools.NucleiBulkSize).
+				WithProgramID(nucleiProgramID).
 				WithLimit(nucleiLimit)
 			result, err := runner.Run(ctx)
 			if err != nil {
@@ -67,6 +71,7 @@ func newAnalyzeCommand() *cobra.Command {
 				"results":           result.Results,
 				"inserted_results":  result.Inserted,
 				"inserted_findings": result.FindingsInserted,
+				"program_id":        nucleiProgramID,
 				"tool":              "nuclei",
 			}); err != nil {
 				return err
@@ -75,7 +80,9 @@ func newAnalyzeCommand() *cobra.Command {
 			return nil
 		},
 	})
+	cmd.Commands()[0].Flags().StringVar(&cvesProgramID, "program-id", "", "record intel policy for one program id")
 	cmd.Commands()[1].Flags().IntVar(&nucleiLimit, "limit", 0, "limit number of URLs to validate")
 	cmd.Commands()[1].Flags().StringVar(&nucleiTemplateID, "template-id", "", "run only matching Nuclei template id(s)")
+	cmd.Commands()[1].Flags().StringVar(&nucleiProgramID, "program-id", "", "limit Nuclei validation to one program id")
 	return cmd
 }

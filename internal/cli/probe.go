@@ -9,6 +9,7 @@ import (
 
 func newProbeCommand() *cobra.Command {
 	var httpxLimit int
+	var programID string
 	cmd := &cobra.Command{
 		Use:   "probe",
 		Short: "Run live host probing and fingerprinting tasks.",
@@ -22,19 +23,20 @@ func newProbeCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "probe")
+			scanID, err := startScanRun(ctx, repo, "probe", programID)
 			if err != nil {
 				return err
 			}
-			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).WithLimit(httpxLimit)
+			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).WithProgramID(programID).WithLimit(httpxLimit)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Hosts, result.Services, map[string]any{
-				"hosts":    result.Hosts,
-				"services": result.Services,
-				"tool":     "httpx",
+				"hosts":      result.Hosts,
+				"services":   result.Services,
+				"tool":       "httpx",
+				"program_id": programID,
 			}); err != nil {
 				return err
 			}
@@ -43,5 +45,6 @@ func newProbeCommand() *cobra.Command {
 		},
 	})
 	cmd.Commands()[0].Flags().IntVar(&httpxLimit, "limit", 0, "limit number of hosts to probe")
+	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit probing to one program id")
 	return cmd
 }

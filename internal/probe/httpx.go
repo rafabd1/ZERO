@@ -15,9 +15,10 @@ import (
 )
 
 type HTTPXRunner struct {
-	repo  *db.Repository
-	bin   string
-	limit int
+	repo      *db.Repository
+	bin       string
+	programID string
+	limit     int
 }
 
 type HTTPXResult struct {
@@ -51,8 +52,13 @@ func (r *HTTPXRunner) WithLimit(limit int) *HTTPXRunner {
 	return r
 }
 
+func (r *HTTPXRunner) WithProgramID(programID string) *HTTPXRunner {
+	r.programID = programID
+	return r
+}
+
 func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
-	targets, err := r.repo.ListProbeTargets(ctx)
+	targets, err := r.repo.ListProbeTargets(ctx, r.programID)
 	if err != nil {
 		return HTTPXResult{}, err
 	}

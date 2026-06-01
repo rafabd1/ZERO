@@ -16,6 +16,7 @@ type SubfinderRunner struct {
 	providerConfig string
 	sources        string
 	rateLimits     string
+	programID      string
 	limit          int
 }
 
@@ -51,12 +52,17 @@ func (r *SubfinderRunner) WithLimit(limit int) *SubfinderRunner {
 	return r
 }
 
+func (r *SubfinderRunner) WithProgramID(programID string) *SubfinderRunner {
+	r.programID = strings.TrimSpace(programID)
+	return r
+}
+
 func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
-	roots, err := r.repo.ListDomainRoots(ctx)
+	roots, err := r.repo.ListDomainRoots(ctx, r.programID)
 	if err != nil {
 		return SubfinderResult{}, err
 	}
-	exclusions, err := r.repo.ListOutOfScopeDomainRules(ctx)
+	exclusions, err := r.repo.ListOutOfScopeDomainRules(ctx, r.programID)
 	if err != nil {
 		return SubfinderResult{}, err
 	}

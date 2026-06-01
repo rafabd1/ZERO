@@ -9,6 +9,7 @@ import (
 
 func newEnumCommand() *cobra.Command {
 	var subfinderLimit int
+	var programID string
 	cmd := &cobra.Command{
 		Use:   "enum",
 		Short: "Run asset enumeration tasks.",
@@ -22,7 +23,7 @@ func newEnumCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "enum")
+			scanID, err := startScanRun(ctx, repo, "enum", programID)
 			if err != nil {
 				return err
 			}
@@ -30,6 +31,7 @@ func newEnumCommand() *cobra.Command {
 				WithProviderConfig(cfg.Tools.SubfinderProviderConfig).
 				WithSources(cfg.Tools.SubfinderSources).
 				WithRateLimits(cfg.Tools.SubfinderRateLimits).
+				WithProgramID(programID).
 				WithLimit(subfinderLimit)
 			result, err := runner.Run(ctx)
 			if err != nil {
@@ -39,6 +41,7 @@ func newEnumCommand() *cobra.Command {
 				"roots":      result.Roots,
 				"subdomains": result.Subdomains,
 				"tool":       "subfinder",
+				"program_id": programID,
 			}); err != nil {
 				return err
 			}
@@ -47,5 +50,6 @@ func newEnumCommand() *cobra.Command {
 		},
 	})
 	cmd.Commands()[0].Flags().IntVar(&subfinderLimit, "limit", 0, "limit number of roots to enumerate")
+	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit enumeration to one program id")
 	return cmd
 }

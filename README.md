@@ -34,11 +34,13 @@ docker compose --profile tools run --rm migrate
 docker compose up -d zero
 ```
 
-The container runs `zero worker` by default. The worker schedules the full continuous pipeline through `ZERO_SCHEDULE_FULL`, and the same sequence can be run manually with:
+The container runs `zero worker` by default. The worker schedules due-program scans through `ZERO_SCHEDULE_FULL`, honoring each program's `scan_interval_hours` and `ZERO_TARGET_PARALLELISM`. The same due-program planner can be inspected safely with:
 
 ```bash
-zero run once
+zero run due --dry-run --limit 4
 ```
+
+Use `zero run once` only when you intentionally want the unbounded global pipeline.
 
 Discord delivery is opt-in through `ZERO_DISCORD_WEBHOOK_URL`. Without a webhook, notification delivery is a safe no-op and reports remain available through the API.
 

@@ -25,7 +25,7 @@ func newSyncCommand() *cobra.Command {
 				return fmt.Errorf("ZERO_H1_USERNAME and ZERO_H1_TOKEN are required")
 			}
 
-			scanID, err := startScanRun(ctx, repo, "scope")
+			scanID, err := startScanRun(ctx, repo, "scope", "")
 			if err != nil {
 				return err
 			}

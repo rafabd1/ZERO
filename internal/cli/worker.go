@@ -25,8 +25,8 @@ func newWorkerCommand() *cobra.Command {
 				return err
 			}
 
-			if err := addJob("full-pipeline", cfg.Schedule.Full, func() {
-				if err := runPipeline(cmd); err != nil {
+			if err := addJob("due-pipeline", cfg.Schedule.Full, func() {
+				if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, false); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "full pipeline failed: %v\n", err)
 				}
 			}); err != nil {

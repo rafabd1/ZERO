@@ -6,16 +6,16 @@ import (
 	"fmt"
 )
 
-func (r *Repository) StartScanRun(ctx context.Context, runType, workerID string) (string, error) {
+func (r *Repository) StartScanRun(ctx context.Context, runType, workerID, programID string) (string, error) {
 	if workerID == "" {
 		workerID = "cli"
 	}
 	var id string
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO zero_scan_runs(run_type, worker_id)
-		VALUES ($1,$2)
+		INSERT INTO zero_scan_runs(run_type, worker_id, program_id)
+		VALUES ($1,$2,NULLIF($3, '')::uuid)
 		RETURNING id::text
-	`, runType, workerID).Scan(&id)
+	`, runType, workerID, programID).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("start scan run: %w", err)
 	}

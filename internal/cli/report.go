@@ -9,6 +9,7 @@ import (
 
 func newReportCommand() *cobra.Command {
 	var limit int
+	var programID string
 	cmd := &cobra.Command{
 		Use:   "report",
 		Short: "Generate and inspect deduplicated reports.",
@@ -22,7 +23,7 @@ func newReportCommand() *cobra.Command {
 			repo := openRepository(ctx, cfg)
 			defer repo.Close()
 
-			result, err := report.NewGenerator(repo).WithLimit(limit).Run(ctx)
+			result, err := report.NewGenerator(repo).WithProgramID(programID).WithLimit(limit).Run(ctx)
 			if err != nil {
 				return err
 			}
@@ -31,5 +32,6 @@ func newReportCommand() *cobra.Command {
 		},
 	})
 	cmd.Commands()[0].Flags().IntVar(&limit, "limit", 500, "maximum new findings to report")
+	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit reporting to one program id")
 	return cmd
 }

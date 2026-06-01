@@ -6,8 +6,8 @@ import (
 	"github.com/rafabd1/ZERO/internal/db"
 )
 
-func startScanRun(ctx context.Context, repo *db.Repository, runType string) (string, error) {
-	return repo.StartScanRun(ctx, runType, "cli")
+func startScanRun(ctx context.Context, repo *db.Repository, runType, programID string) (string, error) {
+	return repo.StartScanRun(ctx, runType, "cli", programID)
 }
 
 func finishScanRun(ctx context.Context, repo *db.Repository, id string, runErr error, inputCount, insertedCount int, stats map[string]any) error {

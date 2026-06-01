@@ -48,6 +48,61 @@ func (r *Repository) UpsertProgram(ctx context.Context, platform, handle, progra
 	return id, nil
 }
 
+func (r *Repository) ListDuePrograms(ctx context.Context, limit int) ([]Program, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text, platform, handle, program_url, scan_interval_hours
+		FROM zero_programs
+		WHERE active = true
+		  AND (
+			last_scan_finished_at IS NULL
+			OR last_scan_finished_at <= now() - make_interval(hours => scan_interval_hours)
+		  )
+		ORDER BY last_scan_finished_at NULLS FIRST, last_seen_at DESC, platform, handle
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	programs := []Program{}
+	for rows.Next() {
+		var program Program
+		if err := rows.Scan(&program.ID, &program.Platform, &program.Handle, &program.ProgramURL, &program.ScanIntervalHours); err != nil {
+			return nil, err
+		}
+		programs = append(programs, program)
+	}
+	return programs, rows.Err()
+}
+
+func (r *Repository) MarkProgramScanStarted(ctx context.Context, programID string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE zero_programs
+		SET last_scan_started_at = now()
+		WHERE id = $1::uuid
+	`, programID)
+	if err != nil {
+		return fmt.Errorf("mark program scan started: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) MarkProgramScanFinished(ctx context.Context, programID string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE zero_programs
+		SET last_scan_finished_at = now()
+		WHERE id = $1::uuid
+	`, programID)
+	if err != nil {
+		return fmt.Errorf("mark program scan finished: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) UpsertScopeAsset(ctx context.Context, asset ScopeAsset) (string, error) {
 	if asset.Source == "" {
 		asset.Source = "bbscope"
@@ -115,15 +170,16 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 	return len(assets), nil
 }
 
-func (r *Repository) ListDomainRoots(ctx context.Context) ([]DomainRoot, error) {
+func (r *Repository) ListDomainRoots(ctx context.Context, programID string) ([]DomainRoot, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, program_id, target_raw, target_normalized
 		FROM zero_scope_assets
 		WHERE active = true
 		  AND in_scope = true
 		  AND asset_type = 'wildcard'
+		  AND ($1 = '' OR program_id::text = $1)
 		ORDER BY target_normalized
-	`)
+	`, programID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,15 +253,16 @@ func (r *Repository) ListSubdomains(ctx context.Context) ([]Subdomain, error) {
 	return subs, rows.Err()
 }
 
-func (r *Repository) ListOutOfScopeDomainRules(ctx context.Context) ([]DomainScopeRule, error) {
+func (r *Repository) ListOutOfScopeDomainRules(ctx context.Context, programID string) ([]DomainScopeRule, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, program_id, asset_type, target_raw, target_normalized
 		FROM zero_scope_assets
 		WHERE active = true
 		  AND in_scope = false
 		  AND asset_type IN ('domain', 'url', 'wildcard')
+		  AND ($1 = '' OR program_id::text = $1)
 		ORDER BY target_normalized
-	`)
+	`, programID)
 	if err != nil {
 		return nil, err
 	}
@@ -233,10 +290,10 @@ func (r *Repository) ListOutOfScopeDomainRules(ctx context.Context) ([]DomainSco
 	return rules, rows.Err()
 }
 
-func (r *Repository) ListProbeTargets(ctx context.Context) ([]ProbeTarget, error) {
+func (r *Repository) ListProbeTargets(ctx context.Context, programID string) ([]ProbeTarget, error) {
 	targets := []ProbeTarget{}
 	seen := map[string]bool{}
-	exclusions, err := r.ListOutOfScopeDomainRules(ctx)
+	exclusions, err := r.ListOutOfScopeDomainRules(ctx, programID)
 	if err != nil {
 		return nil, err
 	}
@@ -257,8 +314,9 @@ func (r *Repository) ListProbeTargets(ctx context.Context) ([]ProbeTarget, error
 		  AND a.active = true
 		  AND a.in_scope = true
 		  AND a.asset_type = 'wildcard'
+		  AND ($1 = '' OR s.program_id::text = $1)
 		ORDER BY s.fqdn
-	`)
+	`, programID)
 	if err != nil {
 		return nil, err
 	}
@@ -302,8 +360,9 @@ func (r *Repository) ListProbeTargets(ctx context.Context) ([]ProbeTarget, error
 		WHERE active = true
 		  AND in_scope = true
 		  AND asset_type IN ('domain', 'url')
+		  AND ($1 = '' OR program_id::text = $1)
 		ORDER BY target_normalized
-	`)
+	`, programID)
 	if err != nil {
 		return nil, err
 	}

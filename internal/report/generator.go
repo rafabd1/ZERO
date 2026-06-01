@@ -13,8 +13,9 @@ import (
 )
 
 type Generator struct {
-	repo  *db.Repository
-	limit int
+	repo      *db.Repository
+	programID string
+	limit     int
 }
 
 type Result struct {
@@ -34,8 +35,13 @@ func (g *Generator) WithLimit(limit int) *Generator {
 	return g
 }
 
+func (g *Generator) WithProgramID(programID string) *Generator {
+	g.programID = strings.TrimSpace(programID)
+	return g
+}
+
 func (g *Generator) Run(ctx context.Context) (Result, error) {
-	findings, err := g.repo.ListUnreportedFindings(ctx, g.limit)
+	findings, err := g.repo.ListUnreportedFindings(ctx, g.programID, g.limit)
 	if err != nil {
 		return Result{}, err
 	}
