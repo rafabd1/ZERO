@@ -12,7 +12,7 @@
 ## Phase 2: Data Quality
 
 - Add DNS validation with `dnsx`.
-- Mark stale subdomains/services inactive after repeated misses.
+- Mark stale subdomains/services inactive after repeated misses or a conservative stale window.
 - Add scope safety checks for wildcard expansion.
 - Normalize technology names with a small alias table.
 - Add batch insert/upsert paths for first scans with large scopes and large subdomain lists.
@@ -36,7 +36,14 @@
 
 - Add authenticated API endpoints for latest scan state.
 - Expose latest assets, alive services, Nuclei hits, candidate findings, reports, and change events.
+- Queue custom scan requests through API and worker-backed persistence.
 - Use a bearer token or service-to-service auth; do not expose Supabase service keys to clients.
+
+## Phase 4.7: Operator Hardening
+
+- Persist Nuclei templates in a Docker volume and update them on startup or via `zero tools nuclei-update`.
+- Maintain a local lab for passive CVE matching and Nuclei validation smoke tests.
+- Run CI for Go tests, builds, Docker build, and public secret guards.
 
 ## Phase 5: More Scope Sources
 

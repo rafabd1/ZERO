@@ -49,6 +49,7 @@ func (r *Repository) ListVersionedTechnologies(ctx context.Context, programID st
 			t.source
 		FROM zero_technology_observations t
 		WHERE t.version <> ''
+		  AND t.active = true
 		  AND ($1 = '' OR t.program_id::text = $1)
 		ORDER BY lower(t.name), t.version, t.last_seen_at DESC
 		LIMIT $2
@@ -196,6 +197,7 @@ func (r *Repository) UpsertTechnologyObservation(ctx context.Context, obs Techno
 		VALUES ($1,$2,NULLIF($3, '')::uuid,$4,$5,$6,$7,$8::jsonb)
 		ON CONFLICT(http_service_id, lower(name), version, source) DO UPDATE SET
 			last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_technology_observations.last_scan_run_id),
+			active = true,
 			last_seen_at = now(),
 			confidence = GREATEST(zero_technology_observations.confidence, excluded.confidence),
 			evidence = zero_technology_observations.evidence || excluded.evidence

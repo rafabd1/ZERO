@@ -25,6 +25,7 @@ GET /v1/nuclei-results
 GET /v1/findings
 GET /v1/scans/latest
 GET /v1/scan-requests
+POST /v1/scan-requests
 GET /v1/changes?since=...
 GET /v1/notifications/discord
 GET /v1/programs/{program_id}/latest-scan
@@ -41,11 +42,32 @@ GET /v1/reports/latest
 Responses should be paginated. Findings and Nuclei results should support filters for severity, confidence, status, and time range.
 
 Current implementation includes `GET /healthz`, `GET /v1/programs`, `GET /v1/assets`, `GET /v1/services`, `GET /v1/technologies`, `GET /v1/technology-vulnerabilities`, `GET /v1/nuclei-results`, and `GET /v1/findings`.
-Current implementation also includes `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/scan-requests`, `GET /v1/changes?since=...`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, `GET /v1/programs/{program_id}/changes?since=...`, `GET /v1/programs/{program_id}/assets`, `GET /v1/programs/{program_id}/services`, `GET /v1/programs/{program_id}/technologies`, `GET /v1/programs/{program_id}/technology-vulnerabilities`, `GET /v1/programs/{program_id}/nuclei-results`, and `GET /v1/programs/{program_id}/findings?status=new`.
+Current implementation also includes `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/scan-requests`, `POST /v1/scan-requests`, `GET /v1/changes?since=...`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, `GET /v1/programs/{program_id}/changes?since=...`, `GET /v1/programs/{program_id}/assets`, `GET /v1/programs/{program_id}/services`, `GET /v1/programs/{program_id}/technologies`, `GET /v1/programs/{program_id}/technology-vulnerabilities`, `GET /v1/programs/{program_id}/nuclei-results`, and `GET /v1/programs/{program_id}/findings?status=new`.
 
 The `since` query parameter accepts a Postgres-compatible timestamp and returns events with `occurred_at` greater than that value.
 
 Asset and service responses include `last_scan_run_id` when the entity was produced or refreshed by a task. Nuclei results, reports, and change events expose `scan_run_id`.
+
+Create a queued custom scan request:
+
+```http
+POST /v1/scan-requests
+Authorization: Bearer <ZERO_API_TOKEN>
+Content-Type: application/json
+
+{
+  "program_id": "00000000-0000-0000-0000-000000000000",
+  "name": "targeted-cve-check",
+  "run_after": "30m",
+  "params": {
+    "ProgramID": "00000000-0000-0000-0000-000000000000",
+    "SkipSync": true,
+    "NucleiFromCVEs": true,
+    "NucleiCVELimit": 20,
+    "NucleiLimit": 50
+  }
+}
+```
 
 ## Notification Flow
 

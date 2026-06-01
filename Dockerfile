@@ -17,9 +17,10 @@ FROM alpine:3.21
 ARG TARGETARCH
 ARG SUBFINDER_VERSION=2.14.0
 ARG HTTPX_VERSION=1.9.0
+ARG DNSX_VERSION=1.2.2
 ARG NUCLEI_VERSION=3.8.0
 
-RUN apk add --no-cache ca-certificates bind-tools git curl unzip && \
+RUN apk add --no-cache ca-certificates bind-tools git curl unzip su-exec && \
     adduser -D -h /home/zero zero && \
     mkdir -p /home/zero/.config/subfinder && \
     chown -R zero:zero /home/zero
@@ -32,10 +33,13 @@ RUN set -eux; \
     curl -fsSL "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_${arch}.zip" -o /tmp/httpx.zip; \
     unzip -q /tmp/httpx.zip -d /tmp/httpx; \
     install -m 0755 /tmp/httpx/httpx /usr/local/bin/httpx; \
+    curl -fsSL "https://github.com/projectdiscovery/dnsx/releases/download/v${DNSX_VERSION}/dnsx_${DNSX_VERSION}_linux_${arch}.zip" -o /tmp/dnsx.zip; \
+    unzip -q /tmp/dnsx.zip -d /tmp/dnsx; \
+    install -m 0755 /tmp/dnsx/dnsx /usr/local/bin/dnsx; \
     curl -fsSL "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_${arch}.zip" -o /tmp/nuclei.zip; \
     unzip -q /tmp/nuclei.zip -d /tmp/nuclei; \
     install -m 0755 /tmp/nuclei/nuclei /usr/local/bin/nuclei; \
-    rm -rf /tmp/subfinder /tmp/subfinder.zip /tmp/httpx /tmp/httpx.zip /tmp/nuclei /tmp/nuclei.zip
+    rm -rf /tmp/subfinder /tmp/subfinder.zip /tmp/httpx /tmp/httpx.zip /tmp/dnsx /tmp/dnsx.zip /tmp/nuclei /tmp/nuclei.zip
 
 COPY --from=build /out/zero /usr/local/bin/zero
 COPY --from=build /out/webanalyze/webanalyze /usr/local/bin/webanalyze
@@ -44,14 +48,15 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER zero
 WORKDIR /home/zero
 
 ENV ZERO_SUBFINDER_BIN=/usr/local/bin/subfinder
 ENV ZERO_HTTPX_BIN=/usr/local/bin/httpx
+ENV ZERO_DNSX_BIN=/usr/local/bin/dnsx
 ENV ZERO_WEBANALYZE_BIN=/usr/local/bin/webanalyze
 ENV ZERO_WEBANALYZE_APPS=/usr/local/share/webanalyze/technologies.json
 ENV ZERO_NUCLEI_BIN=/usr/local/bin/nuclei
+ENV ZERO_NUCLEI_TEMPLATE_DIR=/home/zero/nuclei-templates
 ENV ZERO_SUBFINDER_PROVIDER_CONFIG=/home/zero/.config/subfinder/provider-config.yaml
 
 ENTRYPOINT ["docker-entrypoint.sh"]

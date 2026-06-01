@@ -21,6 +21,7 @@ To run the first real scan, Zero needs:
   - `ZERO_NVD_API_KEY` reduces NVD rate-limit delays during passive CVE matching.
 - External tools installed or available in Docker:
   - `subfinder`
+  - `dnsx`
   - `httpx`
   - `webanalyze`
   - `nuclei`
@@ -48,7 +49,7 @@ Custom one-off scans can be launched immediately with `zero run manual` or queue
 For each due program, Zero executes:
 
 ```text
-enum subfinder --program-id ... -> probe httpx --program-id ... -> enrich webanalyze --program-id ... -> analyze cves --program-id ... -> analyze nuclei --program-id ... -> report generate --program-id ... -> notify discord --program-id ...
+enum subfinder --program-id ... -> probe dnsx --program-id ... -> probe httpx --program-id ... -> enrich webanalyze --program-id ... -> analyze cves --program-id ... -> analyze nuclei --program-id ... -> report generate --program-id ... -> notify discord --program-id ...
 ```
 
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
@@ -61,6 +62,8 @@ Current change events are emitted for newly inserted scope assets, subdomains, H
 
 Task-generated entities carry the current scan id: scope assets, subdomains, HTTP services, and technology observations use `last_scan_run_id`; Nuclei results, reports, and change events use `scan_run_id`. This is the authoritative audit trail for tying a report or notification back to the execution that produced it.
 
+Stale cleanup is conservative and time-based. `ZERO_STALE_AFTER_HOURS=168` means a target must be unseen for roughly seven days before subdomains, HTTP services, or technology observations are marked inactive. Set it to `0` to disable stale cleanup.
+
 On worker startup, `ZERO_RECOVER_RUNNING_SCANS=true` marks interrupted `zero_scan_runs.status='running'` rows as failed with recovery metadata. Since the program's `last_scan_finished_at` is not advanced by an interrupted run, that program remains due and the startup run can continue from the persisted database state.
 
 HackerOne scope sync defaults to `ZERO_SCOPE_PRIVATE_ONLY=false`, so bbscope imports both public and private open programs visible to the configured account. `ZERO_SCOPE_BOUNTY_ONLY=true` keeps VDP programs out. Assets that are listed as in-scope by the platform but are not bounty-eligible are stored as out-of-scope in Zero, so they block broad wildcard expansion instead of being scanned. Set `ZERO_SCOPE_PRIVATE_ONLY=true` only when intentionally limiting Zero to private/soft-launched programs.
@@ -72,6 +75,7 @@ Use limits when validating external tools:
 ```bash
 zero sync h1
 zero enum subfinder --limit 2
+zero probe dnsx --limit 50
 zero probe httpx --limit 50
 zero enrich webanalyze --limit 50
 zero analyze cves --limit 1
@@ -120,10 +124,14 @@ The Docker defaults are:
 
 ```env
 ZERO_SUBFINDER_BIN="subfinder"
+ZERO_DNSX_BIN="dnsx"
+ZERO_DNSX_RATE=200
 ZERO_HTTPX_BIN="httpx"
 ZERO_WEBANALYZE_BIN="webanalyze"
 ZERO_WEBANALYZE_APPS="/usr/local/share/webanalyze/technologies.json"
 ZERO_NUCLEI_BIN="nuclei"
+ZERO_NUCLEI_TEMPLATE_DIR="/home/zero/nuclei-templates"
+ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP=true
 ZERO_NUCLEI_FROM_CVES=true
 ZERO_NUCLEI_CVE_LIMIT=100
 ZERO_SUBFINDER_PROVIDER_CONFIG="/home/zero/.config/subfinder/provider-config.yaml"

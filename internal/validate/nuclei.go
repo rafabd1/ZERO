@@ -23,6 +23,7 @@ type NucleiRunner struct {
 	severities  string
 	templateIDs string
 	templates   string
+	templateDir string
 	rate        int
 	concurrency int
 	bulkSize    int
@@ -86,6 +87,13 @@ func (r *NucleiRunner) WithTemplates(templates string) *NucleiRunner {
 	return r
 }
 
+func (r *NucleiRunner) WithTemplateDir(templateDir string) *NucleiRunner {
+	if strings.TrimSpace(templateDir) != "" {
+		r.templateDir = strings.TrimSpace(templateDir)
+	}
+	return r
+}
+
 func (r *NucleiRunner) WithRuntime(retries, timeout int) *NucleiRunner {
 	if retries >= 0 {
 		r.retries = retries
@@ -145,7 +153,10 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	}
 	if r.templates != "" {
 		args = append(args, "-t", r.templates)
-	} else if r.templateIDs != "" {
+	} else if r.templateDir != "" {
+		args = append(args, "-t", r.templateDir)
+	}
+	if r.templateIDs != "" {
 		args = append(args, "-id", r.templateIDs)
 	} else {
 		args = append(args, "-tags", r.tags)

@@ -31,7 +31,7 @@ func TestMatchConfidenceUsesCPERanges(t *testing.T) {
 		}},
 	}
 
-	confidence, evidence := matchConfidence(tech, cve, "Apache HTTP Server 2.4.49")
+	confidence, evidence := matchConfidence(tech, cve, "Apache HTTP Server 2.4.49", DefaultTechnologyAliases())
 	if confidence < 90 {
 		t.Fatalf("expected strong CPE confidence, got %d with evidence %#v", confidence, evidence)
 	}
@@ -54,20 +54,20 @@ func TestMatchConfidenceRejectsUnrelatedCPE(t *testing.T) {
 		}},
 	}
 
-	confidence, _ := matchConfidence(tech, cve, "nginx 1.18.0")
+	confidence, _ := matchConfidence(tech, cve, "nginx 1.18.0", DefaultTechnologyAliases())
 	if confidence != 0 {
 		t.Fatalf("expected unrelated CPE to be rejected, got %d", confidence)
 	}
 }
 
 func TestProductMatchingAvoidsVendorOnlyCiscoMatches(t *testing.T) {
-	if productMatchesTech("cisco ios xe", "Cisco ASA") {
+	if productMatchesTech("cisco ios xe", "Cisco ASA", DefaultTechnologyAliases()) {
 		t.Fatal("expected Cisco vendor-only overlap to be rejected")
 	}
-	if !productMatchesTech("cisco adaptive security appliance", "Cisco ASA WebVPN") {
+	if !productMatchesTech("cisco adaptive security appliance", "Cisco ASA WebVPN", DefaultTechnologyAliases()) {
 		t.Fatal("expected Cisco ASA alias to match adaptive security appliance CPE product")
 	}
-	if !productMatchesTech("cisco firepower threat defense", "Cisco FTD WebVPN") {
+	if !productMatchesTech("cisco firepower threat defense", "Cisco FTD WebVPN", DefaultTechnologyAliases()) {
 		t.Fatal("expected Cisco FTD alias to match firepower threat defense CPE product")
 	}
 }
@@ -82,7 +82,7 @@ func TestTextFallbackLinksVersionedTechnology(t *testing.T) {
 		}},
 	}
 
-	confidence, evidence := matchConfidence(tech, cve, "Struts 2.5.12")
+	confidence, evidence := matchConfidence(tech, cve, "Struts 2.5.12", DefaultTechnologyAliases())
 	if confidence < 40 {
 		t.Fatalf("expected keyword fallback confidence, got %d with evidence %#v", confidence, evidence)
 	}

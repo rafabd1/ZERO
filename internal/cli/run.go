@@ -46,6 +46,7 @@ func runPipeline(parent *cobra.Command) error {
 	steps := [][]string{
 		{"sync", "h1"},
 		{"enum", "subfinder"},
+		{"probe", "dnsx"},
 		{"probe", "httpx"},
 		{"enrich", "webanalyze"},
 		{"analyze", "cves"},
@@ -114,7 +115,7 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 		go func() {
 			defer wg.Done()
 			for program := range jobs {
-				if err := runProgramPipeline(ctx, parent, repo, program); err != nil {
+				if err := runProgramPipeline(ctx, parent, repo, program, cfg.Data.StaleAfterHours); err != nil {
 					mu.Lock()
 					if firstErr == nil {
 						firstErr = err
@@ -132,7 +133,7 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	return firstErr
 }
 
-func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program) error {
+func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program, staleAfterHours int) error {
 	fmt.Fprintf(parent.OutOrStdout(), "zero program pipeline starting: %s/%s %s\n", program.Platform, program.Handle, program.ID)
 	if err := repo.MarkProgramScanStarted(ctx, program.ID); err != nil {
 		return err
@@ -143,6 +144,7 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 	}
 	steps := [][]string{
 		{"enum", "subfinder", "--program-id", program.ID},
+		{"probe", "dnsx", "--program-id", program.ID},
 		{"probe", "httpx", "--program-id", program.ID},
 		{"enrich", "webanalyze", "--program-id", program.ID},
 		{"analyze", "cves", "--program-id", program.ID},
@@ -159,13 +161,21 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 			})
 		}
 	}
+	stale, err := repo.MarkStaleEntities(ctx, program.ID, staleAfterHours)
+	if err != nil {
+		return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+	}
 	if err := repo.MarkProgramScanFinished(ctx, program.ID); err != nil {
 		return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 	}
 	if err := finishScanRun(ctx, repo, scanID, nil, len(steps), 0, map[string]any{
-		"program_id": program.ID,
-		"handle":     program.Handle,
-		"steps":      len(steps),
+		"program_id":          program.ID,
+		"handle":              program.Handle,
+		"steps":               len(steps),
+		"stale_after_hours":   staleAfterHours,
+		"stale_subdomains":    stale.Subdomains,
+		"stale_http_services": stale.HTTPServices,
+		"stale_technologies":  stale.Technologies,
 	}); err != nil {
 		return err
 	}

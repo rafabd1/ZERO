@@ -298,6 +298,116 @@ func (r *Repository) UpsertSubdomain(ctx context.Context, sub Subdomain) (string
 	return id, nil
 }
 
+func (r *Repository) UpsertSubdomains(ctx context.Context, subs []Subdomain) (int, error) {
+	if len(subs) == 0 {
+		return 0, nil
+	}
+	batch := &pgx.Batch{}
+	for _, sub := range subs {
+		batch.Queue(`
+			INSERT INTO zero_subdomains(program_id, scope_asset_id, last_scan_run_id, root_domain, fqdn, source)
+			VALUES ($1,$2,NULLIF($3, '')::uuid,$4,$5,$6)
+			ON CONFLICT(program_id, fqdn) DO UPDATE SET
+				scope_asset_id = COALESCE(excluded.scope_asset_id, zero_subdomains.scope_asset_id),
+				last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_subdomains.last_scan_run_id),
+				root_domain = excluded.root_domain,
+				source = excluded.source,
+				active = true,
+				last_seen_at = now()
+			RETURNING id::text, (xmax = 0) AS inserted
+		`, sub.ProgramID, nullString(sub.ScopeAssetID), sub.LastScanRunID, sub.RootDomain, sub.FQDN, sub.Source)
+	}
+	results := r.pool.SendBatch(ctx, batch)
+	events := make([]ChangeEvent, 0)
+	for _, sub := range subs {
+		var id string
+		var inserted bool
+		if err := results.QueryRow().Scan(&id, &inserted); err != nil {
+			return 0, fmt.Errorf("batch upsert subdomains: %w", err)
+		}
+		if inserted {
+			events = append(events, ChangeEvent{
+				ProgramID:  sub.ProgramID,
+				ScanRunID:  sub.LastScanRunID,
+				EntityType: "subdomain",
+				EntityID:   id,
+				EntityKey:  sub.FQDN,
+				ChangeType: "added",
+				NewValue: map[string]any{
+					"root_domain": sub.RootDomain,
+					"fqdn":        sub.FQDN,
+					"source":      sub.Source,
+				},
+			})
+		}
+	}
+	if err := results.Close(); err != nil {
+		return 0, fmt.Errorf("batch upsert subdomains: %w", err)
+	}
+	if err := r.RecordChangeEvents(ctx, events); err != nil {
+		return 0, err
+	}
+	return len(subs), nil
+}
+
+func (r *Repository) ListDNSValidationTargets(ctx context.Context, programID string, limit int) ([]Subdomain, error) {
+	if limit <= 0 {
+		limit = 100000
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text, program_id::text, COALESCE(scope_asset_id::text, ''), root_domain, fqdn, source
+		FROM zero_subdomains
+		WHERE active = true
+		  AND ($1 = '' OR program_id::text = $1)
+		ORDER BY last_seen_at DESC, fqdn
+		LIMIT $2
+	`, programID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	targets := []Subdomain{}
+	for rows.Next() {
+		var target Subdomain
+		if err := rows.Scan(&target.ID, &target.ProgramID, &target.ScopeAssetID, &target.RootDomain, &target.FQDN, &target.Source); err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	return targets, rows.Err()
+}
+
+func (r *Repository) UpdateSubdomainResolution(ctx context.Context, programID string, resolved map[string]bool, scanRunID string) (int, error) {
+	if len(resolved) == 0 {
+		return 0, nil
+	}
+	batch := &pgx.Batch{}
+	for fqdn, ok := range resolved {
+		batch.Queue(`
+			UPDATE zero_subdomains
+			SET resolves = $3,
+				last_scan_run_id = COALESCE(NULLIF($4, '')::uuid, last_scan_run_id),
+				last_seen_at = CASE WHEN $3 THEN now() ELSE last_seen_at END,
+				metadata = metadata || jsonb_build_object('last_dns_validation_at', now())
+			WHERE program_id = $1::uuid
+			  AND fqdn = $2
+		`, programID, fqdn, ok, scanRunID)
+	}
+	results := r.pool.SendBatch(ctx, batch)
+	updated := 0
+	for range resolved {
+		tag, err := results.Exec()
+		if err != nil {
+			return updated, fmt.Errorf("update subdomain resolution: %w", err)
+		}
+		updated += int(tag.RowsAffected())
+	}
+	if err := results.Close(); err != nil {
+		return updated, fmt.Errorf("update subdomain resolution: %w", err)
+	}
+	return updated, nil
+}
+
 func (r *Repository) ListSubdomains(ctx context.Context) ([]Subdomain, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, program_id, COALESCE(scope_asset_id::text, ''), root_domain, fqdn, source
@@ -382,6 +492,7 @@ func (r *Repository) ListProbeTargets(ctx context.Context, programID string) ([]
 		  AND a.active = true
 		  AND a.in_scope = true
 		  AND a.asset_type = 'wildcard'
+		  AND COALESCE(s.resolves, true) = true
 		  AND ($1 = '' OR s.program_id::text = $1)
 		ORDER BY s.fqdn
 	`, programID)

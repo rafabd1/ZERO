@@ -19,6 +19,7 @@ type NVDRunner struct {
 	apiKey    string
 	programID string
 	scanRunID string
+	aliases   TechnologyAliases
 	limit     int
 	perQuery  int
 	client    *http.Client
@@ -37,10 +38,18 @@ func NewNVDRunner(repo *db.Repository, apiKey string) *NVDRunner {
 	return &NVDRunner{
 		repo:     repo,
 		apiKey:   strings.TrimSpace(apiKey),
+		aliases:  DefaultTechnologyAliases(),
 		limit:    25,
 		perQuery: 20,
 		client:   &http.Client{Timeout: 20 * time.Second},
 	}
+}
+
+func (r *NVDRunner) WithAliases(aliases TechnologyAliases) *NVDRunner {
+	if len(aliases) > 0 {
+		r.aliases = aliases
+	}
+	return r
 }
 
 func (r *NVDRunner) WithProgramID(programID string) *NVDRunner {
@@ -147,7 +156,7 @@ func (r *NVDRunner) search(ctx context.Context, tech db.VersionedTechnology, key
 	}
 	candidates := make([]nvdCandidate, 0, len(parsed.Vulnerabilities))
 	for _, item := range parsed.Vulnerabilities {
-		confidence, evidence := matchConfidence(tech, item.CVE, keyword)
+		confidence, evidence := matchConfidence(tech, item.CVE, keyword, r.aliases)
 		if confidence < 40 {
 			continue
 		}
@@ -254,8 +263,8 @@ func (c nvdCVE) references() []string {
 	return refs
 }
 
-func matchConfidence(tech db.VersionedTechnology, cve nvdCVE, query string) (int, map[string]any) {
-	cpeScore, cpeEvidence := cve.cpeConfidence(tech)
+func matchConfidence(tech db.VersionedTechnology, cve nvdCVE, query string, aliases TechnologyAliases) (int, map[string]any) {
+	cpeScore, cpeEvidence := cve.cpeConfidence(tech, aliases)
 	textScore, textEvidence := textConfidence(tech, cve)
 	if cpeScore >= textScore {
 		cpeEvidence["query"] = query
@@ -267,7 +276,7 @@ func matchConfidence(tech db.VersionedTechnology, cve nvdCVE, query string) (int
 	return textScore, textEvidence
 }
 
-func (c nvdCVE) cpeConfidence(tech db.VersionedTechnology) (int, map[string]any) {
+func (c nvdCVE) cpeConfidence(tech db.VersionedTechnology, aliases TechnologyAliases) (int, map[string]any) {
 	bestScore := 0
 	best := map[string]any{}
 	for _, config := range c.Configurations {
@@ -281,7 +290,7 @@ func (c nvdCVE) cpeConfidence(tech db.VersionedTechnology) (int, map[string]any)
 					continue
 				}
 				productText := normalizeText(parsed.Vendor + " " + parsed.Product)
-				if !productMatchesTech(productText, tech.Name) {
+				if !productMatchesTech(productText, tech.Name, aliases) {
 					continue
 				}
 				score, relation := cpeVersionScore(tech.Version, parsed.Version, match)
@@ -328,7 +337,7 @@ func parseCPE23(criteria string) (cpe23, bool) {
 	}, true
 }
 
-func productMatchesTech(productText, techName string) bool {
+func productMatchesTech(productText, techName string, aliases TechnologyAliases) bool {
 	techText := normalizeText(techName)
 	if techText == "" || productText == "" {
 		return false
@@ -336,7 +345,7 @@ func productMatchesTech(productText, techName string) bool {
 	if strings.Contains(productText, techText) || strings.Contains(techText, productText) {
 		return true
 	}
-	for _, alias := range technologyAliases(techName) {
+	for _, alias := range aliases.MatchAliases(techName) {
 		if strings.Contains(productText, alias) {
 			return true
 		}
@@ -528,21 +537,6 @@ func significantTokens(value string) []string {
 		out = append(out, token)
 	}
 	return out
-}
-
-func technologyAliases(value string) []string {
-	value = normalizeText(value)
-	aliases := []string{}
-	if strings.Contains(value, "cisco") && strings.Contains(value, "asa") {
-		aliases = append(aliases, "adaptive security appliance")
-	}
-	if strings.Contains(value, "cisco") && strings.Contains(value, "ftd") {
-		aliases = append(aliases, "firepower threat defense")
-	}
-	if strings.Contains(value, "webvpn") || strings.Contains(value, "web vpn") {
-		aliases = append(aliases, "webvpn", "web vpn")
-	}
-	return aliases
 }
 
 var nonWordRE = regexp.MustCompile(`[^a-z0-9.]+`)

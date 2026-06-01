@@ -8,6 +8,8 @@ flowchart LR
   BBS --> DB["Supabase Postgres"]
   DB --> SF["subfinder"]
   SF --> DB
+  DB --> DNSX["dnsx resolution"]
+  DNSX --> DB
   DB --> HX["httpx"]
   HX --> DB
   DB --> WA["Webanalyze/Wappalyzer enrichment"]
@@ -25,7 +27,7 @@ flowchart LR
 - `cmd/zero`: CLI entrypoint.
 - `internal/scope`: scope source adapters. The first adapter imports HackerOne via `github.com/sw33tLie/bbscope/v2/pkg/platforms/hackerone`.
 - `internal/enumeration`: external enumeration tools such as `subfinder`.
-- `internal/probe`: live checks and fingerprinting, currently `httpx`.
+- `internal/probe`: DNS resolution and live checks, currently `dnsx` and `httpx`.
 - `internal/enrich`: heavier target-intelligence enrichment, currently Webanalyze/Wappalyzer definitions.
 - `internal/db`: Supabase/Postgres repository and migrations.
 - `docs`: operator design, integration notes, and roadmap.
@@ -60,6 +62,7 @@ Zero scans multiple programs concurrently through `zero run due`, starting with 
 - Discovered names are accepted only when they match the wildcard regex for that scope asset. The apex (`example.com`) is not accepted as a wildcard discovery unless it is also present as an exact `domain` or `url` asset.
 - Active out-of-scope `domain`, `url`, and `wildcard` assets override broad in-scope wildcards during enumeration and probing.
 - `httpx` probes two target classes: discovered wildcard subdomains and exact `domain`/`url` scope hosts. Exact scope hosts are not expanded into roots.
+- `dnsx` runs before `httpx` for discovered wildcard subdomains and records `resolves`; unresolved wildcard discoveries are skipped by `httpx` unless they later resolve again.
 - `httpx` stores target intel for alive services and technology observations.
 - `webanalyze` runs after `httpx` against alive services and stores broader Wappalyzer-style technology observations, including versions when detectable. Operators can provide a custom technologies file per manual run without changing global worker configuration.
 - `analyze cves` queries NVD for versioned technology observations, prefers CPE/range evidence where available, falls back to keyword evidence, and stores program-scoped CVE matches as passive intelligence only.
@@ -67,6 +70,7 @@ Zero scans multiple programs concurrently through `zero run due`, starting with 
 - Newly inserted entities write stable `zero_change_events` rows so operators and API clients can inspect what changed without replaying old observations.
 - Report generation emits only new, unreported findings and attaches a stable `report_id` for deduplication.
 - Discord notification delivery reads new reports, stores delivery state in `zero_discord_notifications`, and never sends a report twice after a successful send.
+- At the end of a due-program run, entities older than `ZERO_STALE_AFTER_HOURS` are marked inactive/removed with change events. The default is 168 hours, which gives a 72-hour cadence more than two missed cycles before stale cleanup.
 
 ## Scheduler
 
@@ -79,7 +83,7 @@ The worker uses second-enabled cron expressions:
 - `ZERO_SCHEDULE_CVE`
 - `ZERO_SCHEDULE_NUCLEI`
 
-The primary worker job is the due-program pipeline scheduled by `ZERO_SCHEDULE_FULL`: global scope sync first, then per-program enumeration, probing, Webanalyze enrichment, passive CVE matching, Nuclei validation, report generation, and Discord notification for due programs only. The `httpx` and Webanalyze fingerprint phases are target intel only; passive CVE matching creates validation candidates, not reportable findings, until Nuclei or a custom validator confirms them.
+The primary worker job is the due-program pipeline scheduled by `ZERO_SCHEDULE_FULL`: global scope sync first, then per-program enumeration, DNS resolution, probing, Webanalyze enrichment, passive CVE matching, Nuclei validation, report generation, and Discord notification for due programs only. The `httpx` and Webanalyze fingerprint phases are target intel only; passive CVE matching creates validation candidates, not reportable findings, until Nuclei or a custom validator confirms them.
 
 Manual runs use `zero run manual` and accept one-off limits, custom Webanalyze apps files, CVE-derived Nuclei template selection, and explicit Nuclei template IDs. These flags apply only to that execution and do not modify environment defaults or worker cadence.
 

@@ -3,6 +3,8 @@ services:
     build: .
     env_file:
       - .env
+    volumes:
+      - nuclei-templates:/home/zero/nuclei-templates
     command: ["worker"]
     restart: unless-stopped
 
@@ -13,6 +15,8 @@ services:
     environment:
       ZERO_API_ADDR: "0.0.0.0:8080"
     command: ["api"]
+    volumes:
+      - nuclei-templates:/home/zero/nuclei-templates
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
@@ -29,3 +33,6 @@ services:
     command: ["migrate", "up"]
     profiles:
       - tools
+
+volumes:
+  nuclei-templates:

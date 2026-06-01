@@ -22,6 +22,7 @@ type Config struct {
 	Notify    NotifyConfig
 	Worker    WorkerConfig
 	Intel     IntelConfig
+	Data      DataConfig
 }
 
 type SupabaseConfig struct {
@@ -46,12 +47,17 @@ type ToolConfig struct {
 	SubfinderProviderConfig string
 	SubfinderSources        string
 	SubfinderRateLimits     string
+	DNSXBin                 string
+	DNSXResolvers           string
+	DNSXRate                int
 	HTTPXBin                string
 	WebanalyzeBin           string
 	WebanalyzeApps          string
 	WebanalyzeWorkers       int
 	WebanalyzeCrawl         int
 	NucleiBin               string
+	NucleiTemplateDir       string
+	NucleiUpdateTemplates   bool
 	NucleiFromCVEs          bool
 	NucleiTags              string
 	NucleiSeverities        string
@@ -77,7 +83,12 @@ type WorkerConfig struct {
 }
 
 type IntelConfig struct {
-	NVDAPIKey string
+	NVDAPIKey       string
+	TechAliasesFile string
+}
+
+type DataConfig struct {
+	StaleAfterHours int
 }
 
 type ScheduleConfig struct {
@@ -104,12 +115,17 @@ func Load() (Config, error) {
 	v.SetDefault("tools.subfinder_provider_config", "")
 	v.SetDefault("tools.subfinder_sources", "shodan,bevigil,virustotal,securitytrails")
 	v.SetDefault("tools.subfinder_rate_limits", "shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s")
+	v.SetDefault("tools.dnsx_bin", "dnsx")
+	v.SetDefault("tools.dnsx_resolvers", "")
+	v.SetDefault("tools.dnsx_rate", 200)
 	v.SetDefault("tools.httpx_bin", "httpx")
 	v.SetDefault("tools.webanalyze_bin", "webanalyze")
 	v.SetDefault("tools.webanalyze_apps", "")
 	v.SetDefault("tools.webanalyze_workers", 4)
 	v.SetDefault("tools.webanalyze_crawl", 0)
 	v.SetDefault("tools.nuclei_bin", "nuclei")
+	v.SetDefault("tools.nuclei_template_dir", "")
+	v.SetDefault("tools.nuclei_update_templates", true)
 	v.SetDefault("tools.nuclei_from_cves", true)
 	v.SetDefault("tools.nuclei_tags", "cve")
 	v.SetDefault("tools.nuclei_severities", "medium,high,critical")
@@ -129,6 +145,7 @@ func Load() (Config, error) {
 	v.SetDefault("worker.run_on_startup", true)
 	v.SetDefault("worker.recover_running_scans", true)
 	v.SetDefault("database.auto_migrate", true)
+	v.SetDefault("data.stale_after_hours", 168)
 
 	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
@@ -145,12 +162,17 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.subfinder_provider_config", "ZERO_SUBFINDER_PROVIDER_CONFIG", "SUBFINDER_PROVIDER_CONFIG")
 	_ = v.BindEnv("tools.subfinder_sources", "ZERO_SUBFINDER_SOURCES")
 	_ = v.BindEnv("tools.subfinder_rate_limits", "ZERO_SUBFINDER_RATE_LIMITS")
+	_ = v.BindEnv("tools.dnsx_bin", "ZERO_DNSX_BIN")
+	_ = v.BindEnv("tools.dnsx_resolvers", "ZERO_DNSX_RESOLVERS")
+	_ = v.BindEnv("tools.dnsx_rate", "ZERO_DNSX_RATE")
 	_ = v.BindEnv("tools.httpx_bin", "ZERO_HTTPX_BIN")
 	_ = v.BindEnv("tools.webanalyze_bin", "ZERO_WEBANALYZE_BIN")
 	_ = v.BindEnv("tools.webanalyze_apps", "ZERO_WEBANALYZE_APPS")
 	_ = v.BindEnv("tools.webanalyze_workers", "ZERO_WEBANALYZE_WORKERS")
 	_ = v.BindEnv("tools.webanalyze_crawl", "ZERO_WEBANALYZE_CRAWL")
 	_ = v.BindEnv("tools.nuclei_bin", "ZERO_NUCLEI_BIN")
+	_ = v.BindEnv("tools.nuclei_template_dir", "ZERO_NUCLEI_TEMPLATE_DIR")
+	_ = v.BindEnv("tools.nuclei_update_templates", "ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP")
 	_ = v.BindEnv("tools.nuclei_from_cves", "ZERO_NUCLEI_FROM_CVES")
 	_ = v.BindEnv("tools.nuclei_tags", "ZERO_NUCLEI_TAGS")
 	_ = v.BindEnv("tools.nuclei_severities", "ZERO_NUCLEI_SEVERITIES")
@@ -167,6 +189,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("worker.run_on_startup", "ZERO_RUN_ON_STARTUP")
 	_ = v.BindEnv("worker.recover_running_scans", "ZERO_RECOVER_RUNNING_SCANS")
 	_ = v.BindEnv("intel.nvd_api_key", "ZERO_NVD_API_KEY")
+	_ = v.BindEnv("intel.tech_aliases_file", "ZERO_TECH_ALIASES_FILE")
+	_ = v.BindEnv("data.stale_after_hours", "ZERO_STALE_AFTER_HOURS")
 
 	return Config{
 		DatabaseURL:       v.GetString("database_url"),
@@ -191,12 +215,17 @@ func Load() (Config, error) {
 			SubfinderProviderConfig: v.GetString("tools.subfinder_provider_config"),
 			SubfinderSources:        v.GetString("tools.subfinder_sources"),
 			SubfinderRateLimits:     v.GetString("tools.subfinder_rate_limits"),
+			DNSXBin:                 v.GetString("tools.dnsx_bin"),
+			DNSXResolvers:           v.GetString("tools.dnsx_resolvers"),
+			DNSXRate:                v.GetInt("tools.dnsx_rate"),
 			HTTPXBin:                v.GetString("tools.httpx_bin"),
 			WebanalyzeBin:           v.GetString("tools.webanalyze_bin"),
 			WebanalyzeApps:          v.GetString("tools.webanalyze_apps"),
 			WebanalyzeWorkers:       v.GetInt("tools.webanalyze_workers"),
 			WebanalyzeCrawl:         v.GetInt("tools.webanalyze_crawl"),
 			NucleiBin:               v.GetString("tools.nuclei_bin"),
+			NucleiTemplateDir:       v.GetString("tools.nuclei_template_dir"),
+			NucleiUpdateTemplates:   v.GetBool("tools.nuclei_update_templates"),
 			NucleiFromCVEs:          v.GetBool("tools.nuclei_from_cves"),
 			NucleiTags:              v.GetString("tools.nuclei_tags"),
 			NucleiSeverities:        v.GetString("tools.nuclei_severities"),
@@ -226,7 +255,11 @@ func Load() (Config, error) {
 			RecoverRunningScans: v.GetBool("worker.recover_running_scans"),
 		},
 		Intel: IntelConfig{
-			NVDAPIKey: v.GetString("intel.nvd_api_key"),
+			NVDAPIKey:       v.GetString("intel.nvd_api_key"),
+			TechAliasesFile: v.GetString("intel.tech_aliases_file"),
+		},
+		Data: DataConfig{
+			StaleAfterHours: v.GetInt("data.stale_after_hours"),
 		},
 	}, nil
 }

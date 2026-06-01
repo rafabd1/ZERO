@@ -43,7 +43,12 @@ func newAnalyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			aliases, err := intel.LoadTechnologyAliases(cfg.Intel.TechAliasesFile)
+			if err != nil {
+				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+			}
 			result, err := intel.NewNVDRunner(repo, cfg.Intel.NVDAPIKey).
+				WithAliases(aliases).
 				WithProgramID(cvesProgramID).
 				WithScanRunID(scanID).
 				WithLimit(cvesLimit).
@@ -123,6 +128,7 @@ func newAnalyzeCommand() *cobra.Command {
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
 				WithPolicy(tags, severities, templateIDs, rate, concurrency, bulkSize).
 				WithTemplates(nucleiTemplatePath).
+				WithTemplateDir(cfg.Tools.NucleiTemplateDir).
 				WithRuntime(retries, timeout).
 				WithScanRunID(scanID).
 				WithProgramID(nucleiProgramID).

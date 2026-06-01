@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS zero_technology_observations (
 	source text NOT NULL DEFAULT 'httpx',
 	confidence integer NOT NULL DEFAULT 50 CHECK (confidence >= 0 AND confidence <= 100),
 	evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+	active boolean NOT NULL DEFAULT true,
 	first_seen_at timestamptz NOT NULL DEFAULT now(),
 	last_seen_at timestamptz NOT NULL DEFAULT now()
 );
@@ -153,6 +154,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_zero_technology_observations_unique
 	ON zero_technology_observations(http_service_id, lower(name), version, source);
 CREATE INDEX IF NOT EXISTS idx_zero_technology_observations_program
 	ON zero_technology_observations(program_id, lower(name), version);
+ALTER TABLE zero_technology_observations
+	ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
 
 CREATE TABLE IF NOT EXISTS zero_vulnerability_records (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

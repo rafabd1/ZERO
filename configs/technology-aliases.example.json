@@ -1,0 +1,7 @@
+{
+  "Cisco ASA": ["adaptive security appliance", "asa webvpn", "webvpn"],
+  "Cisco FTD": ["firepower threat defense", "ftd webvpn", "webvpn"],
+  "Apache HTTP Server": ["apache http server", "apache httpd", "http_server"],
+  "Ivanti Connect Secure": ["connect secure", "pulse connect secure"],
+  "Fortinet FortiGate": ["fortigate", "fortios"]
+}

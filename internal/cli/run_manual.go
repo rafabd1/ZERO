@@ -13,12 +13,14 @@ type manualRunOptions struct {
 	ProgramID         string
 	SkipSync          bool
 	SkipEnum          bool
+	SkipDNS           bool
 	SkipProbe         bool
 	SkipEnrich        bool
 	SkipNuclei        bool
 	SkipReport        bool
 	SkipNotify        bool
 	SubfinderLimit    int
+	DNSXLimit         int
 	HTTPXLimit        int
 	WebanalyzeLimit   int
 	WebanalyzeApps    string
@@ -87,12 +89,14 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().StringVar(&opts.ProgramID, "program-id", "", "limit manual scan to one program id")
 	cmd.Flags().BoolVar(&opts.SkipSync, "skip-sync", false, "skip HackerOne scope sync")
 	cmd.Flags().BoolVar(&opts.SkipEnum, "skip-enum", false, "skip subfinder")
+	cmd.Flags().BoolVar(&opts.SkipDNS, "skip-dns", false, "skip dnsx resolution")
 	cmd.Flags().BoolVar(&opts.SkipProbe, "skip-probe", false, "skip httpx")
 	cmd.Flags().BoolVar(&opts.SkipEnrich, "skip-enrich", false, "skip Webanalyze enrichment")
 	cmd.Flags().BoolVar(&opts.SkipNuclei, "skip-nuclei", false, "skip Nuclei validation")
 	cmd.Flags().BoolVar(&opts.SkipReport, "skip-report", false, "skip report generation")
 	cmd.Flags().BoolVar(&opts.SkipNotify, "skip-notify", false, "skip Discord notification")
 	cmd.Flags().IntVar(&opts.SubfinderLimit, "subfinder-limit", 0, "manual subfinder root limit")
+	cmd.Flags().IntVar(&opts.DNSXLimit, "dnsx-limit", 0, "manual dnsx host limit")
 	cmd.Flags().IntVar(&opts.HTTPXLimit, "httpx-limit", 0, "manual httpx target limit")
 	cmd.Flags().IntVar(&opts.WebanalyzeLimit, "webanalyze-limit", 0, "manual Webanalyze service limit")
 	cmd.Flags().StringVar(&opts.WebanalyzeApps, "webanalyze-apps", "", "custom Webanalyze apps file for this run only")
@@ -129,6 +133,12 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		steps = append(steps, step)
 	}
 	if !opts.SkipProbe {
+		if !opts.SkipDNS {
+			step := []string{"probe", "dnsx"}
+			step = appendProgramFlag(step, opts.ProgramID)
+			step = appendIntFlag(step, "--limit", opts.DNSXLimit)
+			steps = append(steps, step)
+		}
 		step := []string{"probe", "httpx"}
 		step = appendProgramFlag(step, opts.ProgramID)
 		step = appendIntFlag(step, "--limit", opts.HTTPXLimit)

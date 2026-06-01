@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 func Require(name string) error {
@@ -68,4 +69,33 @@ func RunLines(ctx context.Context, bin string, args []string, stdin io.Reader, o
 		return fmt.Errorf("%s failed: %s", bin, msg)
 	}
 	return nil
+}
+
+func RunLinesRetry(ctx context.Context, attempts int, delay time.Duration, bin string, args []string, stdinFactory func() (io.Reader, error), onLine func(string) error) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if delay <= 0 {
+		delay = 2 * time.Second
+	}
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		stdin, err := stdinFactory()
+		if err != nil {
+			return err
+		}
+		lastErr = RunLines(ctx, bin, args, stdin, onLine)
+		if lastErr == nil {
+			return nil
+		}
+		if attempt == attempts || errors.Is(ctx.Err(), context.Canceled) {
+			break
+		}
+		select {
+		case <-time.After(delay * time.Duration(attempt)):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return lastErr
 }

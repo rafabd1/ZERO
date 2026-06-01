@@ -16,6 +16,7 @@ The initial migration creates tables prefixed with `zero_` to avoid collisions w
 - Subdomains are unique per program and FQDN.
 - HTTP services are unique per program and URL.
 - Technology observations are unique by service, lowercased name, version, and source.
+- Technology observations carry `active`; stale observations are deactivated instead of deleted.
 - Vulnerability records are unique by vulnerability id, for example `CVE-2025-20362`.
 - Technology/CVE matches are unique per program, vulnerability, technology/version, and source query.
 - Nuclei results are unique per program, template, matched URL, and evidence hash.

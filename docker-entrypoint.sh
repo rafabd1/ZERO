@@ -13,4 +13,12 @@ if [ ! -s "$provider_config" ]; then
   } > "$provider_config"
 fi
 
-exec zero "$@"
+nuclei_template_dir="${ZERO_NUCLEI_TEMPLATE_DIR:-/home/zero/nuclei-templates}"
+mkdir -p "$nuclei_template_dir"
+chown -R zero:zero /home/zero/.config "$nuclei_template_dir" 2>/dev/null || true
+
+if [ "${ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP:-true}" = "true" ] && command -v nuclei >/dev/null 2>&1; then
+  su-exec zero nuclei -update-templates -update-template-dir "$nuclei_template_dir" -silent >/dev/null 2>&1 || true
+fi
+
+exec su-exec zero zero "$@"

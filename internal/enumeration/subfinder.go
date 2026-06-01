@@ -88,12 +88,13 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 		if r.rateLimits != "" {
 			args = append(args, "-rls", r.rateLimits)
 		}
+		collected := []db.Subdomain{}
 		err := tools.RunLines(ctx, r.bin, args, nil, func(line string) error {
 			fqdn, ok := sanitize.CanonicalDomain(strings.TrimSpace(line))
 			if !ok || !sanitize.MatchesWildcard(fqdn, root.RootDomain) || excluded(exclusions, root.ProgramID, fqdn) {
 				return nil
 			}
-			_, err := r.repo.UpsertSubdomain(ctx, db.Subdomain{
+			collected = append(collected, db.Subdomain{
 				ProgramID:     root.ProgramID,
 				ScopeAssetID:  root.ScopeAssetID,
 				LastScanRunID: r.scanRunID,
@@ -101,15 +102,16 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 				FQDN:          fqdn,
 				Source:        "subfinder",
 			})
-			if err != nil {
-				return err
-			}
-			result.Subdomains++
 			return nil
 		})
 		if err != nil {
 			return result, fmt.Errorf("subfinder %s: %w", root.RootDomain, err)
 		}
+		inserted, err := r.repo.UpsertSubdomains(ctx, collected)
+		if err != nil {
+			return result, err
+		}
+		result.Subdomains += inserted
 	}
 	return result, nil
 }

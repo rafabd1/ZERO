@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 )
@@ -209,6 +210,7 @@ func (s *Server) routes() {
 		ORDER BY r.created_at DESC
 		LIMIT 100
 	`))
+	s.mux.HandleFunc("POST /v1/scan-requests", s.createScanRequest)
 	s.mux.HandleFunc("GET /v1/changes", s.changes(""))
 	s.mux.HandleFunc("GET /v1/notifications/discord", s.query(`
 		SELECT jsonb_build_object(
@@ -393,12 +395,14 @@ func (s *Server) technologies(programID string) http.HandlerFunc {
 				'version', t.version,
 				'source', t.source,
 				'confidence', t.confidence,
+				'active', t.active,
 				'evidence', t.evidence,
 				'first_seen_at', t.first_seen_at,
 				'last_seen_at', t.last_seen_at
 			)
 			FROM zero_technology_observations t
 			WHERE ($1 = '' OR t.program_id::text = $1)
+			  AND t.active = true
 			ORDER BY t.last_seen_at DESC
 			LIMIT 500
 		`, programID)
@@ -442,6 +446,57 @@ func (s *Server) technologyVulnerabilities(programID string) http.HandlerFunc {
 		}
 		writeRawJSONArray(w, rows)
 	}
+}
+
+func (s *Server) createScanRequest(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ProgramID string          `json:"program_id"`
+		Name      string          `json:"name"`
+		RunAfter  string          `json:"run_after"`
+		Params    json.RawMessage `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	runAfter := time.Now().UTC()
+	if strings.TrimSpace(body.RunAfter) != "" {
+		parsed, err := parseRunAfter(body.RunAfter)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		runAfter = parsed
+	}
+	params := json.RawMessage(`{}`)
+	if len(body.Params) > 0 {
+		params = body.Params
+	}
+	id, err := s.repo.CreateScanRequest(r.Context(), strings.TrimSpace(body.ProgramID), strings.TrimSpace(body.Name), "api", runAfter, params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id":         id,
+		"program_id": body.ProgramID,
+		"run_after":  runAfter,
+	})
+}
+
+func parseRunAfter(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "now") {
+		return time.Now().UTC(), nil
+	}
+	if d, err := time.ParseDuration(value); err == nil {
+		return time.Now().UTC().Add(d), nil
+	}
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid run_after %q: use a duration like 30m or an RFC3339 timestamp", value)
+	}
+	return t, nil
 }
 
 func (s *Server) changes(programID string) http.HandlerFunc {

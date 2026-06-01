@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Build
+        run: go build ./cmd/zero
+      - name: Secret-like config guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          hits="$(grep -RInE '^ZERO_.*(TOKEN|KEY|SECRET|PASSWORD|WEBHOOK).*="[^"]{8,}"' . --exclude-dir=.git --exclude=.env --exclude=.env.example || true)"
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            exit 1
+          fi
+      - name: Docker build
+        run: docker compose build zero api
