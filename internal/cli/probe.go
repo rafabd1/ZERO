@@ -11,6 +11,7 @@ func newProbeCommand() *cobra.Command {
 	var httpxLimit int
 	var httpxTimeout int
 	var httpxThreads int
+	var httpxTLSProbe bool
 	var dnsxLimit int
 	var dnsxProgramID string
 	var programID string
@@ -73,6 +74,7 @@ func newProbeCommand() *cobra.Command {
 				WithProgramID(programID).
 				WithLimit(httpxLimit).
 				WithRequestPolicy(firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout), firstPositive(httpxThreads, cfg.Tools.HTTPXThreads)).
+				WithTLSProbe(httpxTLSProbe || cfg.Tools.HTTPXTLSProbe).
 				WithTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			if err != nil {
@@ -84,6 +86,7 @@ func newProbeCommand() *cobra.Command {
 				"tool":       "httpx",
 				"timeout":    firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout),
 				"threads":    firstPositive(httpxThreads, cfg.Tools.HTTPXThreads),
+				"tls_probe":  httpxTLSProbe || cfg.Tools.HTTPXTLSProbe,
 				"program_id": programID,
 			}); err != nil {
 				return err
@@ -97,6 +100,7 @@ func newProbeCommand() *cobra.Command {
 	httpx.Flags().IntVar(&httpxLimit, "limit", 0, "limit number of hosts to probe")
 	httpx.Flags().IntVar(&httpxTimeout, "timeout", 0, "override httpx per-request timeout seconds")
 	httpx.Flags().IntVar(&httpxThreads, "threads", 0, "override httpx worker threads")
+	httpx.Flags().BoolVar(&httpxTLSProbe, "tls-probe", false, "enable httpx TLS probe for this run")
 	httpx.Flags().StringVar(&programID, "program-id", "", "limit probing to one program id")
 	cmd.AddCommand(dnsx, httpx)
 	return cmd

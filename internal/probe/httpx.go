@@ -24,6 +24,7 @@ type HTTPXRunner struct {
 	timeout    time.Duration
 	reqTimeout int
 	threads    int
+	tlsProbe   bool
 }
 
 type HTTPXResult struct {
@@ -74,6 +75,11 @@ func (r *HTTPXRunner) WithRequestPolicy(reqTimeout, threads int) *HTTPXRunner {
 	return r
 }
 
+func (r *HTTPXRunner) WithTLSProbe(enabled bool) *HTTPXRunner {
+	r.tlsProbe = enabled
+	return r
+}
+
 func (r *HTTPXRunner) WithProgramID(programID string) *HTTPXRunner {
 	r.programID = programID
 	return r
@@ -109,7 +115,7 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	}
 
 	result := HTTPXResult{Hosts: len(byHost)}
-	args := buildHTTPXArgs(r.reqTimeout, r.threads)
+	args := buildHTTPXArgs(r.reqTimeout, r.threads, r.tlsProbe)
 	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		var parsed httpxLine
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
@@ -131,7 +137,7 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	return result, err
 }
 
-func buildHTTPXArgs(reqTimeout, threads int) []string {
+func buildHTTPXArgs(reqTimeout, threads int, tlsProbe bool) []string {
 	args := []string{
 		"-silent",
 		"-json",
@@ -140,7 +146,9 @@ func buildHTTPXArgs(reqTimeout, threads int) []string {
 		"-title",
 		"-web-server",
 		"-favicon",
-		"-tls-probe",
+	}
+	if tlsProbe {
+		args = append(args, "-tls-probe")
 	}
 	if reqTimeout > 0 {
 		args = append(args, "-timeout", strconv.Itoa(reqTimeout))

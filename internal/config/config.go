@@ -54,6 +54,7 @@ type ToolConfig struct {
 	HTTPXBin                string
 	HTTPXTimeout            int
 	HTTPXThreads            int
+	HTTPXTLSProbe           bool
 	WebanalyzeBin           string
 	WebanalyzeApps          string
 	WebanalyzeWorkers       int
@@ -126,6 +127,7 @@ func Load() (Config, error) {
 	v.SetDefault("tools.httpx_bin", "httpx")
 	v.SetDefault("tools.httpx_timeout", 4)
 	v.SetDefault("tools.httpx_threads", 20)
+	v.SetDefault("tools.httpx_tls_probe", false)
 	v.SetDefault("tools.webanalyze_bin", "webanalyze")
 	v.SetDefault("tools.webanalyze_apps", "")
 	v.SetDefault("tools.webanalyze_workers", 4)
@@ -179,6 +181,7 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.httpx_bin", "ZERO_HTTPX_BIN")
 	_ = v.BindEnv("tools.httpx_timeout", "ZERO_HTTPX_TIMEOUT")
 	_ = v.BindEnv("tools.httpx_threads", "ZERO_HTTPX_THREADS")
+	_ = v.BindEnv("tools.httpx_tls_probe", "ZERO_HTTPX_TLS_PROBE")
 	_ = v.BindEnv("tools.webanalyze_bin", "ZERO_WEBANALYZE_BIN")
 	_ = v.BindEnv("tools.webanalyze_apps", "ZERO_WEBANALYZE_APPS")
 	_ = v.BindEnv("tools.webanalyze_workers", "ZERO_WEBANALYZE_WORKERS")
@@ -242,6 +245,7 @@ func Load() (Config, error) {
 			HTTPXBin:                v.GetString("tools.httpx_bin"),
 			HTTPXTimeout:            clampInt(v.GetInt("tools.httpx_timeout"), 1, 60),
 			HTTPXThreads:            clampInt(v.GetInt("tools.httpx_threads"), 1, 200),
+			HTTPXTLSProbe:           v.GetBool("tools.httpx_tls_probe"),
 			WebanalyzeBin:           v.GetString("tools.webanalyze_bin"),
 			WebanalyzeApps:          v.GetString("tools.webanalyze_apps"),
 			WebanalyzeWorkers:       v.GetInt("tools.webanalyze_workers"),

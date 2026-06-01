@@ -60,6 +60,8 @@ Each external tool call is bounded by `ZERO_TOOL_TIMEOUT` and defaults to 20 min
 
 `ZERO_HTTPX_TIMEOUT` controls the per-request timeout passed to httpx with `-timeout`; it defaults to 4 seconds. `ZERO_HTTPX_THREADS` controls httpx internal worker threads with `-threads`; it defaults to 20. These are separate from `ZERO_TOOL_TIMEOUT`, which bounds the whole httpx process for a program.
 
+`ZERO_HTTPX_TLS_PROBE` defaults to `false`. Keep it disabled for broad continuous scans: on real targets such as `valve`, httpx v1.9.0 can emit results quickly but keep the process alive until the global tool timeout when `-tls-probe` is enabled. Use `zero probe httpx --tls-probe` or `zero run manual --httpx-tls-probe` only for targeted certificate/TLS inspection.
+
 Nuclei templates are updated on container startup when `ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP=true` and by the worker schedule `ZERO_SCHEDULE_NUCLEI_TEMPLATES` (default: `0 5 3 * * *`). They are not updated before every program scan because template updates are global, network-dependent, and can add avoidable latency/noise to target processing.
 
 ## Data Lifecycle
@@ -106,7 +108,7 @@ This validates the pipeline without turning a local setup check into a broad sca
 
 Use `zero run once` only when you want the full configured global pipeline without per-step smoke-test limits. Use `zero run due` for the normal continuous per-program execution model.
 
-Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--httpx-timeout`, `--httpx-threads`, `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--skip-cves`, `--cve-limit`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
+Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--httpx-timeout`, `--httpx-threads`, `--httpx-tls-probe`, `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--skip-cves`, `--cve-limit`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
 
 ## Discord Notifications
 
@@ -158,6 +160,7 @@ ZERO_NUCLEI_FROM_CVES=true
 ZERO_NUCLEI_CVE_LIMIT=100
 ZERO_HTTPX_TIMEOUT=4
 ZERO_HTTPX_THREADS=20
+ZERO_HTTPX_TLS_PROBE=false
 ZERO_SUBFINDER_PROVIDER_CONFIG="/home/zero/.config/subfinder/provider-config.yaml"
 ZERO_SUBFINDER_SOURCES="shodan,bevigil,virustotal,securitytrails"
 ZERO_SUBFINDER_RATE_LIMITS="shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s"

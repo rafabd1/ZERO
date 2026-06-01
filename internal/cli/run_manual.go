@@ -25,6 +25,7 @@ type manualRunOptions struct {
 	HTTPXLimit        int
 	HTTPXTimeout      int
 	HTTPXThreads      int
+	HTTPXTLSProbe     bool
 	WebanalyzeLimit   int
 	CVELimit          int
 	WebanalyzeApps    string
@@ -105,6 +106,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.HTTPXLimit, "httpx-limit", 0, "manual httpx target limit")
 	cmd.Flags().IntVar(&opts.HTTPXTimeout, "httpx-timeout", 0, "manual httpx per-request timeout seconds")
 	cmd.Flags().IntVar(&opts.HTTPXThreads, "httpx-threads", 0, "manual httpx worker threads")
+	cmd.Flags().BoolVar(&opts.HTTPXTLSProbe, "httpx-tls-probe", false, "enable httpx TLS probe for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeLimit, "webanalyze-limit", 0, "manual Webanalyze service limit")
 	cmd.Flags().IntVar(&opts.CVELimit, "cve-limit", 0, "manual passive CVE technology limit")
 	cmd.Flags().StringVar(&opts.WebanalyzeApps, "webanalyze-apps", "", "custom Webanalyze apps file for this run only")
@@ -156,6 +158,9 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		step = appendIntFlag(step, "--limit", opts.HTTPXLimit)
 		step = appendIntFlag(step, "--timeout", opts.HTTPXTimeout)
 		step = appendIntFlag(step, "--threads", opts.HTTPXThreads)
+		if opts.HTTPXTLSProbe {
+			step = append(step, "--tls-probe")
+		}
 		steps = append(steps, step)
 	}
 	if !opts.SkipEnrich {
