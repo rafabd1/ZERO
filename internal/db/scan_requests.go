@@ -70,6 +70,25 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 	return requests, rows.Err()
 }
 
+func (r *Repository) RecoverRunningScanRequests(ctx context.Context) (int, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE zero_scan_requests
+		SET status = 'queued',
+			run_after = now(),
+			locked_at = NULL,
+			error = CASE
+				WHEN error = '' THEN 'requeued on worker startup after interrupted execution'
+				ELSE error
+			END,
+			updated_at = now()
+		WHERE status = 'running'
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("recover running scan requests: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr error) error {
 	status := "succeeded"
 	errorText := ""

@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS zero_vulnerability_records (
 CREATE TABLE IF NOT EXISTS zero_technology_vulnerability_matches (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	program_id uuid NOT NULL REFERENCES zero_programs(id) ON DELETE CASCADE,
+	http_service_id uuid REFERENCES zero_http_services(id) ON DELETE CASCADE,
 	vulnerability_id uuid NOT NULL REFERENCES zero_vulnerability_records(id) ON DELETE CASCADE,
 	last_scan_run_id uuid REFERENCES zero_scan_runs(id) ON DELETE SET NULL,
 	technology_name text NOT NULL,
@@ -187,8 +188,11 @@ CREATE TABLE IF NOT EXISTS zero_technology_vulnerability_matches (
 	last_seen_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_zero_technology_vulnerability_matches_unique
-	ON zero_technology_vulnerability_matches(program_id, vulnerability_id, lower(technology_name), technology_version, source_query);
+ALTER TABLE zero_technology_vulnerability_matches
+	ADD COLUMN IF NOT EXISTS http_service_id uuid REFERENCES zero_http_services(id) ON DELETE CASCADE;
+DROP INDEX IF EXISTS idx_zero_technology_vulnerability_matches_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_zero_technology_vulnerability_matches_unique_v2
+	ON zero_technology_vulnerability_matches(program_id, http_service_id, vulnerability_id, lower(technology_name), technology_version, source_query);
 CREATE INDEX IF NOT EXISTS idx_zero_technology_vulnerability_matches_program
 	ON zero_technology_vulnerability_matches(program_id, confidence DESC, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_zero_technology_vulnerability_matches_vuln

@@ -20,9 +20,10 @@ type Generator struct {
 }
 
 type Result struct {
-	Findings int
-	Reports  int
-	Inserted int
+	Findings        int
+	PassiveFindings int
+	Reports         int
+	Inserted        int
 }
 
 func NewGenerator(repo *db.Repository) *Generator {
@@ -47,11 +48,15 @@ func (g *Generator) WithScanRunID(scanRunID string) *Generator {
 }
 
 func (g *Generator) Run(ctx context.Context) (Result, error) {
+	passiveInserted, err := g.repo.UpsertUnconfirmedPassiveFindings(ctx, g.programID, g.scanRunID, g.limit)
+	if err != nil {
+		return Result{}, err
+	}
 	findings, err := g.repo.ListUnreportedFindings(ctx, g.programID, g.limit)
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Findings: len(findings)}
+	result := Result{Findings: len(findings), PassiveFindings: passiveInserted}
 	if len(findings) == 0 {
 		return result, nil
 	}
@@ -161,6 +166,14 @@ func writeEvidence(b *strings.Builder, raw json.RawMessage) {
 	if err := json.Unmarshal(raw, &evidence); err != nil {
 		return
 	}
+	source, _ := evidence["source"].(string)
+	if validation, ok := evidence["validation_status"].(string); ok && validation == "potential_unconfirmed" {
+		fmt.Fprintf(b, "- Validation: potential/unconfirmed passive CVE match")
+		if source != "" {
+			fmt.Fprintf(b, " from `%s`", source)
+		}
+		b.WriteString("; no confirming Nuclei result is linked yet.\n")
+	}
 	if templateID, ok := evidence["template_id"].(string); ok && templateID != "" {
 		fmt.Fprintf(b, "- Nuclei template: `%s`\n", templateID)
 	}
@@ -172,6 +185,16 @@ func writeEvidence(b *strings.Builder, raw json.RawMessage) {
 	}
 	if tags := stringList(evidence["tags"]); len(tags) > 0 {
 		fmt.Fprintf(b, "- Tags: %s\n", strings.Join(tags, ", "))
+	}
+	if techName, ok := evidence["technology_name"].(string); ok && techName != "" {
+		if techVersion, _ := evidence["technology_version"].(string); techVersion != "" {
+			fmt.Fprintf(b, "- Technology: %s %s\n", techName, techVersion)
+		} else {
+			fmt.Fprintf(b, "- Technology: %s\n", techName)
+		}
+	}
+	if summary, ok := evidence["summary"].(string); ok && summary != "" {
+		fmt.Fprintf(b, "- CVE summary: %s\n", summary)
 	}
 }
 

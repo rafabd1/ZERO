@@ -65,8 +65,9 @@ Zero scans multiple programs concurrently through `zero run due`, starting with 
 - `dnsx` runs before `httpx` for discovered wildcard subdomains and records `resolves`; unresolved wildcard discoveries are skipped by `httpx` unless they later resolve again.
 - `httpx` stores target intel for alive services and technology observations.
 - `webanalyze` runs after `httpx` against alive services and stores broader Wappalyzer-style technology observations, including versions when detectable. Operators can provide a custom technologies file per manual run without changing global worker configuration.
-- `analyze cves` queries NVD for versioned technology observations, prefers CPE/range evidence where available, falls back to keyword evidence, and stores program-scoped CVE matches as passive intelligence only.
+- `analyze cves` queries NVD for versioned technology observations, prefers CPE/range evidence where available, falls back to keyword evidence, and stores service-linked CVE matches as passive intelligence.
 - `nuclei` runs after probing/enrichment and only against alive URLs; by default it derives `-id CVE-...` template IDs from medium/high/critical passive matches. Operators can override this with explicit template IDs or the broader tag policy.
+- `report generate` creates confirmed Nuclei-backed reports and also promotes medium/high/critical passive CVE matches to potential/unconfirmed report entries when no Nuclei result confirms that CVE on the same service.
 - Newly inserted entities write stable `zero_change_events` rows so operators and API clients can inspect what changed without replaying old observations.
 - Report generation emits only new, unreported findings and attaches a stable `report_id` for deduplication.
 - Discord notification delivery reads new reports, stores delivery state in `zero_discord_notifications`, and never sends a report twice after a successful send.
@@ -83,7 +84,7 @@ The worker uses second-enabled cron expressions:
 - `ZERO_SCHEDULE_CVE`
 - `ZERO_SCHEDULE_NUCLEI`
 
-The primary worker job is the due-program pipeline scheduled by `ZERO_SCHEDULE_FULL`: global scope sync first, then per-program enumeration, DNS resolution, probing, Webanalyze enrichment, passive CVE matching, Nuclei validation, report generation, and Discord notification for due programs only. The `httpx` and Webanalyze fingerprint phases are target intel only; passive CVE matching creates validation candidates, not reportable findings, until Nuclei or a custom validator confirms them.
+The primary worker job is the due-program pipeline scheduled by `ZERO_SCHEDULE_FULL`: global scope sync first, then per-program enumeration, DNS resolution, probing, Webanalyze enrichment, passive CVE matching, Nuclei validation, report generation, and Discord notification for due programs only. The `httpx` and Webanalyze fingerprint phases are target intel. Passive CVE matching is reported with lower confidence as potential/unconfirmed when Nuclei has no confirming hit, while Nuclei-backed findings remain the higher-confidence validation path.
 
 Manual runs use `zero run manual` and accept one-off limits, custom Webanalyze apps files, CVE-derived Nuclei template selection, and explicit Nuclei template IDs. These flags apply only to that execution and do not modify environment defaults or worker cadence.
 

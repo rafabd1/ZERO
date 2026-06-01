@@ -122,8 +122,15 @@ func recoverWorkerState(cmd *cobra.Command, databaseURL string) error {
 	if err != nil {
 		return err
 	}
+	requeued, err := repo.RecoverRunningScanRequests(ctx)
+	if err != nil {
+		return err
+	}
 	if recovered > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "recovered %d interrupted scan run(s)\n", recovered)
+	}
+	if requeued > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d interrupted scan request(s)\n", requeued)
 	}
 	return nil
 }

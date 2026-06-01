@@ -20,7 +20,7 @@ func newReportCommand() *cobra.Command {
 		Use:   "report",
 		Short: "Generate and inspect deduplicated reports.",
 	}
-	cmd.AddCommand(&cobra.Command{
+	generate := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate reports from new unreported findings.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -38,18 +38,19 @@ func newReportCommand() *cobra.Command {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Findings, result.Inserted, map[string]any{
-				"findings":   result.Findings,
-				"reports":    result.Reports,
-				"inserted":   result.Inserted,
-				"program_id": programID,
+				"findings":         result.Findings,
+				"passive_findings": result.PassiveFindings,
+				"reports":          result.Reports,
+				"inserted":         result.Inserted,
+				"program_id":       programID,
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "processed %d new findings, generated %d reports and inserted %d new reports\n", result.Findings, result.Reports, result.Inserted)
+			fmt.Fprintf(cmd.OutOrStdout(), "processed %d new findings (%d passive potential), generated %d reports and inserted %d new reports\n", result.Findings, result.PassiveFindings, result.Reports, result.Inserted)
 			return nil
 		},
-	})
-	cmd.AddCommand(&cobra.Command{
+	}
+	exportTriage := &cobra.Command{
 		Use:   "export-triage",
 		Short: "Export structured finding bundles for Proteus/Codex triage.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -85,12 +86,13 @@ func newReportCommand() *cobra.Command {
 			fmt.Fprintf(cmd.ErrOrStderr(), "exported %d triage bundle(s)\n", len(bundles))
 			return nil
 		},
-	})
-	cmd.Commands()[0].Flags().IntVar(&limit, "limit", 500, "maximum new findings to report")
-	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit reporting to one program id")
-	cmd.Commands()[1].Flags().IntVar(&exportLimit, "limit", 100, "maximum findings to export")
-	cmd.Commands()[1].Flags().StringVar(&exportProgramID, "program-id", "", "limit export to one program id")
-	cmd.Commands()[1].Flags().StringVar(&exportStatus, "status", "new", "finding status to export; empty exports all statuses")
-	cmd.Commands()[1].Flags().StringVar(&exportOutput, "output", "", "write JSONL bundles to this file instead of stdout")
+	}
+	generate.Flags().IntVar(&limit, "limit", 500, "maximum new findings to report")
+	generate.Flags().StringVar(&programID, "program-id", "", "limit reporting to one program id")
+	exportTriage.Flags().IntVar(&exportLimit, "limit", 100, "maximum findings to export")
+	exportTriage.Flags().StringVar(&exportProgramID, "program-id", "", "limit export to one program id")
+	exportTriage.Flags().StringVar(&exportStatus, "status", "new", "finding status to export; empty exports all statuses")
+	exportTriage.Flags().StringVar(&exportOutput, "output", "", "write JSONL bundles to this file instead of stdout")
+	cmd.AddCommand(generate, exportTriage)
 	return cmd
 }

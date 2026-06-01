@@ -128,6 +128,7 @@ type VulnerabilityRecord struct {
 
 type TechnologyVulnerabilityMatch struct {
 	ProgramID         string
+	HTTPServiceID     string
 	VulnerabilityID   string
 	LastScanRunID     string
 	TechnologyName    string

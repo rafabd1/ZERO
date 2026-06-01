@@ -242,7 +242,10 @@ func (r *Repository) ListDomainRoots(ctx context.Context, programID string) ([]D
 		if err := rows.Scan(&root.ScopeAssetID, &root.ProgramID, &raw, &normalized); err != nil {
 			return nil, err
 		}
-		domain, ok := sanitize.DomainFromScopeTarget(firstNonEmpty(raw, normalized))
+		domain, ok := sanitize.WildcardRootFromScopeTarget(raw)
+		if !ok {
+			domain, ok = sanitize.WildcardRootFromScopeTarget(normalized)
+		}
 		if !ok {
 			continue
 		}

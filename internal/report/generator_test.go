@@ -42,3 +42,38 @@ func TestBuildDraftGroupsFindingsIntoStableNewOnlyReport(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildDraftLabelsPassiveCVEAsUnconfirmed(t *testing.T) {
+	findings := []db.ReportFinding{
+		{
+			ID:            "33333333-3333-3333-3333-333333333333",
+			ProgramID:     "11111111-1111-1111-1111-111111111111",
+			ProgramHandle: "example",
+			ProgramURL:    "https://hackerone.com/example",
+			ServiceURL:    "https://app.example.com",
+			Severity:      "critical",
+			Confidence:    65,
+			Evidence: json.RawMessage(`{
+				"source":"nvd-passive",
+				"validation_status":"potential_unconfirmed",
+				"cves":["CVE-2099-0002"],
+				"technology_name":"Apache HTTP Server",
+				"technology_version":"2.4.49",
+				"summary":"Known vulnerable version detected from passive technology intelligence."
+			}`),
+			FirstSeenAt: "2026-06-01 00:00:00+00",
+		},
+	}
+
+	draft := buildDraft(findings)
+	for _, want := range []string{
+		"potential/unconfirmed passive CVE match",
+		"no confirming Nuclei result",
+		"CVE-2099-0002",
+		"Apache HTTP Server 2.4.49",
+	} {
+		if !strings.Contains(draft.Body, want) {
+			t.Fatalf("passive report body missing %q:\n%s", want, draft.Body)
+		}
+	}
+}

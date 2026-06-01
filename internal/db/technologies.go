@@ -123,17 +123,17 @@ func (r *Repository) UpsertTechnologyVulnerabilityMatch(ctx context.Context, mat
 	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_technology_vulnerability_matches(
-			program_id, vulnerability_id, last_scan_run_id, technology_name, technology_version,
+			program_id, http_service_id, vulnerability_id, last_scan_run_id, technology_name, technology_version,
 			source_observation, source_query, confidence, evidence
 		)
-		VALUES ($1,$2,NULLIF($3, '')::uuid,$4,$5,$6,$7,$8,$9::jsonb)
-		ON CONFLICT(program_id, vulnerability_id, (lower(technology_name)), technology_version, source_query) DO UPDATE SET
+		VALUES ($1,NULLIF($2, '')::uuid,$3,NULLIF($4, '')::uuid,$5,$6,$7,$8,$9,$10::jsonb)
+		ON CONFLICT(program_id, http_service_id, vulnerability_id, (lower(technology_name)), technology_version, source_query) DO UPDATE SET
 			last_scan_run_id = COALESCE(excluded.last_scan_run_id, zero_technology_vulnerability_matches.last_scan_run_id),
 			last_seen_at = now(),
 			confidence = GREATEST(zero_technology_vulnerability_matches.confidence, excluded.confidence),
 			evidence = zero_technology_vulnerability_matches.evidence || excluded.evidence
 		RETURNING id::text, (xmax = 0) AS inserted
-	`, match.ProgramID, match.VulnerabilityID, match.LastScanRunID, match.TechnologyName, match.TechnologyVersion, match.SourceObservation, match.SourceQuery, match.Confidence, string(evidence)).Scan(&id, &inserted)
+	`, match.ProgramID, match.HTTPServiceID, match.VulnerabilityID, match.LastScanRunID, match.TechnologyName, match.TechnologyVersion, match.SourceObservation, match.SourceQuery, match.Confidence, string(evidence)).Scan(&id, &inserted)
 	if err != nil {
 		return "", false, fmt.Errorf("upsert technology vulnerability match: %w", err)
 	}

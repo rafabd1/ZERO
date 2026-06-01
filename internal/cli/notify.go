@@ -16,7 +16,7 @@ func newNotifyCommand() *cobra.Command {
 	var limit int
 	var dryRun bool
 	var programID string
-	cmd.AddCommand(&cobra.Command{
+	discord := &cobra.Command{
 		Use:   "discord",
 		Short: "Send new report notifications to Discord.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,10 +40,11 @@ func newNotifyCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "discord notifications checked %d reports, sent %d, skipped %d, failed %d%s\n", result.Reports, result.Sent, result.Skipped, result.Failed, state)
 			return nil
 		},
-	})
-	cmd.Commands()[0].Flags().IntVar(&limit, "limit", 25, "maximum reports to notify")
-	cmd.Commands()[0].Flags().BoolVar(&dryRun, "dry-run", false, "inspect pending reports without sending or recording notifications")
-	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit notifications to one program id")
+	}
+	discord.Flags().IntVar(&limit, "limit", 25, "maximum reports to notify")
+	discord.Flags().BoolVar(&dryRun, "dry-run", false, "inspect pending reports without sending or recording notifications")
+	discord.Flags().StringVar(&programID, "program-id", "", "limit notifications to one program id")
+	cmd.AddCommand(discord)
 
 	return cmd
 }

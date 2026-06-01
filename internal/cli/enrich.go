@@ -18,7 +18,7 @@ func newEnrichCommand() *cobra.Command {
 		Use:   "enrich",
 		Short: "Run target intelligence enrichment tasks.",
 	}
-	cmd.AddCommand(&cobra.Command{
+	webanalyze := &cobra.Command{
 		Use:   "webanalyze",
 		Short: "Fingerprint alive HTTP services with Webanalyze/Wappalyzer definitions.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,11 +71,12 @@ func newEnrichCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "webanalyze processed %d services, observed %d tech matches, inserted %d new observations and %d versioned matches\n", result.Targets, result.Matches, result.Inserted, result.Versioned)
 			return nil
 		},
-	})
-	cmd.Commands()[0].Flags().IntVar(&limit, "limit", 0, "limit number of alive services to fingerprint")
-	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit enrichment to one program id")
-	cmd.Commands()[0].Flags().StringVar(&apps, "apps", "", "custom Webanalyze/Wappalyzer technologies file for this run only")
-	cmd.Commands()[0].Flags().IntVar(&workers, "workers", 0, "Webanalyze workers for this run only")
-	cmd.Commands()[0].Flags().IntVar(&crawl, "crawl", -1, "Webanalyze crawl depth for this run only")
+	}
+	webanalyze.Flags().IntVar(&limit, "limit", 0, "limit number of alive services to fingerprint")
+	webanalyze.Flags().StringVar(&programID, "program-id", "", "limit enrichment to one program id")
+	webanalyze.Flags().StringVar(&apps, "apps", "", "custom Webanalyze/Wappalyzer technologies file for this run only")
+	webanalyze.Flags().IntVar(&workers, "workers", 0, "Webanalyze workers for this run only")
+	webanalyze.Flags().IntVar(&crawl, "crawl", -1, "Webanalyze crawl depth for this run only")
+	cmd.AddCommand(webanalyze)
 	return cmd
 }

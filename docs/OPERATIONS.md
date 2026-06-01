@@ -64,7 +64,9 @@ Task-generated entities carry the current scan id: scope assets, subdomains, HTT
 
 Stale cleanup is conservative and time-based. `ZERO_STALE_AFTER_HOURS=168` means a target must be unseen for roughly seven days before subdomains, HTTP services, or technology observations are marked inactive. Set it to `0` to disable stale cleanup.
 
-On worker startup, `ZERO_RECOVER_RUNNING_SCANS=true` marks interrupted `zero_scan_runs.status='running'` rows as failed with recovery metadata. Since the program's `last_scan_finished_at` is not advanced by an interrupted run, that program remains due and the startup run can continue from the persisted database state.
+On worker startup, `ZERO_RECOVER_RUNNING_SCANS=true` marks interrupted `zero_scan_runs.status='running'` rows as failed with recovery metadata. Since the program's `last_scan_finished_at` is not advanced by an interrupted run, that program remains due and the startup run can continue from the persisted database state. Interrupted `zero_scan_requests.status='running'` rows are requeued with `run_after=now()`, so a custom scan that was claimed before a container shutdown does not stay stuck forever.
+
+HTTP services, subdomains, and technology observations are not hard-deleted when they disappear once. They remain deduped by stable keys and are marked inactive by stale cleanup after `ZERO_STALE_AFTER_HOURS`. This keeps the API focused on currently active rows while avoiding noisy deletes caused by transient DNS, WAF, or network failures.
 
 HackerOne scope sync defaults to `ZERO_SCOPE_PRIVATE_ONLY=false`, so bbscope imports both public and private open programs visible to the configured account. `ZERO_SCOPE_BOUNTY_ONLY=true` keeps VDP programs out. Assets that are listed as in-scope by the platform but are not bounty-eligible are stored as out-of-scope in Zero, so they block broad wildcard expansion instead of being scanned. Set `ZERO_SCOPE_PRIVATE_ONLY=true` only when intentionally limiting Zero to private/soft-launched programs.
 
@@ -156,6 +158,8 @@ Do not commit provider configs containing real API keys.
 `subfinder` only receives active in-scope `wildcard` assets from the database. For `*.sub.example.com`, the root sent to Subfinder is `sub.example.com`; Zero does not collapse it to `example.com`.
 
 After enumeration, each result must match the wildcard regex derived from that exact asset. `*.example.com` accepts `app.example.com` and `a.b.example.com`, but rejects `example.com`, `example.com.evil.test`, and sibling domains.
+
+Enumeration roots are derived only from explicit wildcard assets. `*.sub.heroku.com` sends `sub.heroku.com` to Subfinder; it is not collapsed to `heroku.com`. A plain `sub.heroku.com` domain/url asset is probed exactly and does not authorize child enumeration.
 
 Out-of-scope `domain`, `url`, and `wildcard` assets override broad in-scope wildcards. This keeps assets such as `*.excluded.example.com` or `admin.example.com` from being probed when the program has explicitly excluded them.
 

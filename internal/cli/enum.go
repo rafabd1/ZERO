@@ -14,7 +14,7 @@ func newEnumCommand() *cobra.Command {
 		Use:   "enum",
 		Short: "Run asset enumeration tasks.",
 	}
-	cmd.AddCommand(&cobra.Command{
+	subfinder := &cobra.Command{
 		Use:   "subfinder",
 		Short: "Enumerate subdomains from in-scope wildcard/domain assets.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -49,8 +49,9 @@ func newEnumCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "processed %d roots and upserted %d subdomains\n", result.Roots, result.Subdomains)
 			return nil
 		},
-	})
-	cmd.Commands()[0].Flags().IntVar(&subfinderLimit, "limit", 0, "limit number of roots to enumerate")
-	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit enumeration to one program id")
+	}
+	subfinder.Flags().IntVar(&subfinderLimit, "limit", 0, "limit number of roots to enumerate")
+	subfinder.Flags().StringVar(&programID, "program-id", "", "limit enumeration to one program id")
+	cmd.AddCommand(subfinder)
 	return cmd
 }

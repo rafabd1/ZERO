@@ -11,24 +11,38 @@ import (
 )
 
 func DomainFromScopeTarget(raw string) (string, bool) {
-	host := strings.TrimSpace(strings.ToLower(raw))
+	host := scopeHost(raw)
 	if host == "" {
 		return "", false
 	}
 
 	host = strings.TrimPrefix(host, "*.")
+	return CanonicalDomain(host)
+}
+
+func WildcardRootFromScopeTarget(raw string) (string, bool) {
+	host := scopeHost(raw)
+	if !strings.HasPrefix(host, "*.") {
+		return "", false
+	}
+	return CanonicalDomain(strings.TrimPrefix(host, "*."))
+}
+
+func scopeHost(raw string) string {
+	host := strings.TrimSpace(strings.ToLower(raw))
+	if host == "" {
+		return ""
+	}
 	if strings.Contains(host, "://") {
 		parsed, err := url.Parse(host)
 		if err != nil {
-			return "", false
+			return ""
 		}
-		host = parsed.Hostname()
-	} else {
-		host = strings.Split(host, "/")[0]
-		host = strings.Split(host, ":")[0]
+		return strings.TrimSpace(strings.ToLower(parsed.Hostname()))
 	}
-
-	return CanonicalDomain(host)
+	host = strings.Split(host, "/")[0]
+	host = strings.Split(host, ":")[0]
+	return strings.TrimSpace(host)
 }
 
 func CanonicalDomain(raw string) (string, bool) {

@@ -67,6 +67,120 @@ func (r *Repository) ListUnreportedFindings(ctx context.Context, programID strin
 	return findings, rows.Err()
 }
 
+func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, programID, scanRunID string, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var inserted int
+	err := r.pool.QueryRow(ctx, `
+		WITH candidates AS (
+			SELECT
+				m.program_id,
+				m.http_service_id,
+				m.vulnerability_id,
+				m.technology_name,
+				m.technology_version,
+				m.confidence AS passive_confidence,
+				m.evidence AS passive_evidence,
+				v.vuln_id,
+				v.severity,
+				v.cvss_score,
+				v.summary,
+				v.references_json,
+				LEAST(GREATEST(m.confidence, 45), 65) AS report_confidence,
+				'passive:' || encode(digest(
+					m.program_id::text || ':' || m.http_service_id::text || ':' || v.vuln_id || ':' ||
+					lower(m.technology_name) || ':' || m.technology_version,
+					'sha256'
+				), 'hex') AS evidence_hash
+			FROM zero_technology_vulnerability_matches m
+			JOIN zero_vulnerability_records v ON v.id = m.vulnerability_id
+			JOIN zero_http_services s ON s.id = m.http_service_id AND s.active = true
+			WHERE m.http_service_id IS NOT NULL
+			  AND m.confidence >= 50
+			  AND lower(v.severity) IN ('medium', 'high', 'critical')
+			  AND ($1 = '' OR m.program_id::text = $1)
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM zero_nuclei_results n
+				WHERE n.program_id = m.program_id
+				  AND n.http_service_id = m.http_service_id
+				  AND lower(v.vuln_id) = ANY(n.cves)
+			  )
+			ORDER BY
+				CASE lower(v.severity)
+					WHEN 'critical' THEN 1
+					WHEN 'high' THEN 2
+					WHEN 'medium' THEN 3
+					ELSE 4
+				END,
+				m.confidence DESC,
+				m.last_seen_at DESC
+			LIMIT $3
+		),
+		upserted AS (
+			INSERT INTO zero_candidate_findings(
+				program_id, http_service_id, vulnerability_id, technology_name, technology_version,
+				severity, confidence, status, evidence_hash, evidence
+			)
+			SELECT
+				program_id,
+				http_service_id,
+				vulnerability_id,
+				technology_name,
+				technology_version,
+				lower(severity),
+				report_confidence,
+				'new',
+				evidence_hash,
+				jsonb_build_object(
+					'source', 'nvd-passive',
+					'validation_status', 'potential_unconfirmed',
+					'nuclei_validation', 'no_confirming_result',
+					'cves', jsonb_build_array(vuln_id),
+					'cvss_score', cvss_score,
+					'summary', summary,
+					'references', references_json,
+					'technology_name', technology_name,
+					'technology_version', technology_version,
+					'passive_confidence', passive_confidence,
+					'passive_evidence', passive_evidence
+				)
+			FROM candidates
+			ON CONFLICT(evidence_hash) DO UPDATE SET
+				last_seen_at = now(),
+				confidence = GREATEST(zero_candidate_findings.confidence, excluded.confidence),
+				evidence = zero_candidate_findings.evidence || excluded.evidence
+			RETURNING id, program_id, evidence_hash, severity, confidence, (xmax = 0) AS inserted
+		),
+		events AS (
+			INSERT INTO zero_change_events(program_id, scan_run_id, entity_type, entity_id, entity_key, change_type, new_value, evidence_hash)
+			SELECT
+				program_id,
+				NULLIF($2, '')::uuid,
+				'candidate_finding',
+				id,
+				evidence_hash,
+				'added',
+				jsonb_build_object(
+					'source', 'nvd-passive',
+					'validation_status', 'potential_unconfirmed',
+					'severity', severity,
+					'confidence', confidence
+				),
+				encode(digest('candidate_finding:' || id::text || ':passive', 'sha256'), 'hex')
+			FROM upserted
+			WHERE inserted
+			ON CONFLICT(evidence_hash) DO NOTHING
+		)
+		SELECT count(*) FILTER (WHERE inserted) FROM upserted
+	`, programID, scanRunID, limit).Scan(&inserted)
+	if err != nil {
+		return 0, fmt.Errorf("upsert unconfirmed passive findings: %w", err)
+	}
+	return inserted, nil
+}
+
 func (r *Repository) CreateReport(ctx context.Context, draft ReportDraft) (string, bool, error) {
 	meta, _ := json.Marshal(draft.Metadata)
 	var id string
@@ -173,6 +287,8 @@ func (r *Repository) ListTriageBundles(ctx context.Context, programID, status st
 				FROM zero_technology_vulnerability_matches m
 				JOIN zero_vulnerability_records v ON v.id = m.vulnerability_id
 				WHERE m.program_id = f.program_id
+				  AND (f.http_service_id IS NULL OR m.http_service_id = f.http_service_id)
+				  AND (f.vulnerability_id IS NULL OR m.vulnerability_id = f.vulnerability_id)
 				  AND (n.id IS NULL OR lower(v.vuln_id) = ANY(n.cves))
 			), '[]'::jsonb),
 			'report', CASE WHEN rep.id IS NULL THEN NULL ELSE jsonb_build_object(
@@ -186,7 +302,10 @@ func (r *Repository) ListTriageBundles(ctx context.Context, programID, status st
 			'triage', jsonb_build_object(
 				'source', 'zero',
 				'exported_for', 'proteus',
-				'notes', 'Nuclei-backed finding. Passive CVE matches are prioritization context, not proof by themselves.'
+				'notes', CASE
+					WHEN n.id IS NULL THEN 'Potential/unconfirmed passive CVE finding. Treat as prioritization context until manually validated.'
+					ELSE 'Nuclei-backed finding. Passive CVE matches are prioritization context, not proof by themselves.'
+				END
 			)
 		)
 		FROM zero_candidate_findings f

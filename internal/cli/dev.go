@@ -19,7 +19,7 @@ func newDevCommand() *cobra.Command {
 	var labURL string
 	var techName string
 	var techVersion string
-	cmd.AddCommand(&cobra.Command{
+	seedLab := &cobra.Command{
 		Use:   "seed-lab",
 		Short: "Seed a local lab service into the database for end-to-end validation.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -85,9 +85,10 @@ func newDevCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "seeded lab program %s for %s (%s %s)\n", programID, labURL, techName, techVersion)
 			return nil
 		},
-	})
-	cmd.Commands()[0].Flags().StringVar(&labURL, "url", "http://lab-apache", "lab service URL")
-	cmd.Commands()[0].Flags().StringVar(&techName, "tech", "Apache HTTP Server", "technology name to seed")
-	cmd.Commands()[0].Flags().StringVar(&techVersion, "version", "2.4.49", "technology version to seed")
+	}
+	seedLab.Flags().StringVar(&labURL, "url", "http://lab-apache", "lab service URL")
+	seedLab.Flags().StringVar(&techName, "tech", "Apache HTTP Server", "technology name to seed")
+	seedLab.Flags().StringVar(&techVersion, "version", "2.4.49", "technology version to seed")
+	cmd.AddCommand(seedLab)
 	return cmd
 }

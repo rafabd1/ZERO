@@ -43,9 +43,9 @@ Nuclei depends on templates. It is strong when a relevant template exists and we
 2. Use Webanalyze/Wappalyzer definitions to improve technology and version coverage.
 3. Use passive CVE/KEV/advisory matching for prioritization.
 4. Use Nuclei to validate known probeable CVEs.
-5. Report only new, deduplicated hits with enough evidence.
+5. Report only new, deduplicated hits with enough evidence, clearly separating confirmed Nuclei hits from passive potential CVEs.
 
-Passive matching is not just a free-text lookup. NVD CPE evidence and version ranges are preferred when present; keyword matching is kept as lower-confidence fallback. Only active Nuclei hits become candidate findings.
+Passive matching is not just a free-text lookup. NVD CPE evidence and version ranges are preferred when present; keyword matching is kept as lower-confidence fallback. Active Nuclei hits become high-confidence candidate findings. Medium/high/critical passive CVE matches can also be promoted during report generation as `potential_unconfirmed` entries when the same service has no confirming Nuclei result for that CVE.
 
 ## Stored Fields
 

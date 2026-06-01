@@ -92,6 +92,7 @@ func (r *NVDRunner) Run(ctx context.Context) (NVDResult, error) {
 			}
 			_, matchInserted, err := r.repo.UpsertTechnologyVulnerabilityMatch(ctx, db.TechnologyVulnerabilityMatch{
 				ProgramID:         tech.ProgramID,
+				HTTPServiceID:     tech.HTTPServiceID,
 				VulnerabilityID:   vulnerabilityID,
 				LastScanRunID:     firstNonEmpty(r.scanRunID, tech.LastScanRunID),
 				TechnologyName:    tech.Name,
