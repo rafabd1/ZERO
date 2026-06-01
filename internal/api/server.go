@@ -59,6 +59,30 @@ func (s *Server) routes() {
 			'parallelism_scope', 'reserved; current scheduler uses ZERO_TARGET_PARALLELISM globally',
 			'last_scan_started_at', last_scan_started_at,
 			'last_scan_finished_at', last_scan_finished_at,
+			'is_running', EXISTS (
+				SELECT 1
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = zero_programs.id
+				  AND sr.run_type = 'full'
+				  AND sr.status = 'running'
+			),
+			'running_scan_started_at', (
+				SELECT sr.started_at
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = zero_programs.id
+				  AND sr.run_type = 'full'
+				  AND sr.status = 'running'
+				ORDER BY sr.started_at DESC
+				LIMIT 1
+			),
+			'latest_scan_status', (
+				SELECT sr.status
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = zero_programs.id
+				  AND sr.run_type = 'full'
+				ORDER BY sr.started_at DESC
+				LIMIT 1
+			),
 			'first_seen_at', first_seen_at,
 			'last_seen_at', last_seen_at
 		)
@@ -310,6 +334,30 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 				'parallelism_scope', 'reserved; current scheduler uses ZERO_TARGET_PARALLELISM globally',
 				'last_scan_started_at', p.last_scan_started_at,
 				'last_scan_finished_at', p.last_scan_finished_at,
+				'is_running', EXISTS (
+					SELECT 1
+					FROM zero_scan_runs sr
+					WHERE sr.program_id = p.id
+					  AND sr.run_type = 'full'
+					  AND sr.status = 'running'
+				),
+				'running_scan_started_at', (
+					SELECT sr.started_at
+					FROM zero_scan_runs sr
+					WHERE sr.program_id = p.id
+					  AND sr.run_type = 'full'
+					  AND sr.status = 'running'
+					ORDER BY sr.started_at DESC
+					LIMIT 1
+				),
+				'latest_scan_status', (
+					SELECT sr.status
+					FROM zero_scan_runs sr
+					WHERE sr.program_id = p.id
+					  AND sr.run_type = 'full'
+					ORDER BY sr.started_at DESC
+					LIMIT 1
+				),
 				'is_due', p.active AND (
 					p.last_scan_finished_at IS NULL
 					OR p.last_scan_finished_at < now() - (p.scan_interval_hours * interval '1 hour')

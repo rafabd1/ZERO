@@ -108,6 +108,8 @@ function renderPrograms() {
       }
       const never = !program.last_scan_finished_at;
       const due = isDue(program);
+      const running = isRunning(program);
+      if (filter === "running") return running;
       if (filter === "due") return due;
       if (filter === "scanned") return !never;
       if (filter === "never") return never;
@@ -116,6 +118,9 @@ function renderPrograms() {
       return true;
     })
     .sort((a, b) => {
+      const ar = isRunning(a) ? 0 : 1;
+      const br = isRunning(b) ? 0 : 1;
+      if (ar !== br) return ar - br;
       const ad = isDue(a) ? 0 : 1;
       const bd = isDue(b) ? 0 : 1;
       if (ad !== bd) return ad - bd;
@@ -139,7 +144,7 @@ function renderPrograms() {
       <td><strong>${escapeHTML(program.handle || "unknown")}</strong><small>${escapeHTML(program.platform || "")}</small></td>
       <td>${statusPill(program)}</td>
       <td>${fmt(program.scan_interval_hours)}h</td>
-      <td>${timeAgo(program.last_scan_finished_at)}</td>
+      <td>${programScanTime(program)}</td>
     `;
     tbody.appendChild(tr);
   }
@@ -156,7 +161,7 @@ async function loadProgramDetail(programID) {
     const assets = stats.assets || {};
     const findings = stats.findings || {};
     setText("detailTitle", program.handle || "Program Detail");
-    setText("detailState", program.is_due ? "Due" : "Current");
+    setText("detailState", isRunning(program) ? "Running" : program.is_due ? "Due" : "Current");
     setText("detailScope", fmt(assets.active_scope_assets));
     setText("detailSubdomains", fmt(assets.active_subdomains));
     setText("detailServices", fmt(assets.active_http_services));
@@ -214,6 +219,7 @@ function renderFindings() {
 
 function statusPill(program) {
   if (!program.active) return `<span class="pill">Inactive</span>`;
+  if (isRunning(program)) return `<span class="pill info">Running</span>`;
   if (!program.last_scan_finished_at) return `<span class="pill warn">Never scanned</span>`;
   if (isDue(program)) return `<span class="pill warn">Due</span>`;
   return `<span class="pill good">Current</span>`;
@@ -241,6 +247,17 @@ function isDue(program) {
   const last = new Date(program.last_scan_finished_at).getTime();
   if (!Number.isFinite(last)) return true;
   return Date.now() - last > intervalHours * 60 * 60 * 1000;
+}
+
+function isRunning(program) {
+  return Boolean(program && (program.is_running || program.latest_scan_status === "running"));
+}
+
+function programScanTime(program) {
+  if (isRunning(program)) {
+    return `started ${timeAgo(program.running_scan_started_at || program.last_scan_started_at)}`;
+  }
+  return timeAgo(program.last_scan_finished_at);
 }
 
 function formatLatestScan(scan) {
