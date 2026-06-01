@@ -1,16 +1,17 @@
 :root {
-  color-scheme: light;
-  --bg: #f5f7f8;
-  --surface: #ffffff;
-  --surface-2: #eef3f0;
-  --ink: #17201c;
-  --muted: #66736c;
-  --line: #dbe3df;
-  --accent: #1f7a5f;
-  --accent-2: #265a8f;
-  --warn: #b7791f;
-  --danger: #b33a3a;
-  --shadow: 0 14px 34px rgba(23, 32, 28, 0.08);
+  color-scheme: dark;
+  --bg: #101412;
+  --surface: #171d1a;
+  --surface-2: #202823;
+  --surface-3: #121714;
+  --ink: #eef4ef;
+  --muted: #97a49c;
+  --line: #2c3832;
+  --accent: #4ec69a;
+  --accent-2: #6da6e8;
+  --warn: #e3b65a;
+  --danger: #ef7777;
+  --shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
 }
 
 * {
@@ -37,7 +38,7 @@ body {
   min-height: 76px;
   padding: 16px clamp(16px, 4vw, 36px);
   border-bottom: 1px solid var(--line);
-  background: rgba(245, 247, 248, 0.94);
+  background: rgba(16, 20, 18, 0.94);
   backdrop-filter: blur(14px);
 }
 
@@ -94,6 +95,11 @@ input {
   background: var(--surface);
   color: var(--ink);
   font: inherit;
+}
+
+select,
+input {
+  color-scheme: dark;
 }
 
 button {
@@ -268,7 +274,7 @@ th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f9fbfa;
+  background: #1c2420;
   font-size: 11px;
   font-weight: 760;
   text-transform: uppercase;
@@ -279,11 +285,11 @@ tr {
 }
 
 tbody tr:hover {
-  background: #f4f8f6;
+  background: #1e2823;
 }
 
 tbody tr.selected {
-  background: #e8f3ee;
+  background: #23382f;
 }
 
 td strong {
@@ -316,23 +322,23 @@ td small {
 }
 
 .pill.good {
-  background: #e3f3ec;
-  color: #17674f;
+  background: #183d31;
+  color: #7ee5bc;
 }
 
 .pill.warn {
-  background: #f8efd9;
-  color: #84550e;
+  background: #463719;
+  color: #f4cb72;
 }
 
 .pill.danger {
-  background: #f7e5e5;
-  color: #953131;
+  background: #4a2224;
+  color: #ff9a9a;
 }
 
 .pill.info {
-  background: #e5eef8;
-  color: #255583;
+  background: #1d334d;
+  color: #9bc7f7;
 }
 
 .detail-grid {
@@ -347,7 +353,7 @@ td small {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfcfc;
+  background: var(--surface-3);
 }
 
 dd {
@@ -364,7 +370,7 @@ dd {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #111816;
+  background: #090c0b;
   color: #dbeee7;
   font-size: 12px;
   line-height: 1.5;

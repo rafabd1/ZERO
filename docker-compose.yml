@@ -3,6 +3,9 @@ services:
     build: .
     env_file:
       - .env
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - nuclei-templates:/home/zero/nuclei-templates
     command: ["worker"]
@@ -12,6 +15,9 @@ services:
     build: .
     env_file:
       - .env
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       ZERO_API_ADDR: "0.0.0.0:8080"
     command: ["api"]
@@ -51,6 +57,9 @@ services:
     build: .
     env_file:
       - .env
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     command: ["migrate", "up"]
     profiles:
       - tools

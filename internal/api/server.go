@@ -264,7 +264,13 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 				'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running'),
 				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded'),
 				'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed'),
-				'total', (SELECT count(*) FROM zero_scan_runs)
+				'total', (SELECT count(*) FROM zero_scan_runs),
+				'recent_24h', jsonb_build_object(
+					'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running' AND started_at > now() - interval '24 hours'),
+					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND started_at > now() - interval '24 hours'),
+					'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND started_at > now() - interval '24 hours'),
+					'total', (SELECT count(*) FROM zero_scan_runs WHERE started_at > now() - interval '24 hours')
+				)
 			),
 			'assets', jsonb_build_object(
 				'active_scope_assets', (SELECT count(*) FROM zero_scope_assets WHERE active),
@@ -323,6 +329,12 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded'),
 				'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed'),
 				'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id),
+				'recent_24h', jsonb_build_object(
+					'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND started_at > now() - interval '24 hours'),
+					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND started_at > now() - interval '24 hours'),
+					'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND started_at > now() - interval '24 hours'),
+					'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND started_at > now() - interval '24 hours')
+				),
 				'by_type', COALESCE((
 					SELECT jsonb_object_agg(run_type, count ORDER BY run_type)
 					FROM (

@@ -88,7 +88,7 @@ function renderGlobalStats() {
   setText("findingsTotal", fmt(findings.total));
   setText("findingsSplit", `${fmt(findings.nuclei_confirmed)} confirmed, ${fmt(findings.passive_unconfirmed)} passive`);
   setText("scansRunning", fmt(scanRuns.running));
-  setText("scansFailed", `${fmt(scanRuns.failed)} failed`);
+  setText("scansFailed", `${fmt(scanRuns.failed)} historical failed runs`);
 
   const active = Number(programs.active || 0);
   const scanned = Number(programs.scanned || 0);
