@@ -20,11 +20,14 @@ flowchart LR
   NUCLEI --> DB
   DB --> REPORT["new-only deduped reports"]
   REPORT --> DISCORD["Discord notification"]
+  DB --> API["Zero API"]
+  API --> DASH["Zero dashboard"]
 ```
 
 ## Components
 
 - `cmd/zero`: CLI entrypoint.
+- `cmd/dashboard`: local operational dashboard and API proxy.
 - `internal/scope`: scope source adapters. The first adapter imports HackerOne via `github.com/sw33tLie/bbscope/v2/pkg/platforms/hackerone`.
 - `internal/enumeration`: external enumeration tools such as `subfinder`.
 - `internal/probe`: DNS resolution and live checks, currently `dnsx` and `httpx`.
@@ -85,6 +88,8 @@ The worker uses second-enabled cron expressions:
 - `ZERO_SCHEDULE_NUCLEI`
 
 The primary worker job is the due-program pipeline scheduled by `ZERO_SCHEDULE_FULL`: global scope sync first, then per-program enumeration, DNS resolution, probing, Webanalyze enrichment, passive CVE matching, Nuclei validation, report generation, and Discord notification for due programs only. The `httpx` and Webanalyze fingerprint phases are target intel. Passive CVE matching is reported with lower confidence as potential/unconfirmed when Nuclei has no confirming hit, while Nuclei-backed findings remain the higher-confidence validation path.
+
+The dashboard runs as a separate container. It serves a static operational UI and proxies read-only API calls to the internal `api` service with the backend token injected server-side.
 
 Manual runs use `zero run manual` and accept one-off limits, custom Webanalyze apps files, CVE-derived Nuclei template selection, and explicit Nuclei template IDs. These flags apply only to that execution and do not modify environment defaults or worker cadence.
 

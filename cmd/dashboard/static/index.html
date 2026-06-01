@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zero Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Zero</h1>
+        <p id="statusLine">Loading dashboard data</p>
+      </div>
+      <div class="toolbar">
+        <label class="switch">
+          <input id="autoRefresh" type="checkbox" checked>
+          <span>Auto</span>
+        </label>
+        <button id="refreshButton" type="button" title="Refresh dashboard data">Refresh</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="metrics" aria-label="Global stats">
+        <article class="metric">
+          <span>Active Programs</span>
+          <strong id="programsActive">-</strong>
+          <small id="programsTotal">- total</small>
+        </article>
+        <article class="metric">
+          <span>Scanned</span>
+          <strong id="programsScanned">-</strong>
+          <small id="programsRemaining">- remaining</small>
+        </article>
+        <article class="metric">
+          <span>HTTP Services</span>
+          <strong id="httpServices">-</strong>
+          <small id="subdomains">- subdomains</small>
+        </article>
+        <article class="metric">
+          <span>Findings</span>
+          <strong id="findingsTotal">-</strong>
+          <small id="findingsSplit">-</small>
+        </article>
+        <article class="metric">
+          <span>Running Scans</span>
+          <strong id="scansRunning">-</strong>
+          <small id="scansFailed">- failed</small>
+        </article>
+      </section>
+
+      <section class="band">
+        <div class="section-title">
+          <h2>Scan Coverage</h2>
+          <span id="coverageLabel">-</span>
+        </div>
+        <div class="progress-track">
+          <div id="coverageBar" class="progress-bar"></div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="panel programs-panel">
+          <div class="section-title">
+            <h2>Programs</h2>
+            <span id="programCount">-</span>
+          </div>
+          <div class="filters">
+            <input id="programSearch" type="search" placeholder="Search program">
+            <select id="programFilter" aria-label="Filter programs">
+              <option value="all">All</option>
+              <option value="due">Due</option>
+              <option value="scanned">Scanned</option>
+              <option value="never">Never scanned</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Program</th>
+                  <th>Status</th>
+                  <th>Interval</th>
+                  <th>Last Scan</th>
+                </tr>
+              </thead>
+              <tbody id="programRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside class="panel detail-panel">
+          <div class="section-title">
+            <h2 id="detailTitle">Program Detail</h2>
+            <span id="detailState">Select a row</span>
+          </div>
+          <dl class="detail-grid">
+            <div><dt>Scope Assets</dt><dd id="detailScope">-</dd></div>
+            <div><dt>Subdomains</dt><dd id="detailSubdomains">-</dd></div>
+            <div><dt>Services</dt><dd id="detailServices">-</dd></div>
+            <div><dt>Tech Observations</dt><dd id="detailTech">-</dd></div>
+            <div><dt>Findings</dt><dd id="detailFindings">-</dd></div>
+            <div><dt>Nuclei Results</dt><dd id="detailNuclei">-</dd></div>
+          </dl>
+          <pre id="latestScan" class="scan-box">No program selected.</pre>
+        </aside>
+      </section>
+
+      <section class="split">
+        <div class="panel">
+          <div class="section-title">
+            <h2>Latest Scans</h2>
+            <span id="scanCount">-</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Started</th>
+                  <th>Stats</th>
+                </tr>
+              </thead>
+              <tbody id="scanRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="section-title">
+            <h2>Recent Findings</h2>
+            <span id="findingCount">-</span>
+          </div>
+          <div class="table-wrap compact">
+            <table>
+              <thead>
+                <tr>
+                  <th>Severity</th>
+                  <th>Confidence</th>
+                  <th>Validation</th>
+                  <th>First Seen</th>
+                </tr>
+              </thead>
+              <tbody id="findingRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

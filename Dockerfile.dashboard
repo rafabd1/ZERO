@@ -1,0 +1,24 @@
+FROM golang:1.24-alpine AS build
+
+WORKDIR /src
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY . .
+RUN go build -trimpath -ldflags="-s -w" -o /out/zero-dashboard ./cmd/dashboard
+
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates curl && \
+    adduser -D -h /home/zero zero
+
+COPY --from=build /out/zero-dashboard /usr/local/bin/zero-dashboard
+
+USER zero
+WORKDIR /home/zero
+
+ENV ZERO_DASHBOARD_ADDR=0.0.0.0:8090
+ENV ZERO_DASHBOARD_API_BASE_URL=http://api:8080
+
+EXPOSE 8090
+
+CMD ["zero-dashboard"]

@@ -135,7 +135,23 @@ zero report export-triage --program-id <uuid> --status reported --limit 50
 
 ## Docker Services
 
-`docker compose up -d zero api` starts the continuous worker and read API. The API service overrides `ZERO_API_ADDR` to `0.0.0.0:8080` inside the container and publishes it on `127.0.0.1:8080` on the host. Keep `ZERO_API_TOKEN` set when exposing the API beyond localhost.
+`docker compose up -d zero api dashboard` starts the continuous worker, read API, and local dashboard. The API service overrides `ZERO_API_ADDR` to `0.0.0.0:8080` inside the container and publishes it on `127.0.0.1:8080` on the host. The dashboard service listens on `127.0.0.1:8090` by default and proxies API reads from the container network using `ZERO_API_TOKEN`, so the browser does not receive the API token.
+
+Open the dashboard at:
+
+```text
+http://127.0.0.1:8090
+```
+
+The dashboard reads:
+
+- global stats from `/v1/stats`;
+- full program list from `/v1/programs`;
+- selected program stats from `/v1/programs/{program_id}/stats`;
+- recent scans from `/v1/scans/latest`;
+- recent findings from `/v1/findings`.
+
+Keep `ZERO_API_TOKEN` set when exposing either the API or dashboard beyond localhost. If the dashboard needs to be exposed remotely, put it behind a trusted auth layer or tunnel with access control instead of publishing the container directly.
 
 ## Subfinder Providers
 
