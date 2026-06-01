@@ -198,5 +198,7 @@ type DiscordReport struct {
 	Confidence    int
 	BodyMarkdown  string
 	FindingIDs    []string
+	Confirmed     int
+	Potential     int
 	CreatedAt     string
 }

@@ -93,12 +93,13 @@ type DataConfig struct {
 }
 
 type ScheduleConfig struct {
-	Full      string
-	ScopeSync string
-	Enum      string
-	Probe     string
-	CVE       string
-	Nuclei    string
+	Full            string
+	ScopeSync       string
+	Enum            string
+	Probe           string
+	CVE             string
+	Nuclei          string
+	NucleiTemplates string
 }
 
 func Load() (Config, error) {
@@ -136,13 +137,14 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
 	v.SetDefault("tools.timeout", "20m")
-	v.SetDefault("target_parallelism", 4)
+	v.SetDefault("target_parallelism", 6)
 	v.SetDefault("schedule.full", "0 15 3 */3 * *")
 	v.SetDefault("schedule.scope_sync", "0 15 3 * * *")
 	v.SetDefault("schedule.enum", "0 45 3 * * *")
 	v.SetDefault("schedule.probe", "0 30 4 * * *")
 	v.SetDefault("schedule.cve", "0 15 5 * * *")
 	v.SetDefault("schedule.nuclei", "0 45 5 * * *")
+	v.SetDefault("schedule.nuclei_templates", "0 5 3 * * *")
 	v.SetDefault("api.addr", "127.0.0.1:8080")
 	v.SetDefault("worker.run_on_startup", true)
 	v.SetDefault("worker.recover_running_scans", true)
@@ -186,6 +188,12 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.timeout", "ZERO_TOOL_TIMEOUT")
 	_ = v.BindEnv("target_parallelism", "ZERO_TARGET_PARALLELISM")
 	_ = v.BindEnv("schedule.full", "ZERO_SCHEDULE_FULL")
+	_ = v.BindEnv("schedule.scope_sync", "ZERO_SCHEDULE_SCOPE_SYNC")
+	_ = v.BindEnv("schedule.enum", "ZERO_SCHEDULE_ENUM")
+	_ = v.BindEnv("schedule.probe", "ZERO_SCHEDULE_PROBE")
+	_ = v.BindEnv("schedule.cve", "ZERO_SCHEDULE_CVE")
+	_ = v.BindEnv("schedule.nuclei", "ZERO_SCHEDULE_NUCLEI")
+	_ = v.BindEnv("schedule.nuclei_templates", "ZERO_SCHEDULE_NUCLEI_TEMPLATES")
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
 	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
 	_ = v.BindEnv("notify.discord_webhook_url", "ZERO_DISCORD_WEBHOOK_URL")
@@ -240,12 +248,13 @@ func Load() (Config, error) {
 			ToolTimeout:             v.GetDuration("tools.timeout"),
 		},
 		Schedule: ScheduleConfig{
-			Full:      v.GetString("schedule.full"),
-			ScopeSync: v.GetString("schedule.scope_sync"),
-			Enum:      v.GetString("schedule.enum"),
-			Probe:     v.GetString("schedule.probe"),
-			CVE:       v.GetString("schedule.cve"),
-			Nuclei:    v.GetString("schedule.nuclei"),
+			Full:            v.GetString("schedule.full"),
+			ScopeSync:       v.GetString("schedule.scope_sync"),
+			Enum:            v.GetString("schedule.enum"),
+			Probe:           v.GetString("schedule.probe"),
+			CVE:             v.GetString("schedule.cve"),
+			Nuclei:          v.GetString("schedule.nuclei"),
+			NucleiTemplates: v.GetString("schedule.nuclei_templates"),
 		},
 		API: APIConfig{
 			Addr:  v.GetString("api.addr"),

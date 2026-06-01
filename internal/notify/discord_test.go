@@ -62,11 +62,39 @@ func TestBuildDiscordPayloadsSplitsLongReport(t *testing.T) {
 			t.Fatalf("payload %d description length = %d; want <= 3900", i, len(payload.Embeds[0].Description))
 		}
 	}
-	if !strings.Contains(payloads[0].Content, "potenciais/passivos") {
+	if !strings.Contains(payloads[0].Content, "potencial(is)/passivo(s)") {
 		t.Fatalf("content = %q; want passive warning", payloads[0].Content)
 	}
 	if !strings.Contains(payloads[1].Embeds[0].Title, "parte 2/") {
 		t.Fatalf("title = %q; want part marker", payloads[1].Embeds[0].Title)
+	}
+}
+
+func TestBuildDiscordPayloadLabelsNucleiConfirmedFindings(t *testing.T) {
+	report := db.DiscordReport{
+		ProgramID:     "program-id",
+		ProgramHandle: "example",
+		ProgramURL:    "https://hackerone.com/example",
+		Title:         "Zero findings for example",
+		Severity:      "critical",
+		Confidence:    95,
+		BodyMarkdown:  "### https://app.example.com\n\nValidation: Nuclei-backed finding.",
+		FindingIDs:    []string{"finding-1", "finding-2"},
+		Confirmed:     2,
+	}
+
+	payload := buildDiscordPayload(report)
+	if !strings.Contains(payload.Content, "confirmou 2 novo(s) finding(s) com Nuclei") {
+		t.Fatalf("content = %q; want explicit Nuclei confirmation", payload.Content)
+	}
+	foundValidation := false
+	for _, field := range payload.Embeds[0].Fields {
+		if field.Name == "Validacao" && strings.Contains(field.Value, "Confirmado por Nuclei: 2") {
+			foundValidation = true
+		}
+	}
+	if !foundValidation {
+		t.Fatalf("fields = %#v; want Nuclei validation field", payload.Embeds[0].Fields)
 	}
 }
 

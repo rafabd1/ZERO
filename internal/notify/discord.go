@@ -218,10 +218,9 @@ func buildDiscordPayloads(report db.DiscordReport) []discordPayload {
 		count = 1
 	}
 	program := firstNonEmpty(report.ProgramHandle, report.ProgramID, "programa")
-	content := fmt.Sprintf("Zero encontrou %d novo(s) candidato(s) de finding em `%s`.", count, program)
-	if strings.Contains(strings.ToLower(report.BodyMarkdown), "potential/unconfirmed") {
-		content += " Alguns itens sao potenciais/passivos e precisam de validacao manual."
-	}
+	confirmed, potential := findingValidationCounts(report, count)
+	content := discordContent(program, count, confirmed, potential)
+	validation := validationLabel(confirmed, potential)
 	chunks := chunkMarkdown(report.BodyMarkdown, 3600)
 	payloads := make([]discordPayload, 0, len(chunks))
 	for i, chunk := range chunks {
@@ -239,6 +238,7 @@ func buildDiscordPayloads(report db.DiscordReport) []discordPayload {
 					{Name: "Severity", Value: firstNonEmpty(report.Severity, "unknown"), Inline: true},
 					{Name: "Confidence", Value: fmt.Sprintf("%d", report.Confidence), Inline: true},
 					{Name: "Findings", Value: fmt.Sprintf("%d", count), Inline: true},
+					{Name: "Validacao", Value: validation, Inline: false},
 					{Name: "Program", Value: truncate(firstNonEmpty(report.ProgramURL, report.ProgramHandle, report.ProgramID, "unknown"), 1000), Inline: false},
 				},
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -246,6 +246,48 @@ func buildDiscordPayloads(report db.DiscordReport) []discordPayload {
 		})
 	}
 	return payloads
+}
+
+func findingValidationCounts(report db.DiscordReport, fallbackCount int) (int, int) {
+	confirmed := report.Confirmed
+	potential := report.Potential
+	if confirmed > 0 || potential > 0 {
+		return confirmed, potential
+	}
+	body := strings.ToLower(report.BodyMarkdown)
+	if strings.Contains(body, "potential/unconfirmed") || strings.Contains(body, "no confirming nuclei result") {
+		return 0, fallbackCount
+	}
+	if strings.Contains(body, "nuclei-backed finding") || strings.Contains(body, "nuclei template:") {
+		return fallbackCount, 0
+	}
+	return 0, 0
+}
+
+func discordContent(program string, count, confirmed, potential int) string {
+	switch {
+	case confirmed > 0 && potential == 0:
+		return fmt.Sprintf("Zero confirmou %d novo(s) finding(s) com Nuclei em `%s`.", confirmed, program)
+	case confirmed > 0 && potential > 0:
+		return fmt.Sprintf("Zero encontrou %d novo(s) candidato(s) de finding em `%s`: %d confirmado(s) por Nuclei e %d potencial(is)/passivo(s).", count, program, confirmed, potential)
+	case potential > 0:
+		return fmt.Sprintf("Zero encontrou %d novo(s) finding(s) potencial(is)/passivo(s) em `%s`; precisam de validacao manual.", potential, program)
+	default:
+		return fmt.Sprintf("Zero encontrou %d novo(s) candidato(s) de finding em `%s`.", count, program)
+	}
+}
+
+func validationLabel(confirmed, potential int) string {
+	switch {
+	case confirmed > 0 && potential == 0:
+		return fmt.Sprintf("Confirmado por Nuclei: %d", confirmed)
+	case confirmed > 0 && potential > 0:
+		return fmt.Sprintf("Confirmado por Nuclei: %d; potencial/passivo: %d", confirmed, potential)
+	case potential > 0:
+		return fmt.Sprintf("Potencial/passivo sem confirmacao do Nuclei: %d", potential)
+	default:
+		return "Nao classificado"
+	}
 }
 
 func chunkMarkdown(value string, max int) []string {

@@ -155,7 +155,8 @@ func (r *Repository) ListCVETemplateIDsFromMatches(ctx context.Context, programI
 		WHERE ($1 = '' OR m.program_id::text = $1)
 		  AND lower(v.severity) = ANY($2::text[])
 		  AND upper(v.vuln_id) LIKE 'CVE-%'
-		  AND m.confidence >= 50
+		  AND m.confidence >= 80
+		  AND m.evidence->>'strategy' = 'nvd-cpe'
 		ORDER BY upper(v.vuln_id)
 		LIMIT $3
 	`, programID, severityList, limit)

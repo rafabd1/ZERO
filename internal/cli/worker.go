@@ -50,6 +50,15 @@ func newWorkerCommand() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+			if cfg.Tools.NucleiUpdateTemplates {
+				if err := addJob("nuclei-template-update", cfg.Schedule.NucleiTemplates, func() {
+					if err := updateNucleiTemplates(commandContext(), cmd, cfg); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "nuclei template update failed: %v\n", err)
+					}
+				}); err != nil {
+					return err
+				}
+			}
 
 			c.Start()
 			if cfg.Worker.RunOnStartup {

@@ -35,7 +35,7 @@ To run the first real scan, Zero needs:
 
 Default per-target scan interval: 72 hours.
 
-Default target parallelism: 4 programs at the same time.
+Default target parallelism: 6 programs at the same time.
 
 Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_programs.max_parallel_tasks`.
 
@@ -56,6 +56,8 @@ enum subfinder --program-id ... -> probe dnsx --program-id ... -> probe httpx --
 The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron syntax, matching the initial three-day cadence.
 
 Each external tool call is bounded by `ZERO_TOOL_TIMEOUT` and defaults to 20 minutes. When a tool times out inside `zero run once`, `zero run due`, `zero run manual`, or `zero tools nuclei-update`, Zero stops that step, marks the current scan run as failed when applicable, and emits a Discord operational alert if `ZERO_DISCORD_WEBHOOK_URL` is configured. The alert includes the alert type, program, step command, configured timeout, and error text. The Docker entrypoint also bounds the optional startup Nuclei template update with the same timeout so the container can continue booting if template refresh stalls.
+
+Nuclei templates are updated on container startup when `ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP=true` and by the worker schedule `ZERO_SCHEDULE_NUCLEI_TEMPLATES` (default: `0 5 3 * * *`). They are not updated before every program scan because template updates are global, network-dependent, and can add avoidable latency/noise to target processing.
 
 ## Data Lifecycle
 
@@ -106,6 +108,8 @@ Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for th
 ## Discord Notifications
 
 `zero notify discord` sends only reports that do not have a successful `zero_discord_notifications` row for the report dedupe key. Failed notifications are stored and can be retried; successful notifications are not sent again.
+
+Report notifications label validation status explicitly. Nuclei-backed findings are announced as confirmed by Nuclei; passive CVE candidates without a linked Nuclei result are announced as potential/passive and require manual validation.
 
 If `ZERO_DISCORD_WEBHOOK_URL` is empty, the command is a safe no-op. Use `--dry-run` to count pending reports without creating notification rows or sending webhooks.
 

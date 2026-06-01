@@ -24,6 +24,18 @@ func (r *Repository) ListDiscordReports(ctx context.Context, programID string, l
 			r.confidence,
 			r.body_markdown,
 			r.finding_ids::text[],
+			(
+				SELECT count(*)
+				FROM zero_candidate_findings f
+				WHERE f.id = ANY(r.finding_ids)
+				  AND f.nuclei_result_id IS NOT NULL
+			)::int,
+			(
+				SELECT count(*)
+				FROM zero_candidate_findings f
+				WHERE f.id = ANY(r.finding_ids)
+				  AND f.nuclei_result_id IS NULL
+			)::int,
 			r.created_at::text
 		FROM zero_reports r
 		LEFT JOIN zero_programs p ON p.id = r.program_id
@@ -56,6 +68,8 @@ func (r *Repository) ListDiscordReports(ctx context.Context, programID string, l
 			&report.Confidence,
 			&report.BodyMarkdown,
 			&report.FindingIDs,
+			&report.Confirmed,
+			&report.Potential,
 			&report.CreatedAt,
 		); err != nil {
 			return nil, err
