@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/rafabd1/ZERO/internal/report"
 	"github.com/spf13/cobra"
@@ -10,6 +12,10 @@ import (
 func newReportCommand() *cobra.Command {
 	var limit int
 	var programID string
+	var exportLimit int
+	var exportProgramID string
+	var exportStatus string
+	var exportOutput string
 	cmd := &cobra.Command{
 		Use:   "report",
 		Short: "Generate and inspect deduplicated reports.",
@@ -43,7 +49,48 @@ func newReportCommand() *cobra.Command {
 			return nil
 		},
 	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "export-triage",
+		Short: "Export structured finding bundles for Proteus/Codex triage.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext()
+			cfg := loadConfig()
+			repo := openRepository(ctx, cfg)
+			defer repo.Close()
+
+			bundles, err := repo.ListTriageBundles(ctx, exportProgramID, exportStatus, exportLimit)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			var file *os.File
+			if exportOutput != "" {
+				file, err = os.Create(exportOutput)
+				if err != nil {
+					return err
+				}
+				defer file.Close()
+				out = file
+			}
+			enc := json.NewEncoder(out)
+			for _, bundle := range bundles {
+				var value any
+				if err := json.Unmarshal(bundle, &value); err != nil {
+					return err
+				}
+				if err := enc.Encode(value); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "exported %d triage bundle(s)\n", len(bundles))
+			return nil
+		},
+	})
 	cmd.Commands()[0].Flags().IntVar(&limit, "limit", 500, "maximum new findings to report")
 	cmd.Commands()[0].Flags().StringVar(&programID, "program-id", "", "limit reporting to one program id")
+	cmd.Commands()[1].Flags().IntVar(&exportLimit, "limit", 100, "maximum findings to export")
+	cmd.Commands()[1].Flags().StringVar(&exportProgramID, "program-id", "", "limit export to one program id")
+	cmd.Commands()[1].Flags().StringVar(&exportStatus, "status", "new", "finding status to export; empty exports all statuses")
+	cmd.Commands()[1].Flags().StringVar(&exportOutput, "output", "", "write JSONL bundles to this file instead of stdout")
 	return cmd
 }

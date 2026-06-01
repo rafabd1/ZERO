@@ -82,6 +82,7 @@ zero analyze cves --limit 1
 zero analyze nuclei --from-cves --limit 5 --cve-limit 10
 zero analyze nuclei --limit 5 --template-id CVE-2025-20362
 zero report generate --limit 50
+zero report export-triage --limit 50 --output triage-bundles.jsonl
 zero notify discord --dry-run
 zero run due --dry-run --limit 4
 zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --nuclei-from-cves --nuclei-cve-limit 10 --nuclei-limit 20
@@ -102,6 +103,15 @@ Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for th
 `zero notify discord` sends only reports that do not have a successful `zero_discord_notifications` row for the report dedupe key. Failed notifications are stored and can be retried; successful notifications are not sent again.
 
 If `ZERO_DISCORD_WEBHOOK_URL` is empty, the command is a safe no-op. Use `--dry-run` to count pending reports without creating notification rows or sending webhooks.
+
+## Triage Export
+
+Use `zero report export-triage` to create JSONL bundles for Proteus/Codex review. Each line contains the finding, program, service, Nuclei result, active technology observations, passive CVE context, and report metadata when available.
+
+```bash
+zero report export-triage --status new --limit 100 --output triage-bundles.jsonl
+zero report export-triage --program-id <uuid> --status reported --limit 50
+```
 
 ## Docker Services
 

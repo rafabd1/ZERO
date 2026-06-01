@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,79 +81,12 @@ func (s *Server) routes() {
 		ORDER BY a.last_seen_at DESC
 		LIMIT 500
 	`))
-	s.mux.HandleFunc("GET /v1/services", s.query(`
-		SELECT jsonb_build_object(
-			'id', s.id,
-			'program_id', s.program_id,
-			'last_scan_run_id', s.last_scan_run_id,
-			'url', s.url,
-			'host', s.host,
-			'status_code', s.status_code,
-			'title', s.title,
-			'webserver', s.webserver,
-			'technologies', s.technologies,
-			'first_seen_at', s.first_seen_at,
-			'last_seen_at', s.last_seen_at
-		)
-		FROM zero_http_services s
-		WHERE s.active = true
-		ORDER BY s.last_seen_at DESC
-		LIMIT 500
-	`))
+	s.mux.HandleFunc("GET /v1/services", s.services(""))
 	s.mux.HandleFunc("GET /v1/technologies", s.technologies(""))
 	s.mux.HandleFunc("GET /v1/technology-vulnerabilities", s.technologyVulnerabilities(""))
-	s.mux.HandleFunc("GET /v1/nuclei-results", s.query(`
-		SELECT jsonb_build_object(
-			'id', n.id,
-			'program_id', n.program_id,
-			'scan_run_id', n.scan_run_id,
-			'http_service_id', n.http_service_id,
-			'template_id', n.template_id,
-			'matched_at', n.matched_at,
-			'severity', n.severity,
-			'cves', n.cves,
-			'tags', n.tags,
-			'first_seen_at', n.first_seen_at,
-			'last_seen_at', n.last_seen_at
-		)
-		FROM zero_nuclei_results n
-		ORDER BY n.first_seen_at DESC
-		LIMIT 500
-	`))
-	s.mux.HandleFunc("GET /v1/findings", s.query(`
-		SELECT jsonb_build_object(
-			'id', f.id,
-			'program_id', f.program_id,
-			'http_service_id', f.http_service_id,
-			'nuclei_result_id', f.nuclei_result_id,
-			'severity', f.severity,
-			'confidence', f.confidence,
-			'status', f.status,
-			'evidence', f.evidence,
-			'first_seen_at', f.first_seen_at,
-			'last_seen_at', f.last_seen_at
-		)
-		FROM zero_candidate_findings f
-		ORDER BY f.first_seen_at DESC
-		LIMIT 500
-	`))
-	s.mux.HandleFunc("GET /v1/reports", s.query(`
-		SELECT jsonb_build_object(
-			'id', r.id,
-			'program_id', r.program_id,
-			'scan_run_id', r.scan_run_id,
-			'report_key', r.report_key,
-			'title', r.title,
-			'severity', r.severity,
-			'confidence', r.confidence,
-			'finding_ids', r.finding_ids,
-			'created_at', r.created_at,
-			'metadata', r.metadata
-		)
-		FROM zero_reports r
-		ORDER BY r.created_at DESC
-		LIMIT 500
-	`))
+	s.mux.HandleFunc("GET /v1/nuclei-results", s.nucleiResults(""))
+	s.mux.HandleFunc("GET /v1/findings", s.findings(""))
+	s.mux.HandleFunc("GET /v1/reports", s.reports(""))
 	s.mux.HandleFunc("GET /v1/reports/latest", s.query(`
 		SELECT jsonb_build_object(
 			'id', r.id,
@@ -290,7 +224,25 @@ func (s *Server) routes() {
 		writeRawJSONArray(w, rows)
 	})
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/services", func(w http.ResponseWriter, r *http.Request) {
-		programID := r.PathValue("program_id")
+		s.services(r.PathValue("program_id"))(w, r)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/technologies", func(w http.ResponseWriter, r *http.Request) {
+		s.technologies(r.PathValue("program_id"))(w, r)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/technology-vulnerabilities", func(w http.ResponseWriter, r *http.Request) {
+		s.technologyVulnerabilities(r.PathValue("program_id"))(w, r)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/nuclei-results", func(w http.ResponseWriter, r *http.Request) {
+		s.nucleiResults(r.PathValue("program_id"))(w, r)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/findings", func(w http.ResponseWriter, r *http.Request) {
+		s.findings(r.PathValue("program_id"))(w, r)
+	})
+}
+
+func (s *Server) services(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := listParamsFromRequest(r, 500)
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', s.id,
@@ -306,24 +258,24 @@ func (s *Server) routes() {
 				'last_seen_at', s.last_seen_at
 			)
 			FROM zero_http_services s
-			WHERE s.program_id = $1::uuid
+			WHERE s.active = true
+			  AND ($1 = '' OR s.program_id::text = $1)
+			  AND ($2 = '' OR s.host ILIKE '%' || $2 || '%' OR s.url ILIKE '%' || $2 || '%')
+			  AND ($3 = '' OR s.last_seen_at > $3::timestamptz)
 			ORDER BY s.last_seen_at DESC
-			LIMIT 500
-		`, programID)
+			LIMIT $4 OFFSET $5
+		`, programID, strings.TrimSpace(r.URL.Query().Get("q")), p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeRawJSONArray(w, rows)
-	})
-	s.mux.HandleFunc("GET /v1/programs/{program_id}/technologies", func(w http.ResponseWriter, r *http.Request) {
-		s.technologies(r.PathValue("program_id"))(w, r)
-	})
-	s.mux.HandleFunc("GET /v1/programs/{program_id}/technology-vulnerabilities", func(w http.ResponseWriter, r *http.Request) {
-		s.technologyVulnerabilities(r.PathValue("program_id"))(w, r)
-	})
-	s.mux.HandleFunc("GET /v1/programs/{program_id}/nuclei-results", func(w http.ResponseWriter, r *http.Request) {
-		programID := r.PathValue("program_id")
+	}
+}
+
+func (s *Server) nucleiResults(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := listParamsFromRequest(r, 500)
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', n.id,
@@ -339,22 +291,24 @@ func (s *Server) routes() {
 				'last_seen_at', n.last_seen_at
 			)
 			FROM zero_nuclei_results n
-			WHERE n.program_id = $1::uuid
+			WHERE ($1 = '' OR n.program_id::text = $1)
+			  AND ($2 = '' OR n.severity = $2)
+			  AND ($3 = '' OR n.template_id = $3)
+			  AND ($4 = '' OR n.first_seen_at > $4::timestamptz)
 			ORDER BY n.first_seen_at DESC
-			LIMIT 500
-		`, programID)
+			LIMIT $5 OFFSET $6
+		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), strings.TrimSpace(r.URL.Query().Get("template_id")), p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeRawJSONArray(w, rows)
-	})
-	s.mux.HandleFunc("GET /v1/programs/{program_id}/findings", func(w http.ResponseWriter, r *http.Request) {
-		programID := r.PathValue("program_id")
-		status := r.URL.Query().Get("status")
-		if status == "" {
-			status = "new"
-		}
+	}
+}
+
+func (s *Server) findings(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := listParamsFromRequest(r, 500)
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', f.id,
@@ -370,17 +324,51 @@ func (s *Server) routes() {
 				'last_seen_at', f.last_seen_at
 			)
 			FROM zero_candidate_findings f
-			WHERE f.program_id = $1::uuid
-			  AND f.status = $2
+			WHERE ($1 = '' OR f.program_id::text = $1)
+			  AND ($2 = '' OR f.status = $2)
+			  AND ($3 = '' OR f.severity = $3)
+			  AND ($4 = 0 OR f.confidence >= $4)
+			  AND ($5 = '' OR f.first_seen_at > $5::timestamptz)
 			ORDER BY f.first_seen_at DESC
-			LIMIT 500
-		`, programID, status)
+			LIMIT $6 OFFSET $7
+		`, programID, strings.TrimSpace(r.URL.Query().Get("status")), strings.TrimSpace(r.URL.Query().Get("severity")), queryInt(r, "min_confidence", 0), p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeRawJSONArray(w, rows)
-	})
+	}
+}
+
+func (s *Server) reports(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := listParamsFromRequest(r, 500)
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', r.id,
+				'program_id', r.program_id,
+				'scan_run_id', r.scan_run_id,
+				'report_key', r.report_key,
+				'title', r.title,
+				'severity', r.severity,
+				'confidence', r.confidence,
+				'finding_ids', r.finding_ids,
+				'created_at', r.created_at,
+				'metadata', r.metadata
+			)
+			FROM zero_reports r
+			WHERE ($1 = '' OR r.program_id::text = $1)
+			  AND ($2 = '' OR r.severity = $2)
+			  AND ($3 = '' OR r.created_at > $3::timestamptz)
+			ORDER BY r.created_at DESC
+			LIMIT $4 OFFSET $5
+		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), p.Since, p.Limit, p.Offset)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	}
 }
 
 func (s *Server) technologies(programID string) http.HandlerFunc {
@@ -446,6 +434,43 @@ func (s *Server) technologyVulnerabilities(programID string) http.HandlerFunc {
 		}
 		writeRawJSONArray(w, rows)
 	}
+}
+
+type listParams struct {
+	Limit  int
+	Offset int
+	Since  string
+}
+
+func listParamsFromRequest(r *http.Request, defaultLimit int) listParams {
+	limit := queryInt(r, "limit", defaultLimit)
+	if limit < 1 {
+		limit = defaultLimit
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	offset := queryInt(r, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+	return listParams{
+		Limit:  limit,
+		Offset: offset,
+		Since:  strings.TrimSpace(r.URL.Query().Get("since")),
+	}
+}
+
+func queryInt(r *http.Request, name string, fallback int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
 
 func (s *Server) createScanRequest(w http.ResponseWriter, r *http.Request) {

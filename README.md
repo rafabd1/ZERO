@@ -30,6 +30,7 @@ go run ./cmd/zero enrich webanalyze
 go run ./cmd/zero analyze cves
 go run ./cmd/zero analyze nuclei
 go run ./cmd/zero report generate
+go run ./cmd/zero report export-triage --limit 25
 go run ./cmd/zero notify discord --dry-run
 ```
 
@@ -81,5 +82,6 @@ This commit establishes the base project:
 - `subfinder`, `dnsx`, and `httpx` task runners.
 - Webanalyze enrichment, NVD CVE matching, and Nuclei result ingestion.
 - New-only report generation from unreported findings.
+- JSONL triage bundle export for Proteus/Codex review.
 
 Passive CVE matching never creates findings by itself. Fingerprints from `httpx` and Webanalyze are kept as asset intelligence; reportable CVE candidates come from Nuclei validation.
