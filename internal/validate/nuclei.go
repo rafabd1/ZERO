@@ -41,6 +41,7 @@ type NucleiResult struct {
 	Results          int
 	Inserted         int
 	FindingsInserted int
+	Skipped          string
 }
 
 func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
@@ -136,6 +137,11 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	if r.limit > 0 && len(targets) > r.limit {
 		targets = targets[:r.limit]
 	}
+	result := NucleiResult{Targets: len(targets)}
+	if len(targets) == 0 {
+		result.Skipped = "no active HTTP services"
+		return result, nil
+	}
 
 	var input bytes.Buffer
 	for _, target := range targets {
@@ -144,7 +150,6 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	}
 
 	index := newTargetIndex(targets)
-	result := NucleiResult{Targets: len(targets)}
 	args := []string{
 		"-silent",
 		"-j",
@@ -200,7 +205,39 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		}
 		return nil
 	})
+	if err != nil && isNoTemplatesError(err) {
+		result.Skipped = "no matching local Nuclei templates"
+		return result, nil
+	}
 	return result, err
+}
+
+func isNoTemplatesError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(stripANSI(err.Error()))
+	return strings.Contains(msg, "no templates provided for scan")
+}
+
+func stripANSI(value string) string {
+	var out strings.Builder
+	inEscape := false
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if inEscape {
+			if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		if ch == 0x1b {
+			inEscape = true
+			continue
+		}
+		out.WriteByte(ch)
+	}
+	return out.String()
 }
 
 type nucleiJSON struct {

@@ -97,7 +97,8 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 			JOIN zero_vulnerability_records v ON v.id = m.vulnerability_id
 			JOIN zero_http_services s ON s.id = m.http_service_id AND s.active = true
 			WHERE m.http_service_id IS NOT NULL
-			  AND m.confidence >= 50
+			  AND m.confidence >= 80
+			  AND m.evidence->>'strategy' = 'nvd-cpe'
 			  AND lower(v.severity) IN ('medium', 'high', 'critical')
 			  AND ($1 = '' OR m.program_id::text = $1)
 			  AND NOT EXISTS (

@@ -23,6 +23,9 @@ func TestBuildDiscordPayload(t *testing.T) {
 	if !strings.Contains(payload.Content, "2 novo") {
 		t.Fatalf("content = %q; want finding count", payload.Content)
 	}
+	if strings.Contains(payload.Content, "validado") {
+		t.Fatalf("content = %q; should not claim validation", payload.Content)
+	}
 	if len(payload.Embeds) != 1 {
 		t.Fatalf("embeds = %d; want 1", len(payload.Embeds))
 	}
@@ -32,6 +35,38 @@ func TestBuildDiscordPayload(t *testing.T) {
 	}
 	if len(embed.Description) > 3900 {
 		t.Fatalf("description length = %d; want <= 3900", len(embed.Description))
+	}
+}
+
+func TestBuildDiscordPayloadsSplitsLongReport(t *testing.T) {
+	report := db.DiscordReport{
+		ProgramID:     "program-id",
+		ProgramHandle: "example",
+		ProgramURL:    "https://hackerone.com/example",
+		Title:         "Zero findings for example",
+		Severity:      "critical",
+		Confidence:    65,
+		BodyMarkdown:  strings.Repeat("### https://app.example.com\n\nValidation: potential/unconfirmed passive CVE match.\n\n", 90),
+		FindingIDs:    []string{"finding-1", "finding-2", "finding-3"},
+	}
+
+	payloads := buildDiscordPayloads(report)
+	if len(payloads) < 2 {
+		t.Fatalf("payloads = %d; want split payloads", len(payloads))
+	}
+	for i, payload := range payloads {
+		if len(payload.Embeds) != 1 {
+			t.Fatalf("payload %d embeds = %d; want 1", i, len(payload.Embeds))
+		}
+		if len(payload.Embeds[0].Description) > 3900 {
+			t.Fatalf("payload %d description length = %d; want <= 3900", i, len(payload.Embeds[0].Description))
+		}
+	}
+	if !strings.Contains(payloads[0].Content, "potenciais/passivos") {
+		t.Fatalf("content = %q; want passive warning", payloads[0].Content)
+	}
+	if !strings.Contains(payloads[1].Embeds[0].Title, "parte 2/") {
+		t.Fatalf("title = %q; want part marker", payloads[1].Embeds[0].Title)
 	}
 }
 

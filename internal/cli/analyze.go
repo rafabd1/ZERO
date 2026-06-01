@@ -155,8 +155,13 @@ func newAnalyzeCommand() *cobra.Command {
 				"bulk_size":         bulkSize,
 				"retries":           retries,
 				"timeout":           timeout,
+				"skipped":           result.Skipped,
 			}); err != nil {
 				return err
+			}
+			if result.Skipped != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "nuclei skipped: %s\n", result.Skipped)
+				return nil
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "nuclei scanned %d URLs, observed %d results, inserted %d new results and %d new findings\n", result.Targets, result.Results, result.Inserted, result.FindingsInserted)
 			return nil

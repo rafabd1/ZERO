@@ -266,6 +266,9 @@ func (c nvdCVE) references() []string {
 
 func matchConfidence(tech db.VersionedTechnology, cve nvdCVE, query string, aliases TechnologyAliases) (int, map[string]any) {
 	cpeScore, cpeEvidence := cve.cpeConfidence(tech, aliases)
+	if cve.hasVulnerableCPEs() && cpeScore == 0 {
+		return 0, map[string]any{"reason": "cpe-present-without-product-version-match"}
+	}
 	textScore, textEvidence := textConfidence(tech, cve)
 	if cpeScore >= textScore {
 		cpeEvidence["query"] = query
@@ -275,6 +278,19 @@ func matchConfidence(tech db.VersionedTechnology, cve nvdCVE, query string, alia
 	textEvidence["query"] = query
 	textEvidence["strategy"] = "nvd-keyword"
 	return textScore, textEvidence
+}
+
+func (c nvdCVE) hasVulnerableCPEs() bool {
+	for _, config := range c.Configurations {
+		for _, node := range config.Nodes {
+			for _, match := range flattenCPEMatches(node) {
+				if match.Vulnerable && strings.TrimSpace(match.Criteria) != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (c nvdCVE) cpeConfidence(tech db.VersionedTechnology, aliases TechnologyAliases) (int, map[string]any) {
@@ -390,6 +406,9 @@ func textConfidence(tech db.VersionedTechnology, cve nvdCVE) (int, map[string]an
 	raw, _ := json.Marshal(cve)
 	text := normalizeText(summary + " " + string(raw))
 	tokens := significantTokens(tech.Name)
+	if weakTextFallbackTech(tokens) {
+		return 0, map[string]any{"reason": "weak-keyword-only-technology"}
+	}
 	hits := []string{}
 	for _, token := range tokens {
 		if strings.Contains(text, token) {
@@ -417,6 +436,20 @@ func textConfidence(tech db.VersionedTechnology, cve nvdCVE) (int, map[string]an
 		"version_match":   versionRelation,
 		"summary_excerpt": truncate(summary, 240),
 	}
+}
+
+func weakTextFallbackTech(tokens []string) bool {
+	if len(tokens) != 1 {
+		return false
+	}
+	weak := map[string]struct{}{
+		"iis":     {},
+		"openssl": {},
+		"apache":  {},
+		"nginx":   {},
+	}
+	_, ok := weak[tokens[0]]
+	return ok
 }
 
 func versionInRange(version string, match nvdCPEMatch) (bool, bool) {

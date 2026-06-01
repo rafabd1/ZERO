@@ -49,7 +49,7 @@ The exact flags can evolve with testing, but the principle should remain: CVE-ta
 
 ## CVE Validation
 
-Zero stores passive CVE candidates from versioned technology observations as unconfirmed findings. These are useful prioritization signals, not proof.
+Zero stores passive CVE candidates from versioned technology observations as intelligence. Only strong CPE-backed matches are promoted to unconfirmed findings by default; keyword-only matches remain useful context but are too noisy for automatic Discord reports.
 
 Validated CVE findings come from Nuclei results. Confidence is highest when a Nuclei template produces vulnerability-specific evidence. If Nuclei does not confirm a passive CVE candidate, the candidate can still appear in reports as potential/unconfirmed context.
 

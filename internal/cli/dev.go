@@ -90,5 +90,89 @@ func newDevCommand() *cobra.Command {
 	seedLab.Flags().StringVar(&techName, "tech", "Apache HTTP Server", "technology name to seed")
 	seedLab.Flags().StringVar(&techVersion, "version", "2.4.49", "technology version to seed")
 	cmd.AddCommand(seedLab)
+	cmd.AddCommand(&cobra.Command{
+		Use:   "disable-lab",
+		Short: "Disable the seeded lab program and related active entities.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext()
+			cfg := loadConfig()
+			repo := openRepository(ctx, cfg)
+			defer repo.Close()
+
+			rows, err := repo.QueryJSONRows(ctx, `
+				WITH target AS (
+					SELECT id
+					FROM zero_programs
+					WHERE platform = 'lab'
+					  AND handle = 'zero-lab'
+				), programs AS (
+					UPDATE zero_programs
+					SET active = false,
+						metadata = metadata || jsonb_build_object(
+							'disabled_reason', 'lab program excluded before real execution',
+							'disabled_at', now()
+						)
+					WHERE id IN (SELECT id FROM target)
+					RETURNING id
+				), assets AS (
+					UPDATE zero_scope_assets
+					SET active = false,
+						metadata = metadata || jsonb_build_object(
+							'disabled_reason', 'lab program excluded before real execution',
+							'disabled_at', now()
+						)
+					WHERE program_id IN (SELECT id FROM target)
+					  AND active = true
+					RETURNING id
+				), subdomains AS (
+					UPDATE zero_subdomains
+					SET active = false,
+						metadata = metadata || jsonb_build_object(
+							'disabled_reason', 'lab program excluded before real execution',
+							'disabled_at', now()
+						)
+					WHERE program_id IN (SELECT id FROM target)
+					  AND active = true
+					RETURNING id
+				), services AS (
+					UPDATE zero_http_services
+					SET active = false,
+						raw = raw || jsonb_build_object(
+							'disabled_reason', 'lab program excluded before real execution',
+							'disabled_at', now()
+						)
+					WHERE program_id IN (SELECT id FROM target)
+					  AND active = true
+					RETURNING id
+				), technologies AS (
+					UPDATE zero_technology_observations
+					SET active = false,
+						evidence = evidence || jsonb_build_object(
+							'disabled_reason', 'lab program excluded before real execution',
+							'disabled_at', now()
+						)
+					WHERE program_id IN (SELECT id FROM target)
+					  AND active = true
+					RETURNING id
+				)
+				SELECT jsonb_build_object(
+					'programs', (SELECT count(*) FROM programs),
+					'assets', (SELECT count(*) FROM assets),
+					'subdomains', (SELECT count(*) FROM subdomains),
+					'services', (SELECT count(*) FROM services),
+					'technologies', (SELECT count(*) FROM technologies)
+				)
+			`)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "lab program not found")
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "disabled lab entities: %s\n", rows[0])
+			return nil
+		},
+	})
 	return cmd
 }

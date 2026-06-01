@@ -134,23 +134,25 @@ func SendOperationalAlert(ctx context.Context, webhookURL string, alert Operatio
 }
 
 func (n *DiscordNotifier) send(ctx context.Context, report db.DiscordReport) error {
-	payload := buildDiscordPayload(report)
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.webhookURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := n.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("discord webhook returned HTTP %d", resp.StatusCode)
+	for _, payload := range buildDiscordPayloads(report) {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.webhookURL, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := n.client.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			_ = resp.Body.Close()
+			return fmt.Errorf("discord webhook returned HTTP %d", resp.StatusCode)
+		}
+		_ = resp.Body.Close()
 	}
 	return nil
 }
@@ -207,26 +209,93 @@ type discordField struct {
 }
 
 func buildDiscordPayload(report db.DiscordReport) discordPayload {
+	return buildDiscordPayloads(report)[0]
+}
+
+func buildDiscordPayloads(report db.DiscordReport) []discordPayload {
 	count := len(report.FindingIDs)
 	if count == 0 {
 		count = 1
 	}
-	content := fmt.Sprintf("Zero encontrou %d novo(s) finding(s) validado(s) por Nuclei em `%s`.", count, firstNonEmpty(report.ProgramHandle, report.ProgramID, "programa"))
-	return discordPayload{
-		Content: truncate(content, 1900),
-		Embeds: []discordEmbed{{
-			Title:       truncate(report.Title, 250),
-			Description: truncate(report.BodyMarkdown, 3900),
-			Color:       severityColor(report.Severity),
-			Fields: []discordField{
-				{Name: "Severity", Value: firstNonEmpty(report.Severity, "unknown"), Inline: true},
-				{Name: "Confidence", Value: fmt.Sprintf("%d", report.Confidence), Inline: true},
-				{Name: "Findings", Value: fmt.Sprintf("%d", count), Inline: true},
-				{Name: "Program", Value: truncate(firstNonEmpty(report.ProgramURL, report.ProgramHandle, report.ProgramID, "unknown"), 1000), Inline: false},
-			},
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		}},
+	program := firstNonEmpty(report.ProgramHandle, report.ProgramID, "programa")
+	content := fmt.Sprintf("Zero encontrou %d novo(s) candidato(s) de finding em `%s`.", count, program)
+	if strings.Contains(strings.ToLower(report.BodyMarkdown), "potential/unconfirmed") {
+		content += " Alguns itens sao potenciais/passivos e precisam de validacao manual."
 	}
+	chunks := chunkMarkdown(report.BodyMarkdown, 3600)
+	payloads := make([]discordPayload, 0, len(chunks))
+	for i, chunk := range chunks {
+		title := report.Title
+		if len(chunks) > 1 {
+			title = fmt.Sprintf("%s (parte %d/%d)", report.Title, i+1, len(chunks))
+		}
+		payloads = append(payloads, discordPayload{
+			Content: truncate(content, 1900),
+			Embeds: []discordEmbed{{
+				Title:       truncate(title, 250),
+				Description: truncate(chunk, 3900),
+				Color:       severityColor(report.Severity),
+				Fields: []discordField{
+					{Name: "Severity", Value: firstNonEmpty(report.Severity, "unknown"), Inline: true},
+					{Name: "Confidence", Value: fmt.Sprintf("%d", report.Confidence), Inline: true},
+					{Name: "Findings", Value: fmt.Sprintf("%d", count), Inline: true},
+					{Name: "Program", Value: truncate(firstNonEmpty(report.ProgramURL, report.ProgramHandle, report.ProgramID, "unknown"), 1000), Inline: false},
+				},
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}},
+		})
+	}
+	return payloads
+}
+
+func chunkMarkdown(value string, max int) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return []string{"No report body."}
+	}
+	paragraphs := strings.Split(value, "\n\n")
+	chunks := []string{}
+	var current strings.Builder
+	flush := func() {
+		chunk := strings.TrimSpace(current.String())
+		if chunk != "" {
+			chunks = append(chunks, chunk)
+			current.Reset()
+		}
+	}
+	for _, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
+			continue
+		}
+		if len(paragraph) > max {
+			flush()
+			for len(paragraph) > max {
+				chunks = append(chunks, paragraph[:max])
+				paragraph = paragraph[max:]
+			}
+			if strings.TrimSpace(paragraph) != "" {
+				current.WriteString(strings.TrimSpace(paragraph))
+			}
+			continue
+		}
+		nextLen := current.Len() + len(paragraph)
+		if current.Len() > 0 {
+			nextLen += 2
+		}
+		if nextLen > max {
+			flush()
+		}
+		if current.Len() > 0 {
+			current.WriteString("\n\n")
+		}
+		current.WriteString(paragraph)
+	}
+	flush()
+	if len(chunks) == 0 {
+		return []string{"No report body."}
+	}
+	return chunks
 }
 
 func severityColor(severity string) int {

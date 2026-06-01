@@ -90,3 +90,43 @@ func TestTextFallbackLinksVersionedTechnology(t *testing.T) {
 		t.Fatalf("expected keyword strategy, got %#v", evidence["strategy"])
 	}
 }
+
+func TestTextFallbackRejectsWeakIISToken(t *testing.T) {
+	tech := db.VersionedTechnology{Name: "IIS", Version: "10.0"}
+	cve := nvdCVE{
+		ID: "CVE-2012-4591",
+		Descriptions: []nvdDescription{{
+			Lang:  "en",
+			Value: "About.aspx in the Portal in McAfee Enterprise Mobility Manager before 10.0 discloses the IIS worker process account.",
+		}},
+	}
+
+	confidence, evidence := matchConfidence(tech, cve, "IIS 10.0", DefaultTechnologyAliases())
+	if confidence != 0 {
+		t.Fatalf("expected weak IIS text-only match to be rejected, got %d with evidence %#v", confidence, evidence)
+	}
+}
+
+func TestCPEPresenceBlocksUnmatchedKeywordFallback(t *testing.T) {
+	tech := db.VersionedTechnology{Name: "Apache HTTP Server", Version: "2.4.6"}
+	cve := nvdCVE{
+		ID: "CVE-FAKE-1",
+		Descriptions: []nvdDescription{{
+			Lang:  "en",
+			Value: "Apache HTTP Server is mentioned in a broad advisory, but the vulnerable product is not httpd.",
+		}},
+		Configurations: []nvdConfiguration{{
+			Nodes: []nvdNode{{
+				CPEMatch: []nvdCPEMatch{{
+					Vulnerable: true,
+					Criteria:   "cpe:2.3:a:oracle:weblogic_server:12.2.1.4.0:*:*:*:*:*:*:*",
+				}},
+			}},
+		}},
+	}
+
+	confidence, evidence := matchConfidence(tech, cve, "Apache HTTP Server 2.4.6", DefaultTechnologyAliases())
+	if confidence != 0 {
+		t.Fatalf("expected unmatched vulnerable CPE to block keyword fallback, got %d with evidence %#v", confidence, evidence)
+	}
+}
