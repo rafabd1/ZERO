@@ -47,6 +47,7 @@ Every discovered entity is linked back to `zero_programs`. This is required beca
 Zero scans multiple programs concurrently through `zero run due`, starting with `ZERO_TARGET_PARALLELISM=4`. A program is due when it is active and its `last_scan_finished_at` is missing or older than `scan_interval_hours`. Inside each program, external tools use moderate defaults and batching:
 
 - Scope sync writes in batches on first import and uses unique constraints for deduplication.
+- Scope sync defaults to bounty programs only. Assets without bounty eligibility are stored as out-of-scope even when the source lists them as in-scope.
 - Enumeration accepts only sanitized, valid, in-scope wildcard assets linked to the program. For `*.example.com`, `subfinder` receives `example.com`.
 - Discovered names are accepted only when they match the wildcard regex for that scope asset. The apex (`example.com`) is not accepted as a wildcard discovery unless it is also present as an exact `domain` or `url` asset.
 - Active out-of-scope `domain`, `url`, and `wildcard` assets override broad in-scope wildcards during enumeration and probing.

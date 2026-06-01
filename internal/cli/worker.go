@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 )
@@ -15,6 +16,11 @@ func newWorkerCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := loadConfig()
 			c := cron.New(cron.WithSeconds())
+			if cfg.Worker.RecoverRunningScans {
+				if err := recoverWorkerState(cmd, cfg.DatabaseURL); err != nil {
+					return err
+				}
+			}
 
 			addJob := func(name, spec string, fn func()) error {
 				_, err := c.AddFunc(spec, func() {
@@ -34,12 +40,41 @@ func newWorkerCommand() *cobra.Command {
 			}
 
 			c.Start()
+			if cfg.Worker.RunOnStartup {
+				go func() {
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup due-pipeline\n", time.Now().UTC().Format(time.RFC3339))
+					if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, false); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "startup full pipeline failed: %v\n", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup due-pipeline\n", time.Now().UTC().Format(time.RFC3339))
+				}()
+			}
 			<-commandContext().Done()
 			ctx := c.Stop()
 			<-ctx.Done()
 			return nil
 		},
 	}
+}
+
+func recoverWorkerState(cmd *cobra.Command, databaseURL string) error {
+	if databaseURL == "" {
+		return fmt.Errorf("ZERO_DATABASE_URL is required")
+	}
+	ctx := commandContext()
+	repo, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		return err
+	}
+	defer repo.Close()
+	recovered, err := repo.RecoverRunningScanRuns(ctx)
+	if err != nil {
+		return err
+	}
+	if recovered > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "recovered %d interrupted scan run(s)\n", recovered)
+	}
+	return nil
 }
 
 func runChild(parent *cobra.Command, args ...string) {

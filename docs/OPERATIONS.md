@@ -36,6 +36,8 @@ Program-level overrides live in `zero_programs.scan_interval_hours` and `zero_pr
 
 The main continuous execution path is `zero worker`, which schedules `zero run due` using `ZERO_SCHEDULE_FULL`. It first refreshes HackerOne scope, then selects active programs whose `last_scan_finished_at` is older than their configured interval, and processes up to `ZERO_TARGET_PARALLELISM` programs concurrently.
 
+By default the worker also runs this due-program planner immediately on container startup (`ZERO_RUN_ON_STARTUP=true`). This makes the container self-starting after deploy/restart instead of waiting for the next cron tick.
+
 For each due program, Zero executes:
 
 ```text
@@ -47,6 +49,10 @@ The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron
 ## Data Lifecycle
 
 Zero should not blindly delete missing data. Missing assets should be marked inactive only after enough scan evidence shows they are gone. New or changed entities are written to `zero_change_events`, and reports/Discord notifications should use that table to avoid repeating old results.
+
+On worker startup, `ZERO_RECOVER_RUNNING_SCANS=true` marks interrupted `zero_scan_runs.status='running'` rows as failed with recovery metadata. Since the program's `last_scan_finished_at` is not advanced by an interrupted run, that program remains due and the startup run can continue from the persisted database state.
+
+HackerOne scope sync defaults to `ZERO_SCOPE_PRIVATE_ONLY=false`, so bbscope imports both public and private open programs visible to the configured account. `ZERO_SCOPE_BOUNTY_ONLY=true` keeps VDP programs out. Assets that are listed as in-scope by the platform but are not bounty-eligible are stored as out-of-scope in Zero, so they block broad wildcard expansion instead of being scanned. Set `ZERO_SCOPE_PRIVATE_ONLY=true` only when intentionally limiting Zero to private/soft-launched programs.
 
 ## Smoke Tests
 

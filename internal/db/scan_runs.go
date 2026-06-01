@@ -46,3 +46,21 @@ func (r *Repository) FinishScanRun(ctx context.Context, id, status string, input
 	}
 	return nil
 }
+
+func (r *Repository) RecoverRunningScanRuns(ctx context.Context) (int, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE zero_scan_runs
+		SET status = 'failed',
+			finished_at = now(),
+			error = CASE
+				WHEN error = '' THEN 'recovered on worker startup after interrupted execution'
+				ELSE error
+			END,
+			stats = stats || jsonb_build_object('recovered_on_startup', true)
+		WHERE status = 'running'
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("recover running scan runs: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}

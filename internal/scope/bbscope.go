@@ -101,7 +101,7 @@ func (s *Service) SyncHackerOne(ctx context.Context, opts HackerOneOptions) (Syn
 }
 
 func (s *Service) syncHackerOneProgram(ctx context.Context, poller *h1platform.Poller, pollOpts platforms.PollOptions, handle string) (int, int, error) {
-	program, err := poller.FetchProgramScope(ctx, handle, pollOpts)
+	program, err := poller.FetchProgramScope(ctx, handle, fetchScopeOptions(pollOpts))
 	if err != nil {
 		return 0, 0, fmt.Errorf("fetch HackerOne scope for %s: %w", handle, err)
 	}
@@ -114,8 +114,11 @@ func (s *Service) syncHackerOneProgram(ctx context.Context, poller *h1platform.P
 		return 0, 0, err
 	}
 
+	inScope, bountyExcluded := splitBountyScope(program.InScope, pollOpts.BountyOnly)
+
 	assets := make([]db.ScopeAsset, 0, len(program.InScope)+len(program.OutOfScope))
-	assets = append(assets, buildAssets(programID, "h1", handle, program.InScope, true)...)
+	assets = append(assets, buildAssets(programID, "h1", handle, inScope, true)...)
+	assets = append(assets, buildAssets(programID, "h1", handle, bountyExcluded, false)...)
 	assets = append(assets, buildAssets(programID, "h1", handle, program.OutOfScope, false)...)
 
 	count, err := s.repo.UpsertScopeAssets(ctx, assets)
@@ -123,6 +126,27 @@ func (s *Service) syncHackerOneProgram(ctx context.Context, poller *h1platform.P
 		return 0, 0, err
 	}
 	return 1, count, nil
+}
+
+func fetchScopeOptions(pollOpts platforms.PollOptions) platforms.PollOptions {
+	pollOpts.BountyOnly = false
+	return pollOpts
+}
+
+func splitBountyScope(elements []bbscope.ScopeElement, bountyOnly bool) ([]bbscope.ScopeElement, []bbscope.ScopeElement) {
+	if !bountyOnly {
+		return elements, nil
+	}
+	inScope := make([]bbscope.ScopeElement, 0, len(elements))
+	outOfScope := make([]bbscope.ScopeElement, 0)
+	for _, element := range elements {
+		if element.IsBBP {
+			inScope = append(inScope, element)
+			continue
+		}
+		outOfScope = append(outOfScope, element)
+	}
+	return inScope, outOfScope
 }
 
 func buildAssets(programID, platform, handle string, elements []bbscope.ScopeElement, inScope bool) []db.ScopeAsset {

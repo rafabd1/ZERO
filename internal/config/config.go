@@ -19,6 +19,7 @@ type Config struct {
 	Schedule  ScheduleConfig
 	API       APIConfig
 	Notify    NotifyConfig
+	Worker    WorkerConfig
 }
 
 type SupabaseConfig struct {
@@ -62,6 +63,11 @@ type NotifyConfig struct {
 	DiscordWebhookURL string
 }
 
+type WorkerConfig struct {
+	RunOnStartup        bool
+	RecoverRunningScans bool
+}
+
 type ScheduleConfig struct {
 	Full      string
 	ScopeSync string
@@ -80,7 +86,7 @@ func Load() (Config, error) {
 	v.AutomaticEnv()
 
 	v.SetDefault("scope.bounty_only", true)
-	v.SetDefault("scope.private_only", true)
+	v.SetDefault("scope.private_only", false)
 	v.SetDefault("scope.categories", "url,wildcard")
 	v.SetDefault("tools.subfinder_bin", "subfinder")
 	v.SetDefault("tools.subfinder_provider_config", "")
@@ -102,6 +108,8 @@ func Load() (Config, error) {
 	v.SetDefault("schedule.cve", "0 15 5 * * *")
 	v.SetDefault("schedule.nuclei", "0 45 5 * * *")
 	v.SetDefault("api.addr", "127.0.0.1:8080")
+	v.SetDefault("worker.run_on_startup", true)
+	v.SetDefault("worker.recover_running_scans", true)
 
 	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
@@ -130,6 +138,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
 	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
 	_ = v.BindEnv("notify.discord_webhook_url", "ZERO_DISCORD_WEBHOOK_URL")
+	_ = v.BindEnv("worker.run_on_startup", "ZERO_RUN_ON_STARTUP")
+	_ = v.BindEnv("worker.recover_running_scans", "ZERO_RECOVER_RUNNING_SCANS")
 
 	return Config{
 		DatabaseURL:       v.GetString("database_url"),
@@ -176,6 +186,10 @@ func Load() (Config, error) {
 		},
 		Notify: NotifyConfig{
 			DiscordWebhookURL: v.GetString("notify.discord_webhook_url"),
+		},
+		Worker: WorkerConfig{
+			RunOnStartup:        v.GetBool("worker.run_on_startup"),
+			RecoverRunningScans: v.GetBool("worker.recover_running_scans"),
 		},
 	}, nil
 }

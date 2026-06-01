@@ -42,6 +42,8 @@ zero run due --dry-run --limit 4
 
 Use `zero run once` only when you intentionally want the unbounded global pipeline.
 
+On startup, the worker marks interrupted `running` scan runs as failed/recovered and immediately runs the due-program planner by default. Set `ZERO_RUN_ON_STARTUP=false` only when you want cron-only execution.
+
 Discord delivery is opt-in through `ZERO_DISCORD_WEBHOOK_URL`. Without a webhook, notification delivery is a safe no-op and reports remain available through the API.
 
 ## Required Tools
