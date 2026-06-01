@@ -11,6 +11,8 @@ import (
 type Config struct {
 	DatabaseURL       string
 	DatabaseMaxConns  int
+	DatabaseRetries   int
+	DatabaseRetryWait time.Duration
 	AutoMigrate       bool
 	Supabase          SupabaseConfig
 	TargetParallelism int
@@ -161,6 +163,8 @@ func Load() (Config, error) {
 	v.SetDefault("worker.recover_running_scans", true)
 	v.SetDefault("database.auto_migrate", true)
 	v.SetDefault("database.max_conns", 1)
+	v.SetDefault("database.retries", 4)
+	v.SetDefault("database.retry_wait", "3s")
 	v.SetDefault("data.stale_after_hours", 168)
 	v.SetDefault("intel.cve_min_year", 2018)
 
@@ -168,6 +172,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
 	_ = v.BindEnv("database.auto_migrate", "ZERO_AUTO_MIGRATE")
 	_ = v.BindEnv("database.max_conns", "ZERO_DATABASE_MAX_CONNS")
+	_ = v.BindEnv("database.retries", "ZERO_DATABASE_RETRIES")
+	_ = v.BindEnv("database.retry_wait", "ZERO_DATABASE_RETRY_WAIT")
 	_ = v.BindEnv("supabase_url", "ZERO_SUPABASE_URL")
 	_ = v.BindEnv("supabase_anon_key", "ZERO_SUPABASE_ANON_KEY")
 	_ = v.BindEnv("supabase_service_role_key", "ZERO_SUPABASE_SERVICE_ROLE_KEY")
@@ -227,6 +233,8 @@ func Load() (Config, error) {
 	return Config{
 		DatabaseURL:       v.GetString("database_url"),
 		DatabaseMaxConns:  clampInt(v.GetInt("database.max_conns"), 1, 10),
+		DatabaseRetries:   clampInt(v.GetInt("database.retries"), 1, 10),
+		DatabaseRetryWait: v.GetDuration("database.retry_wait"),
 		AutoMigrate:       v.GetBool("database.auto_migrate"),
 		TargetParallelism: clampInt(v.GetInt("target_parallelism"), 1, 16),
 		Supabase: SupabaseConfig{

@@ -6,6 +6,7 @@ To run the first real scan, Zero needs:
 
 - `ZERO_DATABASE_URL`: Supabase Postgres connection string with `sslmode=require`.
 - `ZERO_DATABASE_MAX_CONNS`: max pgx pool connections per Zero process. Default: 1. Keep this low when using Supabase session pooler because parallel scans run many short-lived task processes.
+- `ZERO_DATABASE_RETRIES` and `ZERO_DATABASE_RETRY_WAIT`: retry opening/migrating the repository before a command returns failure. Defaults: `4` attempts, `3s` wait. This absorbs transient Supabase pooler/Docker DNS timeouts without killing the worker process.
 - HackerOne API credentials:
   - `ZERO_H1_USERNAME`
   - `ZERO_H1_TOKEN`
@@ -49,6 +50,8 @@ The main continuous execution path is `zero worker`, which schedules `zero run d
 By default the worker also runs this due-program planner immediately on container startup (`ZERO_RUN_ON_STARTUP=true`). This makes the container self-starting after deploy/restart instead of waiting for the next cron tick.
 
 Commands that open the database run idempotent migrations first when `ZERO_AUTO_MIGRATE=true`. Migration execution uses a Postgres advisory transaction lock, so the worker and API containers can start together safely.
+
+Database connection failures are returned as normal command errors after the configured retry budget. Inside the worker, this means a transient DB/DNS failure can fail the current program/task and be reported, but it must not terminate the whole `zero worker` process.
 
 Custom one-off scans can be launched immediately with `zero run manual` or queued for the worker with `zero run schedule`. Queued requests are stored in `zero_scan_requests`, picked up every 30 seconds, and executed with the request-specific parameters instead of mutating global `.env` defaults.
 

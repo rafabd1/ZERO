@@ -26,7 +26,10 @@ func newReportCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext()
 			cfg := loadConfig()
-			repo := openRepository(ctx, cfg)
+			repo, err := openRepositoryE(ctx, cfg)
+			if err != nil {
+				return err
+			}
 			defer repo.Close()
 
 			scanID, err := startScanRun(ctx, repo, "intel", programID)
@@ -57,7 +60,10 @@ func newReportCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext()
 			cfg := loadConfig()
-			repo := openRepository(ctx, cfg)
+			repo, err := openRepositoryE(ctx, cfg)
+			if err != nil {
+				return err
+			}
 			defer repo.Close()
 
 			bundles, err := repo.ListTriageBundles(ctx, exportProgramID, exportStatus, exportLimit)

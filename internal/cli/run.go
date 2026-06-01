@@ -85,7 +85,10 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 		}
 	}
 
-	repo := openRepository(ctx, cfg)
+	repo, err := openRepositoryE(ctx, cfg)
+	if err != nil {
+		return err
+	}
 	defer repo.Close()
 
 	queryLimit := limit

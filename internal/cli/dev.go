@@ -25,7 +25,10 @@ func newDevCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext()
 			cfg := loadConfig()
-			repo := openRepository(ctx, cfg)
+			repo, err := openRepositoryE(ctx, cfg)
+			if err != nil {
+				return err
+			}
 			defer repo.Close()
 			u, err := url.Parse(labURL)
 			if err != nil || u.Hostname() == "" {
@@ -96,7 +99,10 @@ func newDevCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext()
 			cfg := loadConfig()
-			repo := openRepository(ctx, cfg)
+			repo, err := openRepositoryE(ctx, cfg)
+			if err != nil {
+				return err
+			}
 			defer repo.Close()
 
 			rows, err := repo.QueryJSONRows(ctx, `
