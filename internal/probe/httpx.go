@@ -52,32 +52,27 @@ func (r *HTTPXRunner) WithLimit(limit int) *HTTPXRunner {
 }
 
 func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
-	subdomains, err := r.repo.ListSubdomains(ctx)
+	targets, err := r.repo.ListProbeTargets(ctx)
 	if err != nil {
 		return HTTPXResult{}, err
 	}
-	if r.limit > 0 && len(subdomains) > r.limit {
-		subdomains = subdomains[:r.limit]
+	if r.limit > 0 && len(targets) > r.limit {
+		targets = targets[:r.limit]
 	}
 
 	var input bytes.Buffer
-	for _, sub := range subdomains {
-		fqdn, ok := sanitize.CanonicalDomain(sub.FQDN)
-		if !ok || !sanitize.IsWithinRoot(fqdn, sub.RootDomain) {
+	byHost := make(map[string][]db.ProbeTarget, len(targets))
+	for _, target := range targets {
+		fqdn, ok := sanitize.CanonicalDomain(target.FQDN)
+		if !ok || !targetAllowsHost(target, fqdn) {
 			continue
 		}
-		input.WriteString(fqdn)
-		input.WriteByte('\n')
-	}
-
-	byHost := make(map[string]db.Subdomain, len(subdomains))
-	for _, sub := range subdomains {
-		fqdn, ok := sanitize.CanonicalDomain(sub.FQDN)
-		if !ok || !sanitize.IsWithinRoot(fqdn, sub.RootDomain) {
-			continue
+		target.FQDN = fqdn
+		if _, ok := byHost[fqdn]; !ok {
+			input.WriteString(fqdn)
+			input.WriteByte('\n')
 		}
-		sub.FQDN = fqdn
-		byHost[fqdn] = sub
+		byHost[fqdn] = append(byHost[fqdn], target)
 	}
 
 	result := HTTPXResult{Hosts: len(byHost)}
@@ -96,34 +91,33 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			return fmt.Errorf("parse httpx json: %w", err)
 		}
-		service, ok, err := parsed.toService(byHost)
+		services, err := parsed.toServices(byHost)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			return nil
+		for _, service := range services {
+			_, err = r.repo.UpsertHTTPService(ctx, service)
+			if err != nil {
+				return err
+			}
+			result.Services++
 		}
-		_, err = r.repo.UpsertHTTPService(ctx, service)
-		if err != nil {
-			return err
-		}
-		result.Services++
 		return nil
 	})
 	return result, err
 }
 
-func (h httpxLine) toService(byHost map[string]db.Subdomain) (db.HTTPService, bool, error) {
+func (h httpxLine) toServices(byHost map[string][]db.ProbeTarget) ([]db.HTTPService, error) {
 	if h.URL == "" {
-		return db.HTTPService{}, false, fmt.Errorf("httpx output without url")
+		return nil, fmt.Errorf("httpx output without url")
 	}
 	u, err := url.Parse(h.URL)
 	if err != nil {
-		return db.HTTPService{}, false, err
+		return nil, err
 	}
 	host, ok := sanitize.CanonicalDomain(u.Hostname())
 	if !ok {
-		return db.HTTPService{}, false, fmt.Errorf("httpx output host %q is not a valid domain", u.Hostname())
+		return nil, nil
 	}
 	var port *int
 	if h.Port != "" {
@@ -136,31 +130,44 @@ func (h httpxLine) toService(byHost map[string]db.Subdomain) (db.HTTPService, bo
 		status = &h.StatusCode
 	}
 	raw, _ := json.Marshal(h)
-	sub, ok := byHost[host]
-	if !ok || sub.ProgramID == "" {
+	candidates := append([]db.ProbeTarget{}, byHost[host]...)
+	if h.Input != "" {
 		inputHost, inputOK := sanitize.CanonicalDomain(h.Input)
-		if inputOK {
-			sub, ok = byHost[inputHost]
+		if inputOK && inputHost != host {
+			candidates = append(candidates, byHost[inputHost]...)
 		}
 	}
-	if !ok || sub.ProgramID == "" || !sanitize.IsWithinRoot(host, sub.RootDomain) {
-		return db.HTTPService{}, false, nil
+	if len(candidates) == 0 {
+		return nil, nil
 	}
-	return db.HTTPService{
-		ProgramID:    sub.ProgramID,
-		SubdomainID:  sub.ID,
-		URL:          h.URL,
-		Scheme:       firstNonEmpty(h.Scheme, u.Scheme),
-		Host:         host,
-		Port:         port,
-		StatusCode:   status,
-		Title:        h.Title,
-		Webserver:    h.Webserver,
-		Technologies: h.Technologies,
-		FaviconHash:  h.FaviconHash,
-		TLS:          h.TLS,
-		Raw:          raw,
-	}, true, nil
+	services := make([]db.HTTPService, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, target := range candidates {
+		if target.ProgramID == "" || !targetAllowsHost(target, host) {
+			continue
+		}
+		key := target.ProgramID + "\x00" + target.SubdomainID + "\x00" + h.URL
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		services = append(services, db.HTTPService{
+			ProgramID:    target.ProgramID,
+			SubdomainID:  target.SubdomainID,
+			URL:          h.URL,
+			Scheme:       firstNonEmpty(h.Scheme, u.Scheme),
+			Host:         host,
+			Port:         port,
+			StatusCode:   status,
+			Title:        h.Title,
+			Webserver:    h.Webserver,
+			Technologies: h.Technologies,
+			FaviconHash:  h.FaviconHash,
+			TLS:          h.TLS,
+			Raw:          raw,
+		})
+	}
+	return services, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -170,4 +177,16 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func targetAllowsHost(target db.ProbeTarget, host string) bool {
+	switch target.MatchMode {
+	case db.ProbeMatchWildcard:
+		return sanitize.MatchesWildcard(host, target.RootDomain)
+	case db.ProbeMatchExact:
+		root, ok := sanitize.CanonicalDomain(target.RootDomain)
+		return ok && host == root
+	default:
+		return false
+	}
 }

@@ -9,6 +9,8 @@
 - `subfinder`: passive subdomain discovery. It is low-noise and appropriate for daily runs.
 - `dnsx`: recommended next step to validate DNS resolution and reduce stale passive results.
 
+Zero feeds `subfinder` only with active in-scope wildcard roots. It does not pass exact URL hosts or collapse scoped subdomains to a broader eTLD+1.
+
 Recommended Subfinder provider sources for the initial private setup:
 
 ```text
@@ -25,6 +27,8 @@ shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s
 
 - `httpx`: first-pass alive check and fingerprint source. Use JSON output with tech detection, title, status code, webserver, TLS, and favicon hash.
 - `nuclei`: final active validation layer for CVE candidates and known exposures. Zero should not use it as a noisy general scanner by default.
+
+`httpx` receives sanitized probe targets after scope filtering: discovered wildcard subdomains plus exact URL/domain hosts from the scope table.
 
 Recommended default:
 

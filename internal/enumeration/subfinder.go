@@ -56,6 +56,10 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 	if err != nil {
 		return SubfinderResult{}, err
 	}
+	exclusions, err := r.repo.ListOutOfScopeDomainRules(ctx)
+	if err != nil {
+		return SubfinderResult{}, err
+	}
 	if r.limit > 0 && len(roots) > r.limit {
 		roots = roots[:r.limit]
 	}
@@ -74,7 +78,7 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 		}
 		err := tools.RunLines(ctx, r.bin, args, nil, func(line string) error {
 			fqdn, ok := sanitize.CanonicalDomain(strings.TrimSpace(line))
-			if !ok || !sanitize.IsWithinRoot(fqdn, root.RootDomain) {
+			if !ok || !sanitize.MatchesWildcard(fqdn, root.RootDomain) || excluded(exclusions, root.ProgramID, fqdn) {
 				return nil
 			}
 			_, err := r.repo.UpsertSubdomain(ctx, db.Subdomain{
@@ -95,4 +99,23 @@ func (r *SubfinderRunner) Run(ctx context.Context) (SubfinderResult, error) {
 		}
 	}
 	return result, nil
+}
+
+func excluded(rules []db.DomainScopeRule, programID, host string) bool {
+	for _, rule := range rules {
+		if rule.ProgramID != programID {
+			continue
+		}
+		switch rule.MatchMode {
+		case db.ProbeMatchWildcard:
+			if sanitize.MatchesWildcard(host, rule.Host) {
+				return true
+			}
+		case db.ProbeMatchExact:
+			if host == rule.Host {
+				return true
+			}
+		}
+	}
+	return false
 }

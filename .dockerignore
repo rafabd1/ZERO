@@ -1,11 +1,13 @@
 .git
 .tmp
+.tools
 tmp
 bin
 dist
 reports/generated
 subfinder-output
 httpx-output
+configs/subfinder/provider-config.yaml
 .env
 .env.*
 README.local.md

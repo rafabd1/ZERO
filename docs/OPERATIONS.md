@@ -56,12 +56,34 @@ This validates the pipeline without turning a local setup check into a broad sca
 
 The public repo ships only a safe template at `configs/subfinder/provider-config.example.yaml`.
 
-For local runs, either let Subfinder use its default `$HOME/.config/subfinder/provider-config.yaml`, or create a private provider config and point Zero to it:
+For Docker runs, put provider API keys in `.env`. The image writes a private Subfinder provider config at startup from:
 
 ```env
-ZERO_SUBFINDER_PROVIDER_CONFIG="C:\\Users\\rafae\\.config\\subfinder\\provider-config.yaml"
+ZERO_SUBFINDER_SHODAN_API_KEY=""
+ZERO_SUBFINDER_BEVIGIL_API_KEY=""
+ZERO_SUBFINDER_VIRUSTOTAL_API_KEY=""
+ZERO_SUBFINDER_SECURITYTRAILS_API_KEY=""
+```
+
+The Docker defaults are:
+
+```env
+ZERO_SUBFINDER_BIN="subfinder"
+ZERO_HTTPX_BIN="httpx"
+ZERO_NUCLEI_BIN="nuclei"
+ZERO_SUBFINDER_PROVIDER_CONFIG="/home/zero/.config/subfinder/provider-config.yaml"
 ZERO_SUBFINDER_SOURCES="shodan,bevigil,virustotal,securitytrails"
 ZERO_SUBFINDER_RATE_LIMITS="shodan=1/s,virustotal=4/m,securitytrails=1/s,bevigil=1/s"
 ```
 
 Do not commit provider configs containing real API keys.
+
+## Scope Safety
+
+`subfinder` only receives active in-scope `wildcard` assets from the database. For `*.sub.example.com`, the root sent to Subfinder is `sub.example.com`; Zero does not collapse it to `example.com`.
+
+After enumeration, each result must match the wildcard regex derived from that exact asset. `*.example.com` accepts `app.example.com` and `a.b.example.com`, but rejects `example.com`, `example.com.evil.test`, and sibling domains.
+
+Out-of-scope `domain`, `url`, and `wildcard` assets override broad in-scope wildcards. This keeps assets such as `*.excluded.example.com` or `admin.example.com` from being probed when the program has explicitly excluded them.
+
+Exact `domain` and `url` assets are probed by `httpx` as exact hosts only. They are not used as enumeration roots and they do not authorize arbitrary child subdomains.

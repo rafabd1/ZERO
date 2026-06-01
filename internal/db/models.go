@@ -23,6 +23,13 @@ type DomainRoot struct {
 	RootDomain   string
 }
 
+type DomainScopeRule struct {
+	ScopeAssetID string
+	ProgramID    string
+	Host         string
+	MatchMode    string
+}
+
 type Subdomain struct {
 	ID           string
 	ProgramID    string
@@ -30,6 +37,21 @@ type Subdomain struct {
 	RootDomain   string
 	FQDN         string
 	Source       string
+}
+
+const (
+	ProbeMatchExact    = "exact"
+	ProbeMatchWildcard = "wildcard"
+)
+
+type ProbeTarget struct {
+	SubdomainID  string
+	ProgramID    string
+	ScopeAssetID string
+	RootDomain   string
+	FQDN         string
+	Source       string
+	MatchMode    string
 }
 
 type HTTPService struct {

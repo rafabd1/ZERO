@@ -37,3 +37,26 @@ func TestIsWithinRoot(t *testing.T) {
 		t.Fatal("expected suffix lookalike to be rejected")
 	}
 }
+
+func TestMatchesWildcard(t *testing.T) {
+	tests := []struct {
+		name   string
+		domain string
+		root   string
+		want   bool
+	}{
+		{name: "one label", domain: "app.example.com", root: "example.com", want: true},
+		{name: "many labels", domain: "a.b.example.com", root: "example.com", want: true},
+		{name: "apex is not wildcard match", domain: "example.com", root: "example.com", want: false},
+		{name: "sibling rejected", domain: "app.other.com", root: "example.com", want: false},
+		{name: "suffix lookalike rejected", domain: "example.com.evil.test", root: "example.com", want: false},
+		{name: "bad label rejected", domain: "-bad.example.com", root: "example.com", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := MatchesWildcard(tt.domain, tt.root); got != tt.want {
+				t.Fatalf("MatchesWildcard(%q, %q) = %v; want %v", tt.domain, tt.root, got, tt.want)
+			}
+		})
+	}
+}

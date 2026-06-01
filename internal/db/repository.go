@@ -117,12 +117,11 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 
 func (r *Repository) ListDomainRoots(ctx context.Context) ([]DomainRoot, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, program_id, target_normalized
+		SELECT id, program_id, target_raw, target_normalized
 		FROM zero_scope_assets
 		WHERE active = true
 		  AND in_scope = true
-		  AND asset_type IN ('domain', 'wildcard', 'url')
-		  AND target_normalized NOT LIKE '%/%'
+		  AND asset_type = 'wildcard'
 		ORDER BY target_normalized
 	`)
 	if err != nil {
@@ -131,16 +130,26 @@ func (r *Repository) ListDomainRoots(ctx context.Context) ([]DomainRoot, error) 
 	defer rows.Close()
 
 	var roots []DomainRoot
+	seen := map[string]bool{}
 	for rows.Next() {
 		var root DomainRoot
-		if err := rows.Scan(&root.ScopeAssetID, &root.ProgramID, &root.RootDomain); err != nil {
+		var raw, normalized string
+		if err := rows.Scan(&root.ScopeAssetID, &root.ProgramID, &raw, &normalized); err != nil {
 			return nil, err
 		}
-		domain, ok := sanitize.DomainFromScopeTarget(root.RootDomain)
+		domain, ok := sanitize.DomainFromScopeTarget(firstNonEmpty(raw, normalized))
 		if !ok {
 			continue
 		}
+		if _, ok := sanitize.WildcardRegex(domain); !ok {
+			continue
+		}
 		root.RootDomain = domain
+		key := root.ProgramID + "\x00" + root.RootDomain
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		roots = append(roots, root)
 	}
 	return roots, rows.Err()
@@ -186,6 +195,143 @@ func (r *Repository) ListSubdomains(ctx context.Context) ([]Subdomain, error) {
 		subs = append(subs, sub)
 	}
 	return subs, rows.Err()
+}
+
+func (r *Repository) ListOutOfScopeDomainRules(ctx context.Context) ([]DomainScopeRule, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, program_id, asset_type, target_raw, target_normalized
+		FROM zero_scope_assets
+		WHERE active = true
+		  AND in_scope = false
+		  AND asset_type IN ('domain', 'url', 'wildcard')
+		ORDER BY target_normalized
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rules := []DomainScopeRule{}
+	for rows.Next() {
+		var rule DomainScopeRule
+		var assetType, raw, normalized string
+		if err := rows.Scan(&rule.ScopeAssetID, &rule.ProgramID, &assetType, &raw, &normalized); err != nil {
+			return nil, err
+		}
+		host, ok := sanitize.DomainFromScopeTarget(firstNonEmpty(raw, normalized))
+		if !ok {
+			continue
+		}
+		rule.Host = host
+		if assetType == "wildcard" {
+			rule.MatchMode = ProbeMatchWildcard
+		} else {
+			rule.MatchMode = ProbeMatchExact
+		}
+		rules = append(rules, rule)
+	}
+	return rules, rows.Err()
+}
+
+func (r *Repository) ListProbeTargets(ctx context.Context) ([]ProbeTarget, error) {
+	targets := []ProbeTarget{}
+	seen := map[string]bool{}
+	exclusions, err := r.ListOutOfScopeDomainRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	wildcardRows, err := r.pool.Query(ctx, `
+		SELECT
+			s.id,
+			s.program_id,
+			COALESCE(s.scope_asset_id::text, ''),
+			COALESCE(a.target_raw, ''),
+			COALESCE(a.target_normalized, ''),
+			s.root_domain,
+			s.fqdn,
+			s.source
+		FROM zero_subdomains s
+		JOIN zero_scope_assets a ON a.id = s.scope_asset_id
+		WHERE s.active = true
+		  AND a.active = true
+		  AND a.in_scope = true
+		  AND a.asset_type = 'wildcard'
+		ORDER BY s.fqdn
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer wildcardRows.Close()
+
+	for wildcardRows.Next() {
+		var target ProbeTarget
+		var raw, normalized, storedRoot string
+		if err := wildcardRows.Scan(
+			&target.SubdomainID,
+			&target.ProgramID,
+			&target.ScopeAssetID,
+			&raw,
+			&normalized,
+			&storedRoot,
+			&target.FQDN,
+			&target.Source,
+		); err != nil {
+			return nil, err
+		}
+		root, ok := sanitize.DomainFromScopeTarget(firstNonEmpty(raw, normalized, storedRoot))
+		if !ok {
+			continue
+		}
+		fqdn, ok := sanitize.CanonicalDomain(target.FQDN)
+		if !ok || !sanitize.MatchesWildcard(fqdn, root) || domainExcluded(exclusions, target.ProgramID, fqdn) {
+			continue
+		}
+		target.RootDomain = root
+		target.FQDN = fqdn
+		target.MatchMode = ProbeMatchWildcard
+		addProbeTarget(&targets, seen, target)
+	}
+	if err := wildcardRows.Err(); err != nil {
+		return nil, err
+	}
+
+	exactRows, err := r.pool.Query(ctx, `
+		SELECT id, program_id, asset_type, target_raw, target_normalized
+		FROM zero_scope_assets
+		WHERE active = true
+		  AND in_scope = true
+		  AND asset_type IN ('domain', 'url')
+		ORDER BY target_normalized
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer exactRows.Close()
+
+	for exactRows.Next() {
+		var assetID, programID, assetType, raw, normalized string
+		if err := exactRows.Scan(&assetID, &programID, &assetType, &raw, &normalized); err != nil {
+			return nil, err
+		}
+		host, ok := sanitize.DomainFromScopeTarget(firstNonEmpty(raw, normalized))
+		if !ok || domainExcluded(exclusions, programID, host) {
+			continue
+		}
+		addProbeTarget(&targets, seen, ProbeTarget{
+			ProgramID:    programID,
+			ScopeAssetID: assetID,
+			RootDomain:   host,
+			FQDN:         host,
+			Source:       "scope:" + assetType,
+			MatchMode:    ProbeMatchExact,
+		})
+	}
+	if err := exactRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return targets, nil
 }
 
 func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService) (string, error) {
@@ -250,4 +396,41 @@ func nullString(s string) any {
 		return nil
 	}
 	return s
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func addProbeTarget(targets *[]ProbeTarget, seen map[string]bool, target ProbeTarget) {
+	key := target.ProgramID + "\x00" + target.MatchMode + "\x00" + target.FQDN + "\x00" + target.ScopeAssetID
+	if seen[key] {
+		return
+	}
+	seen[key] = true
+	*targets = append(*targets, target)
+}
+
+func domainExcluded(rules []DomainScopeRule, programID, host string) bool {
+	for _, rule := range rules {
+		if rule.ProgramID != programID {
+			continue
+		}
+		switch rule.MatchMode {
+		case ProbeMatchWildcard:
+			if sanitize.MatchesWildcard(host, rule.Host) {
+				return true
+			}
+		case ProbeMatchExact:
+			if host == rule.Host {
+				return true
+			}
+		}
+	}
+	return false
 }

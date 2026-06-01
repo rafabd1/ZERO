@@ -3,6 +3,7 @@ package sanitize
 import (
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"golang.org/x/net/idna"
@@ -75,4 +76,30 @@ func IsWithinRoot(domain, root string) bool {
 		return false
 	}
 	return d == r || strings.HasSuffix(d, "."+r)
+}
+
+func WildcardRegex(root string) (*regexp.Regexp, bool) {
+	r, ok := CanonicalDomain(root)
+	if !ok {
+		return nil, false
+	}
+	label := `[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?`
+	pattern := `^(?:` + label + `\.)+` + regexp.QuoteMeta(r) + `$`
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, false
+	}
+	return compiled, true
+}
+
+func MatchesWildcard(domain, root string) bool {
+	d, ok := CanonicalDomain(domain)
+	if !ok {
+		return false
+	}
+	re, ok := WildcardRegex(root)
+	if !ok {
+		return false
+	}
+	return re.MatchString(d)
 }

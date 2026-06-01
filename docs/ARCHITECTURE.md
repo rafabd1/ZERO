@@ -46,7 +46,10 @@ Every discovered entity is linked back to `zero_programs`. This is required beca
 Zero should scan multiple programs concurrently, starting with `ZERO_TARGET_PARALLELISM=4`. Inside each program, external tools should use moderate defaults and batching:
 
 - Scope sync writes in batches on first import and uses unique constraints for deduplication.
-- Enumeration accepts only sanitized, valid, in-scope wildcard or URL-host roots linked to the program.
+- Enumeration accepts only sanitized, valid, in-scope wildcard assets linked to the program. For `*.example.com`, `subfinder` receives `example.com`.
+- Discovered names are accepted only when they match the wildcard regex for that scope asset. The apex (`example.com`) is not accepted as a wildcard discovery unless it is also present as an exact `domain` or `url` asset.
+- Active out-of-scope `domain`, `url`, and `wildcard` assets override broad in-scope wildcards during enumeration and probing.
+- `httpx` probes two target classes: discovered wildcard subdomains and exact `domain`/`url` scope hosts. Exact scope hosts are not expanded into roots.
 - `httpx` stores target intel for alive services and technology observations.
 - `nuclei` runs after probing and only against alive URLs.
 - Report generation emits only changes/new findings since the previous successful scan.
