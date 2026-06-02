@@ -1,30 +1,44 @@
 # Database
 
-Zero uses Supabase as a managed Postgres database. Set `ZERO_DATABASE_URL` to a Supabase Postgres connection string with `sslmode=require`.
+Zero uses Postgres, commonly through Supabase hosted Postgres.
+
+Set:
+
+```env
+ZERO_DATABASE_URL="postgres://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require"
+```
 
 Apply migrations:
 
 ```bash
-go run ./cmd/zero migrate up
+docker compose --profile tools run --rm migrate
 ```
 
-The initial migration creates tables prefixed with `zero_` to avoid collisions with other public schemas.
+All tables are prefixed with `zero_`.
 
 ## Deduplication
 
-- Scope assets are unique per program, asset type, normalized target, and scope direction.
-- Subdomains are unique per program and FQDN.
-- HTTP services are unique per program and URL.
-- Technology observations are unique by service, lowercased name, version, and source.
-- Technology observations carry `active`; stale observations are deactivated instead of deleted.
-- Vulnerability records are unique by vulnerability id, for example `CVE-2025-20362`.
-- Technology/CVE matches are unique per program, vulnerability, technology/version, and source query.
-- Nuclei results are unique per program, template, matched URL, and evidence hash.
-- Candidate findings are unique by `evidence_hash`.
-- Change events are unique by `evidence_hash`.
+Zero avoids duplicate rows by using stable program-scoped keys:
+
+- scope assets: program, type, normalized target, and direction;
+- subdomains: program and hostname;
+- HTTP services: program and URL;
+- technology observations: service, normalized name, version, and source;
+- vulnerability records: CVE/advisory/template id;
+- passive technology/CVE matches: program, vulnerability, technology/version, and source query;
+- Nuclei results: program, template, matched URL, and evidence hash;
+- candidate findings and change events: evidence hash.
+
+This lets campaigns rerun safely without repeating old reports.
+
+## Lifecycle
+
+Data is deactivated conservatively instead of deleted immediately. `ZERO_STALE_AFTER_HOURS` controls when stale subdomains, services, and technology observations become inactive.
+
+Scan runs and custom scan requests keep execution history, recovery metadata, and campaign progress.
 
 ## Supabase Notes
 
-The pipeline currently talks directly to Postgres using `pgx`, which is simpler and faster than using Supabase REST for batch ingestion. Row-level security should not be enabled for these internal tables unless service-role access policies are added deliberately.
+Zero talks directly to Postgres with `pgx` because batch ingestion is simpler and faster through SQL than through Supabase REST.
 
-For production, use the Supabase service-role key only on the backend/worker side. Do not put service keys in browser clients or public dashboards.
+Keep service-role keys backend-only. Do not expose database credentials in browser clients or public dashboards.

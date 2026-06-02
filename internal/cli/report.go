@@ -56,7 +56,7 @@ func newReportCommand() *cobra.Command {
 	}
 	exportTriage := &cobra.Command{
 		Use:   "export-triage",
-		Short: "Export structured finding bundles for Proteus/Codex triage.",
+		Short: "Export structured finding bundles for manual triage.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext()
 			cfg := loadConfig()

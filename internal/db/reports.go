@@ -340,7 +340,7 @@ func (r *Repository) ListTriageBundles(ctx context.Context, programID, status st
 			) END,
 			'triage', jsonb_build_object(
 				'source', 'zero',
-				'exported_for', 'proteus',
+				'exported_for', 'manual_triage',
 				'notes', CASE
 					WHEN n.id IS NULL THEN 'Potential/unconfirmed passive CVE finding. Treat as prioritization context until manually validated.'
 					ELSE 'Nuclei-backed finding. Passive CVE matches are prioritization context, not proof by themselves.'

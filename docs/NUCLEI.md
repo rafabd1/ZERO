@@ -1,76 +1,61 @@
-# Nuclei Validation
+# Nuclei
 
-Nuclei is part of Zero as a confidence validator, not as the primary source of target intelligence.
+Zero uses Nuclei as an active validation layer, not as the only source of target intelligence.
 
-## Default Policy
+## Policy
 
-Run only against alive URLs already discovered by `httpx`.
+For broad runs, start with:
 
-Default filters:
+- alive URLs only;
+- CVE-tagged or explicit templates;
+- `medium,high,critical` severities;
+- moderate rate and concurrency;
+- JSONL output stored in `zero_nuclei_results`.
 
-- Template IDs from passive CVE matches when available
-- Severities: `medium,high,critical`
-- Exclude low/info by default
-- Keep rate limits moderate
-- Store JSONL output structurally in `zero_nuclei_results`
+Nuclei is strongest when a relevant template exists and produces vulnerability-specific evidence. If no template exists, Zero can still keep passive CVE context, but it should be reported as potential/unconfirmed.
 
-Recommended starting command shape:
+## Default Role Split
 
-```bash
-nuclei -l urls.txt \
-  -j \
-  -duc \
-  -ni \
-  -pt http \
-  -id CVE-2025-20362,CVE-2021-41773 \
-  -severity medium,high,critical \
-  -rate-limit 80 \
-  -c 20 \
-  -bs 5 \
-  -retries 1 \
-  -timeout 8 \
-  -or \
-  -ot
-```
+- `httpx`: alive checks and lightweight fingerprints.
+- Webanalyze: broader technology and version observations.
+- Passive CVE context: prioritization from versioned technologies.
+- Nuclei: active validation when a relevant template is selected.
 
-These are starting values, not a promise that every target tolerates them. Manual and scheduled custom runs can override template IDs, template paths, tags, severities, rate, concurrency, bulk size, retries, timeout, and target limit without changing global worker defaults.
-
-## Why This Matters
-
-Nuclei depends on templates. It is strong when a relevant template exists and weak for CVEs without templates or with fragile product/version detection. Zero should therefore:
-
-1. Use `httpx` for alive checks and fingerprints.
-2. Use Webanalyze/Wappalyzer definitions to improve technology and version coverage.
-3. Use passive CVE/KEV/advisory matching for prioritization.
-4. Use Nuclei to validate known probeable CVEs.
-5. Report only new, deduplicated hits with enough evidence, clearly separating confirmed Nuclei hits from passive potential CVEs.
-
-Passive matching is not just a free-text lookup. NVD CPE evidence and version ranges are preferred when present; keyword matching is kept as lower-confidence fallback. Active Nuclei hits become high-confidence candidate findings. Medium/high/critical passive CVE matches can also be promoted during report generation as `potential_unconfirmed` entries when the same service has no confirming Nuclei result for that CVE.
-
-`ZERO_CVE_MIN_YEAR` defaults to `2018` and applies to NVD passive matching, CVE-derived Nuclei template selection, and passive/unconfirmed report generation. If no eligible CVE remains after this year filter, Zero does not generate a passive report for that candidate set.
-
-## Stored Fields
-
-Each Nuclei result is linked to:
-
-- `program_id`
-- `http_service_id` when matched to a known service
-- `scan_run_id`
-- `template_id`
-- `matched_at`
-- `severity`
-- `cves`
-- `tags`
-- `evidence_hash`
-- raw JSON output
-
-The unique key is `(program_id, template_id, matched_at, evidence_hash)` so reruns do not create duplicate rows.
-
-For targeted validation after passive matching:
+## Focused Validation
 
 ```bash
-zero analyze cves --limit 25
-zero analyze nuclei --from-cves --limit 20 --cve-limit 50
-zero analyze nuclei --limit 5 --template-id CVE-2025-20362
-zero analyze nuclei --template-path ./templates/custom-cve.yaml --severity high,critical --rate-limit 40 --concurrency 10 --timeout 10
+docker compose run --rm zero analyze nuclei \
+  --limit 25 \
+  --template-id CVE-2025-20362 \
+  --rate-limit 40 \
+  --concurrency 10 \
+  --timeout 10
 ```
+
+Custom path:
+
+```bash
+docker compose run --rm zero analyze nuclei \
+  --template-path ./templates/custom.yaml \
+  --severity high,critical \
+  --rate-limit 40 \
+  --concurrency 10
+```
+
+Campaigns can pass the same Nuclei options through `zero run schedule`.
+
+## Stored Evidence
+
+Each result stores:
+
+- program id;
+- service id when matched to a known HTTP service;
+- scan run id;
+- template id;
+- matched URL;
+- severity;
+- CVEs and tags;
+- evidence hash;
+- raw JSON output.
+
+Stable evidence hashes prevent duplicate findings across reruns.
