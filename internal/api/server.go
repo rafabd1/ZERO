@@ -317,6 +317,7 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 				'running', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'running'),
 				'queued', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'queued'),
 				'succeeded', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'succeeded'),
+				'partial', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'partial'),
 				'failed', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'failed'),
 				'total', (SELECT count(*) FROM zero_scan_campaigns)
 			),

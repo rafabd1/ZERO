@@ -8,23 +8,27 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 )
 
 type Generator struct {
-	repo       *db.Repository
-	scanRunID  string
-	programID  string
-	limit      int
-	cveMinYear int
+	repo                       *db.Repository
+	scanRunID                  string
+	programID                  string
+	limit                      int
+	cveMinYear                 int
+	includePassiveFingerprints bool
+	passiveFingerprintMaxAge   time.Duration
 }
 
 type Result struct {
-	Findings        int
-	PassiveFindings int
-	Reports         int
-	Inserted        int
+	Findings                   int
+	PassiveFindings            int
+	PassiveFingerprintFindings int
+	Reports                    int
+	Inserted                   int
 }
 
 func NewGenerator(repo *db.Repository) *Generator {
@@ -55,16 +59,31 @@ func (g *Generator) WithCVEMinYear(year int) *Generator {
 	return g
 }
 
+func (g *Generator) WithPassiveFingerprintFindings(include bool, maxAge time.Duration) *Generator {
+	g.includePassiveFingerprints = include
+	if maxAge > 0 {
+		g.passiveFingerprintMaxAge = maxAge
+	}
+	return g
+}
+
 func (g *Generator) Run(ctx context.Context) (Result, error) {
 	passiveInserted, err := g.repo.UpsertUnconfirmedPassiveFindings(ctx, g.programID, g.scanRunID, g.limit, g.cveMinYear)
 	if err != nil {
 		return Result{}, err
 	}
+	passiveFingerprintInserted := 0
+	if g.includePassiveFingerprints {
+		passiveFingerprintInserted, err = g.repo.UpsertUnconfirmedFingerprintFindings(ctx, g.programID, g.scanRunID, g.limit, int64(g.passiveFingerprintMaxAge.Seconds()))
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	findings, err := g.repo.ListUnreportedFindings(ctx, g.programID, g.limit)
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Findings: len(findings), PassiveFindings: passiveInserted}
+	result := Result{Findings: len(findings), PassiveFindings: passiveInserted, PassiveFingerprintFindings: passiveFingerprintInserted}
 	if len(findings) == 0 {
 		return result, nil
 	}
@@ -176,18 +195,31 @@ func writeEvidence(b *strings.Builder, raw json.RawMessage) {
 	}
 	source, _ := evidence["source"].(string)
 	if validation, ok := evidence["validation_status"].(string); ok && validation == "potential_unconfirmed" {
-		fmt.Fprintf(b, "- Validation: potential/unconfirmed passive CVE match")
-		if source != "" {
-			fmt.Fprintf(b, " from `%s`", source)
-		}
-		reason := nucleiValidationReason(evidence)
-		if reason != "" {
-			fmt.Fprintf(b, "; %s.\n", reason)
+		if source == "custom-fingerprint-passive" {
+			fmt.Fprintf(b, "- Validation: potential/unconfirmed custom fingerprint match")
+			reason := nucleiValidationReason(evidence)
+			if reason != "" {
+				fmt.Fprintf(b, "; %s.\n", reason)
+			} else {
+				b.WriteString("; no confirming Nuclei result is linked yet.\n")
+			}
+			if fingerprintURL, _ := evidence["fingerprint_url"].(string); fingerprintURL != "" {
+				fmt.Fprintf(b, "- Fingerprint URL: %s\n", fingerprintURL)
+			}
 		} else {
-			b.WriteString("; no confirming Nuclei result is linked yet.\n")
-		}
-		if condition, _ := evidence["passive_condition"].(string); condition != "" && condition != "version_match_only" {
-			b.WriteString("- Passive condition: version match appears configuration/module-dependent; manual validation is required before treating this as exploitable.\n")
+			fmt.Fprintf(b, "- Validation: potential/unconfirmed passive CVE match")
+			if source != "" {
+				fmt.Fprintf(b, " from `%s`", source)
+			}
+			reason := nucleiValidationReason(evidence)
+			if reason != "" {
+				fmt.Fprintf(b, "; %s.\n", reason)
+			} else {
+				b.WriteString("; no confirming Nuclei result is linked yet.\n")
+			}
+			if condition, _ := evidence["passive_condition"].(string); condition != "" && condition != "version_match_only" {
+				b.WriteString("- Passive condition: version match appears configuration/module-dependent; manual validation is required before treating this as exploitable.\n")
+			}
 		}
 	}
 	if templateID, ok := evidence["template_id"].(string); ok && templateID != "" {
@@ -226,6 +258,11 @@ func nucleiValidationReason(evidence map[string]any) string {
 		return "Nuclei was not run for this CVE because no local template candidate was selected"
 	case "nuclei_not_run":
 		return "Nuclei has not run for this program since the passive match was observed"
+	case "nuclei_skipped":
+		if msg, _ := evidence["nuclei_skipped"].(string); msg != "" {
+			return "Nuclei validation was skipped: " + msg
+		}
+		return "Nuclei validation was skipped"
 	case "nuclei_error":
 		if msg, _ := evidence["nuclei_error"].(string); msg != "" {
 			return "Nuclei validation errored: " + msg

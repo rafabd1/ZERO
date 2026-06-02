@@ -78,3 +78,37 @@ func TestBuildDraftLabelsPassiveCVEAsUnconfirmed(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildDraftLabelsCustomFingerprintAsUnconfirmed(t *testing.T) {
+	findings := []db.ReportFinding{
+		{
+			ID:            "44444444-4444-4444-4444-444444444444",
+			ProgramID:     "11111111-1111-1111-1111-111111111111",
+			ProgramHandle: "example",
+			ProgramURL:    "https://hackerone.com/example",
+			ServiceURL:    "https://app.example.com",
+			Severity:      "medium",
+			Confidence:    55,
+			Evidence: json.RawMessage(`{
+				"source":"custom-fingerprint-passive",
+				"validation_status":"potential_unconfirmed",
+				"nuclei_validation_reason":"no_confirming_result",
+				"technology_name":"Apache ActiveMQ",
+				"fingerprint_url":"https://app.example.com/api/jolokia/version"
+			}`),
+			FirstSeenAt: "2026-06-01 00:00:00+00",
+		},
+	}
+
+	draft := buildDraft(findings)
+	for _, want := range []string{
+		"potential/unconfirmed custom fingerprint match",
+		"did not return a confirming result",
+		"Apache ActiveMQ",
+		"https://app.example.com/api/jolokia/version",
+	} {
+		if !strings.Contains(draft.Body, want) {
+			t.Fatalf("custom fingerprint report body missing %q:\n%s", want, draft.Body)
+		}
+	}
+}

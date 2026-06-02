@@ -10,54 +10,56 @@ import (
 )
 
 type manualRunOptions struct {
-	ProgramID            string
-	SkipSync             bool
-	SkipEnum             bool
-	SkipDNS              bool
-	SkipProbe            bool
-	ReuseActiveServices  bool
-	SkipEnrich           bool
-	SkipCVEs             bool
-	SkipNuclei           bool
-	SkipReport           bool
-	SkipNotify           bool
-	SubfinderLimit       int
-	DNSXLimit            int
-	HTTPXLimit           int
-	HTTPXTimeout         int
-	HTTPXThreads         int
-	HTTPXBatchSize       int
-	HTTPXBatchTimeout    string
-	HTTPXPatternMin      int
-	HTTPXPatternCap      int
-	HTTPXTLSProbe        bool
-	WebanalyzeLimit      int
-	CVELimit             int
-	WebanalyzeApps       string
-	WebanalyzeProbePaths []string
-	WebanalyzeWorkers    int
-	WebanalyzeCrawl      int
-	WebanalyzeBatch      int
-	NucleiLimit          int
-	NucleiTemplateID     string
-	NucleiTemplate       string
-	NucleiTechFilter     string
-	NucleiTechMaxAge     string
-	NucleiTags           string
-	NucleiSeverity       string
-	NucleiHeaders        []string
-	NucleiProxy          string
-	NucleiStrategy       string
-	NucleiMaxHostErr     int
-	NucleiRateLimit      int
-	NucleiConcurrency    int
-	NucleiBulkSize       int
-	NucleiRetries        int
-	NucleiTimeout        int
-	NucleiFromCVEs       bool
-	NucleiAllCVEs        bool
-	NucleiForce          bool
-	NucleiCVELimit       int
+	ProgramID                        string
+	SkipSync                         bool
+	SkipEnum                         bool
+	SkipDNS                          bool
+	SkipProbe                        bool
+	ReuseActiveServices              bool
+	SkipEnrich                       bool
+	SkipCVEs                         bool
+	SkipNuclei                       bool
+	SkipReport                       bool
+	DisablePassiveFingerprintReports bool
+	SkipNotify                       bool
+	SubfinderLimit                   int
+	DNSXLimit                        int
+	HTTPXLimit                       int
+	HTTPXTimeout                     int
+	HTTPXThreads                     int
+	HTTPXBatchSize                   int
+	HTTPXBatchTimeout                string
+	HTTPXPatternMin                  int
+	HTTPXPatternCap                  int
+	HTTPXTLSProbe                    bool
+	WebanalyzeLimit                  int
+	CVELimit                         int
+	WebanalyzeApps                   string
+	WebanalyzeProbePaths             []string
+	WebanalyzeWorkers                int
+	WebanalyzeCrawl                  int
+	WebanalyzeBatch                  int
+	WebanalyzeBatchTimeout           string
+	NucleiLimit                      int
+	NucleiTemplateID                 string
+	NucleiTemplate                   string
+	NucleiTechFilter                 string
+	NucleiTechMaxAge                 string
+	NucleiTags                       string
+	NucleiSeverity                   string
+	NucleiHeaders                    []string
+	NucleiProxy                      string
+	NucleiStrategy                   string
+	NucleiMaxHostErr                 int
+	NucleiRateLimit                  int
+	NucleiConcurrency                int
+	NucleiBulkSize                   int
+	NucleiRetries                    int
+	NucleiTimeout                    int
+	NucleiFromCVEs                   bool
+	NucleiAllCVEs                    bool
+	NucleiForce                      bool
+	NucleiCVELimit                   int
 }
 
 func addManualRunCommand(parent *cobra.Command) {
@@ -142,6 +144,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().BoolVar(&opts.SkipCVEs, "skip-cves", false, "skip passive CVE matching")
 	cmd.Flags().BoolVar(&opts.SkipNuclei, "skip-nuclei", false, "skip Nuclei validation")
 	cmd.Flags().BoolVar(&opts.SkipReport, "skip-report", false, "skip report generation")
+	cmd.Flags().BoolVar(&opts.DisablePassiveFingerprintReports, "disable-passive-fingerprint-reports", false, "do not report fresh custom fingerprint matches as passive potential findings when Nuclei does not confirm")
 	cmd.Flags().BoolVar(&opts.SkipNotify, "skip-notify", false, "skip Discord notification")
 	cmd.Flags().IntVar(&opts.SubfinderLimit, "subfinder-limit", 0, "manual subfinder root limit")
 	cmd.Flags().IntVar(&opts.DNSXLimit, "dnsx-limit", 0, "manual dnsx host limit")
@@ -159,7 +162,8 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().StringArrayVar(&opts.WebanalyzeProbePaths, "webanalyze-probe-path", nil, "additional relative path to fingerprint on every service, for example /admin/; repeatable")
 	cmd.Flags().IntVar(&opts.WebanalyzeWorkers, "webanalyze-workers", 0, "custom Webanalyze workers for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeCrawl, "webanalyze-crawl", -1, "custom Webanalyze crawl depth for this run only")
-	cmd.Flags().IntVar(&opts.WebanalyzeBatch, "webanalyze-batch-size", 0, "custom Webanalyze services per process")
+	cmd.Flags().IntVar(&opts.WebanalyzeBatch, "webanalyze-batch-size", 0, "custom expanded Webanalyze URLs per process")
+	cmd.Flags().StringVar(&opts.WebanalyzeBatchTimeout, "webanalyze-batch-timeout", "", "custom max wall-clock time per Webanalyze batch, for example 10m")
 	cmd.Flags().IntVar(&opts.NucleiLimit, "nuclei-limit", 0, "manual Nuclei URL limit")
 	cmd.Flags().StringVar(&opts.NucleiTemplateID, "nuclei-template-id", "", "custom Nuclei template id(s) for this run only")
 	cmd.Flags().StringVar(&opts.NucleiTemplate, "nuclei-template", "", "custom Nuclei template file/directory path(s) for this run only")
@@ -238,6 +242,7 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 			step = append(step, "--crawl", fmt.Sprint(opts.WebanalyzeCrawl))
 		}
 		step = appendIntFlag(step, "--batch-size", opts.WebanalyzeBatch)
+		step = appendStringFlag(step, "--batch-timeout", opts.WebanalyzeBatchTimeout)
 		steps = append(steps, step)
 	}
 	if !opts.SkipCVEs {
@@ -304,6 +309,10 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 	if !opts.SkipReport {
 		step := []string{"report", "generate"}
 		step = appendProgramFlag(step, opts.ProgramID)
+		if shouldIncludePassiveFingerprintReports(opts) {
+			step = append(step, "--include-passive-fingerprint-findings")
+			step = append(step, "--passive-fingerprint-max-age", automaticTechMaxAge(cfg.Tools.ToolTimeout))
+		}
 		steps = append(steps, step)
 	}
 	if !opts.SkipNotify {
@@ -354,6 +363,13 @@ func normalizeManualRunOptions(opts manualRunOptions) manualRunOptions {
 
 func runRefreshesFingerprint(opts manualRunOptions) bool {
 	return !opts.SkipProbe || !opts.SkipEnrich
+}
+
+func shouldIncludePassiveFingerprintReports(opts manualRunOptions) bool {
+	if opts.DisablePassiveFingerprintReports || opts.SkipEnrich {
+		return false
+	}
+	return strings.TrimSpace(opts.WebanalyzeApps) != "" || len(opts.WebanalyzeProbePaths) > 0
 }
 
 func automaticTechMaxAge(toolTimeout time.Duration) string {

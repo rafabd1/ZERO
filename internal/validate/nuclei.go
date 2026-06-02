@@ -68,7 +68,7 @@ func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
 		bulkSize:    5,
 		retries:     1,
 		timeout:     8,
-		wafDetect:   true,
+		wafDetect:   false,
 		wafSample:   8,
 		wafTimeout:  5,
 	}

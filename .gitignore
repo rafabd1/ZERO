@@ -27,3 +27,6 @@ reports/generated/
 configs/subfinder/provider-config.yaml
 configs/webanalyze/*.json
 !configs/webanalyze/*.example.json
+custom-assets/*
+!custom-assets/README.md
+!custom-assets/.gitkeep

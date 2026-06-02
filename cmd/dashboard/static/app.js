@@ -124,7 +124,7 @@ function renderGlobalStats() {
   setText("scansRunning", fmt(scanRuns.running_programs || scanRuns.running));
   setText("scansFailed", `${fmt(scanRuns.failed)} failed program scans, ${fmt((scanRuns.task_runs || {}).running)} tool tasks running`);
   setText("campaignsRunning", fmt(campaigns.running));
-  setText("campaignsSplit", `${fmt(campaigns.queued)} queued, ${fmt(campaigns.failed)} failed`);
+  setText("campaignsSplit", `${fmt(campaigns.queued)} queued, ${fmt(campaigns.partial)} partial, ${fmt(campaigns.failed)} failed`);
 
   const active = Number(programs.active || 0);
   const scanned = Number(programs.scanned || 0);
@@ -520,6 +520,7 @@ function scanStatusPill(status) {
   const clean = String(status || "unknown").toLowerCase();
   if (clean === "succeeded") return `<span class="pill good">Succeeded</span>`;
   if (clean === "running") return `<span class="pill info">Running</span>`;
+  if (clean === "partial") return `<span class="pill warn">Partial</span>`;
   if (clean === "failed") return `<span class="pill danger">Failed</span>`;
   return `<span class="pill">${escapeHTML(clean)}</span>`;
 }

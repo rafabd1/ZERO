@@ -1,0 +1,272 @@
+# Custom Campaigns
+
+Custom campaigns are for targeted vulnerability analysis across many authorized programs. The usual pattern is:
+
+```text
+select inventory -> focused fingerprint -> technology gate -> Nuclei validation -> report
+```
+
+Use a campaign when the question is specific, for example:
+
+- Which targets expose a product or management console?
+- Which targets match a newly relevant CVE template?
+- Which targets have a known path, banner, HTML marker, cookie, or API response?
+- Which targets should be validated with one or more custom Nuclei templates?
+
+## File Loading
+
+Queued campaigns are executed by the long-running `zero` worker. Custom files must be visible to that container, not only to the one-off CLI process that schedules the campaign.
+
+By default, Docker Compose mounts:
+
+```text
+./custom-assets -> /home/zero/custom-assets
+```
+
+Place private custom Webanalyze JSON files and Nuclei YAML templates in `custom-assets/`, then reference them with container paths:
+
+```text
+/home/zero/custom-assets/product.webanalyze.json
+/home/zero/custom-assets/product-cve.yaml
+```
+
+Files under `custom-assets/` are ignored by Git except the public README and `.gitkeep`.
+
+## Choosing Parameters
+
+Start from the least expensive inventory source that still answers the question.
+
+Use `--reuse-active-services` when a full scan recently refreshed alive services. This skips `dnsx/httpx` and avoids repeated probing.
+
+Use `--skip-enum` when you need fresh `httpx`/fingerprinting but do not need new subdomain discovery.
+
+Use `--campaign-limit` for staged rollouts. A good flow is `25 -> 100 -> all programs`.
+
+Use `--campaign-parallelism` for program-level concurrency. This is independent from `ZERO_TARGET_PARALLELISM`.
+
+Use `--webanalyze-workers` for per-program Webanalyze URL concurrency. Total concurrent Webanalyze activity is roughly:
+
+```text
+campaign_parallelism * webanalyze_workers
+```
+
+Use `--webanalyze-batch-size` and `--webanalyze-batch-timeout` when a program has many services or many probe paths. Webanalyze batching is based on expanded URLs, and each service is expanded into:
+
+```text
+base URL + every --webanalyze-probe-path
+```
+
+For example, 250 services with 5 probe paths means up to 1500 Webanalyze URLs.
+
+Zero defaults Webanalyze batches to 50 expanded URLs and 10 minutes per batch. `ZERO_TOOL_TIMEOUT` applies to external steps that do not have a dedicated batch timeout, such as subfinder, dnsx, Nuclei, and template updates. Use a larger explicit `--webanalyze-batch-size` only after a staged run shows it is stable.
+
+Use `--nuclei-tech-filter` to run Nuclei only on services where `httpx`, Webanalyze, title, server text, or stored technology observations match the target product.
+
+Use `--nuclei-force` when you provide an explicit template/tag policy and do not want Nuclei selection derived from passive CVE matches.
+
+Use `--disable-passive-fingerprint-reports` when the campaign should emit only Nuclei-confirmed findings.
+
+## Webanalyze Templates
+
+Custom Webanalyze files follow Wappalyzer-style JSON. Keep them specific enough to avoid matching generic pages.
+
+Minimal example:
+
+```json
+{
+  "technologies": {
+    "Example Product": {
+      "cats": ["19"],
+      "html": [
+        "<title>Example Product</title>",
+        "Manage Example Product"
+      ],
+      "headers": {
+        "Server": "ExampleProduct"
+      },
+      "cookies": {
+        "ExampleSession": ""
+      },
+      "scripts": [
+        "/example/static/"
+      ],
+      "website": "https://example.com/product"
+    }
+  },
+  "categories": {
+    "19": {
+      "name": "Enterprise software"
+    }
+  }
+}
+```
+
+Prefer multiple independent signals:
+
+- title or body text that names the product;
+- product-specific cookie names;
+- product-specific static paths;
+- product-specific response headers;
+- version strings only when they are reliable.
+
+Avoid generic terms such as `Apache`, `admin`, `portal`, or `login` unless paired with a stronger marker.
+
+## Path Probes
+
+Use `--webanalyze-probe-path` when the product rarely fingerprints at `/`.
+
+Examples:
+
+```bash
+--webanalyze-probe-path /admin/
+--webanalyze-probe-path /console/
+--webanalyze-probe-path /api/version
+--webanalyze-probe-path "/api/jolokia/search/org.example:type=Server,*"
+```
+
+Probe paths must be relative paths. Zero derives them from already alive HTTP services and ties any matches back to the original service record.
+
+Path probes are partial fingerprints. They add focused observations but do not clear the normal technology inventory.
+
+## Nuclei Templates
+
+Use Nuclei for active validation, not broad discovery, unless that is the explicit campaign goal.
+
+Minimal HTTP template shape:
+
+```yaml
+id: example-product-exposure
+
+info:
+  name: Example Product Exposure Check
+  author: zero
+  severity: medium
+  tags: exposure,example
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/version"
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Example Product"
+```
+
+For CVE validation, include CVE metadata when appropriate:
+
+```yaml
+info:
+  classification:
+    cve-id: CVE-YYYY-NNNN
+  severity: high
+  tags: cve,cveYYYY,example
+```
+
+Keep templates safe and bounded:
+
+- prefer `GET`/read-only probes when possible;
+- avoid state-changing requests unless the campaign explicitly requires them;
+- make matchers specific enough to avoid generic 200 responses;
+- set `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, and `--nuclei-retries` explicitly for broad campaigns.
+
+## Scenario Examples
+
+### Focused CVE Sweep Against Fresh Inventory
+
+Use this after a recent full run:
+
+```bash
+docker compose run --rm zero run schedule \
+  --all-programs \
+  --campaign-parallelism 8 \
+  --name "example-product-cve-sweep" \
+  --skip-sync \
+  --reuse-active-services \
+  --webanalyze-apps /home/zero/custom-assets/example-product.webanalyze.json \
+  --webanalyze-probe-path /admin/ \
+  --webanalyze-probe-path /api/version \
+  --webanalyze-workers 4 \
+  --webanalyze-batch-size 50 \
+  --webanalyze-batch-timeout 10m \
+  --nuclei-template /home/zero/custom-assets/example-product-cve.yaml \
+  --nuclei-tech-filter "Example Product|ExampleProduct" \
+  --nuclei-force \
+  --nuclei-rate-limit 30 \
+  --nuclei-concurrency 8 \
+  --nuclei-bulk-size 5 \
+  --nuclei-timeout 10 \
+  --nuclei-retries 1
+```
+
+### Discovery Plus Fingerprint
+
+Use this when the alive inventory may be stale:
+
+```bash
+docker compose run --rm zero run schedule \
+  --all-programs \
+  --campaign-parallelism 4 \
+  --campaign-limit 100 \
+  --name "example-product-discovery-stage" \
+  --skip-sync \
+  --httpx-timeout 4 \
+  --httpx-threads 20 \
+  --httpx-batch-size 50 \
+  --httpx-batch-timeout 5m \
+  --webanalyze-apps /home/zero/custom-assets/example-product.webanalyze.json \
+  --webanalyze-probe-path /console/ \
+  --webanalyze-workers 3 \
+  --webanalyze-batch-size 50 \
+  --webanalyze-batch-timeout 10m \
+  --nuclei-template /home/zero/custom-assets/example-product-check.yaml \
+  --nuclei-tech-filter "Example Product" \
+  --nuclei-rate-limit 20 \
+  --nuclei-concurrency 5
+```
+
+### Fingerprint-Only Triage
+
+Use this when you only want potential leads and do not have a validation template yet:
+
+```bash
+docker compose run --rm zero run schedule \
+  --all-programs \
+  --campaign-parallelism 8 \
+  --name "example-product-fingerprint-only" \
+  --skip-sync \
+  --reuse-active-services \
+  --webanalyze-apps /home/zero/custom-assets/example-product.webanalyze.json \
+  --webanalyze-probe-path /admin/ \
+  --skip-cves \
+  --skip-nuclei
+```
+
+Because this uses custom fingerprinting, Zero can emit potential/unconfirmed fingerprint reports. Add `--disable-passive-fingerprint-reports` if you only want database observations.
+
+### Nuclei-Only Validation
+
+Use this when the template itself is safe, specific, and suitable for all active services:
+
+```bash
+docker compose run --rm zero run schedule \
+  --all-programs \
+  --campaign-parallelism 4 \
+  --name "example-nuclei-only" \
+  --skip-sync \
+  --reuse-active-services \
+  --skip-enrich \
+  --skip-cves \
+  --nuclei-template /home/zero/custom-assets/example-safe-check.yaml \
+  --nuclei-force \
+  --nuclei-rate-limit 20 \
+  --nuclei-concurrency 5
+```
+
+Only use this for narrow, low-noise templates. For product-specific checks, prefer fingerprint gating first.

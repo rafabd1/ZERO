@@ -49,7 +49,7 @@ The worker is the normal execution mode.
 - `ZERO_SCOPE_SYNC_MAX_AGE=24h` prevents scope sync from running on every restart.
 - `ZERO_DEFAULT_SCAN_INTERVAL_HOURS=72` is the default per-program scan interval.
 - `ZERO_TARGET_PARALLELISM=12` controls default/due pipeline program parallelism.
-- `ZERO_TOOL_TIMEOUT=20m` bounds each external tool invocation.
+- `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder, dnsx, Nuclei, and template updates.
 - `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
 
 The main pipeline per due program is:
@@ -63,6 +63,8 @@ Each stage writes structured state to Postgres. A restart requeues interrupted c
 ## Custom Campaigns
 
 Custom campaigns let you run targeted analysis across one program or the full active inventory.
+
+For detailed parameter recipes, custom Webanalyze templates, Nuclei template examples, and staged rollout guidance, see [Custom Campaigns](CUSTOM_CAMPAIGNS.md).
 
 Single program:
 
@@ -89,6 +91,8 @@ docker compose run --rm zero run schedule \
   --webanalyze-apps ./custom-technologies.json \
   --webanalyze-probe-path /admin/ \
   --webanalyze-probe-path /api/version \
+  --webanalyze-batch-size 50 \
+  --webanalyze-batch-timeout 10m \
   --nuclei-tech-filter "product-name" \
   --nuclei-template ./templates/custom \
   --nuclei-severity medium,high,critical
@@ -98,7 +102,9 @@ Use `--due-only` if the campaign should respect each program's normal scan inter
 
 The worker pool keeps custom campaign slots filled from each campaign's own `--campaign-parallelism`. Multiple custom campaigns can run side by side; their capacity is additive and is not capped by `ZERO_TARGET_PARALLELISM`, which only controls default/due scans.
 
-Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. Use `--webanalyze-probe-path` for products whose fingerprint appears on known paths such as `/admin/`, `/console/`, `/demo/`, or `/api/jolokia/version`; each path is derived from the already authorized alive service URL and tied back to the same HTTP service record. Path probes are partial fingerprints too, so they do not clear existing technology inventory. For targeted validation, pair `--nuclei-tech-filter` with fresh fingerprinting in the same campaign; Zero automatically applies a freshness window before Nuclei. Use `--nuclei-tech-max-age` only when skipping fingerprint stages and intentionally relying on observations already in the database.
+Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. Use `--webanalyze-probe-path` for products whose fingerprint appears on known paths such as `/admin/`, `/console/`, `/demo/`, or `/api/jolokia/version`; each path is derived from the already authorized alive service URL and tied back to the same HTTP service record. Path probes are partial fingerprints too, so they do not clear existing technology inventory. Webanalyze batch size counts expanded URLs after path expansion, so keep `--webanalyze-batch-size` conservative for broad path-probe campaigns. For targeted validation, pair `--nuclei-tech-filter` with fresh fingerprinting in the same campaign; Zero automatically applies a freshness window before Nuclei. Use `--nuclei-tech-max-age` only when skipping fingerprint stages and intentionally relying on observations already in the database.
+
+When custom fingerprinting is used, reports include fresh fingerprint matches as potential/unconfirmed findings if Nuclei runs but does not confirm them. Use `--disable-passive-fingerprint-reports` for campaigns that should emit only Nuclei-confirmed findings.
 
 Use `--reuse-active-services` to skip `dnsx/httpx` and run enrichment, CVE context, Nuclei, reporting, and notification against active HTTP services already stored in Postgres. This avoids repeated alive probing when multiple focused campaigns are launched soon after a fresh full scan. In this mode, `httpx` tuning flags are intentionally ignored.
 
@@ -141,6 +147,14 @@ Broad scopes can contain many near-identical tenant, CDN, or default-page hosts.
 - `ZERO_HTTPX_PATTERN_MIN_GROUP=200`
 - `ZERO_HTTPX_PATTERN_CAP=120`
 - `ZERO_HTTPX_TLS_PROBE=false`
+
+For Webanalyze and custom path probes:
+
+- `ZERO_WEBANALYZE_WORKERS=4`
+- `ZERO_WEBANALYZE_BATCH_SIZE=50`
+- `ZERO_WEBANALYZE_BATCH_TIMEOUT=10m`
+
+Webanalyze batches count expanded URLs, not base services. A service plus four probe paths becomes five Webanalyze URLs.
 
 For Nuclei:
 

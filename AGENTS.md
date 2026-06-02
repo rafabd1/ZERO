@@ -36,10 +36,22 @@ Custom campaigns can skip parts of that path:
 - `--skip-enum` skips subfinder.
 - `--reuse-active-services` skips `dnsx/httpx` and uses active HTTP services already stored in Postgres.
 - `--webanalyze-apps` adds focused technology fingerprints for a run without clearing the full technology inventory.
+- `--webanalyze-probe-path` fingerprints additional relative paths such as `/admin/`, `/console/`, or `/api/version` on each alive service.
 - `--nuclei-tech-filter` should gate focused active validation to assets whose fingerprint/title/server/banner matches the intended technology.
 - `--nuclei-tech-max-age` is mainly for scans that skip fingerprinting and intentionally use existing database observations.
+- `--disable-passive-fingerprint-reports` should be used when a custom campaign must report only Nuclei-confirmed findings.
 
 Default/due scans use `ZERO_TARGET_PARALLELISM`. Custom campaigns use their own campaign parallelism and can run independently.
+
+Before scheduling a broad custom campaign:
+
+- Check whether recent alive inventory exists; prefer `--reuse-active-services` when it does.
+- Stage expensive campaigns with `--campaign-limit` before running across all programs.
+- Remember that each service expands to `base URL + every --webanalyze-probe-path`; `--webanalyze-batch-size` counts expanded URLs, not base services.
+- Keep custom Nuclei templates gated with `--nuclei-tech-filter` unless the template is safe and specific enough to run on every active service.
+- Ensure custom files referenced by queued campaigns are available in the worker container under `/home/zero/custom-assets`.
+
+For detailed recipes and template examples, read `docs/CUSTOM_CAMPAIGNS.md`.
 
 ## Security Research Standards
 

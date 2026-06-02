@@ -90,7 +90,10 @@ Content-Type: application/json
       "/admin/",
       "/api/version"
     ],
+    "DisablePassiveFingerprintReports": false,
     "WebanalyzeWorkers": 4,
+    "WebanalyzeBatch": 50,
+    "WebanalyzeBatchTimeout": "10m",
     "NucleiTemplate": "/work/templates/custom",
     "NucleiForce": true,
     "NucleiTechFilter": "product-name",

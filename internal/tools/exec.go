@@ -33,6 +33,14 @@ func IsTimeout(err error) bool {
 	return errors.As(err, &timeoutErr)
 }
 
+func TimeoutDuration(err error) (time.Duration, bool) {
+	var timeoutErr TimeoutError
+	if !errors.As(err, &timeoutErr) {
+		return 0, false
+	}
+	return timeoutErr.Timeout, true
+}
+
 func RunLines(ctx context.Context, bin string, args []string, stdin io.Reader, onLine func(string) error) error {
 	return RunLinesWithTimeout(ctx, 0, bin, args, stdin, onLine)
 }

@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_status
 CREATE TABLE IF NOT EXISTS zero_scan_campaigns (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	name text NOT NULL DEFAULT '',
-	status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','canceled')),
+	status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','partial','failed','canceled')),
 	requested_by text NOT NULL DEFAULT 'cli',
 	run_after timestamptz NOT NULL DEFAULT now(),
 	parallelism integer NOT NULL DEFAULT 1 CHECK (parallelism >= 1 AND parallelism <= 32),
@@ -64,6 +64,31 @@ CREATE TABLE IF NOT EXISTS zero_scan_campaigns (
 
 CREATE INDEX IF NOT EXISTS idx_zero_scan_campaigns_status
 	ON zero_scan_campaigns(status, run_after, created_at);
+
+DO $$
+BEGIN
+	IF EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'zero_scan_campaigns_status_check'
+		  AND conrelid = 'zero_scan_campaigns'::regclass
+	) THEN
+		ALTER TABLE zero_scan_campaigns DROP CONSTRAINT zero_scan_campaigns_status_check;
+	END IF;
+	ALTER TABLE zero_scan_campaigns
+		ADD CONSTRAINT zero_scan_campaigns_status_check
+		CHECK (status IN ('queued','running','succeeded','partial','failed','canceled'));
+END $$;
+
+UPDATE zero_scan_campaigns
+SET status = 'partial',
+	error = failed_requests::text || ' campaign scan request(s) failed; completed partially',
+	updated_at = now()
+WHERE status = 'failed'
+  AND queued_requests = 0
+  AND running_requests = 0
+  AND succeeded_requests > 0
+  AND failed_requests > 0;
 
 CREATE TABLE IF NOT EXISTS zero_scan_requests (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

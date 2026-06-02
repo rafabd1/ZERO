@@ -220,6 +220,123 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 	return inserted, nil
 }
 
+func (r *Repository) UpsertUnconfirmedFingerprintFindings(ctx context.Context, programID, scanRunID string, limit int, maxAgeSeconds int64) (int, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var inserted int
+	err := r.pool.QueryRow(ctx, `
+		WITH candidates AS (
+			SELECT
+				t.program_id,
+				t.http_service_id,
+				t.name AS technology_name,
+				t.version AS technology_version,
+				t.confidence AS fingerprint_confidence,
+				t.evidence AS fingerprint_evidence,
+				COALESCE(t.evidence->>'url', s.url) AS fingerprint_url,
+				COALESCE(ns.stats->>'skipped', '') AS nuclei_skipped,
+				COALESCE(ns.error, '') AS nuclei_error,
+				CASE
+					WHEN ns.id IS NULL THEN 'nuclei_not_run'
+					WHEN COALESCE(ns.stats->>'skipped', '') <> '' THEN 'nuclei_skipped'
+					WHEN COALESCE(ns.error, '') <> '' THEN 'nuclei_error'
+					ELSE 'no_confirming_result'
+				END AS nuclei_validation_reason,
+				'fingerprint-passive:' || encode(digest(
+					t.program_id::text || ':' || t.http_service_id::text || ':' ||
+					lower(t.name) || ':' || t.version || ':' || t.source,
+					'sha256'
+				), 'hex') AS evidence_hash
+			FROM zero_technology_observations t
+			JOIN zero_http_services s ON s.id = t.http_service_id AND s.active = true
+			LEFT JOIN LATERAL (
+				SELECT sr.id, sr.status, sr.error, sr.stats
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = t.program_id
+				  AND sr.run_type = 'nuclei'
+				  AND sr.started_at >= t.last_seen_at - interval '5 minutes'
+				ORDER BY sr.started_at DESC
+				LIMIT 1
+			) ns ON true
+			WHERE t.http_service_id IS NOT NULL
+			  AND t.active = true
+			  AND t.source = 'webanalyze'
+			  AND t.name <> ''
+			  AND ($1 = '' OR t.program_id::text = $1)
+			  AND ($4::bigint <= 0 OR t.last_seen_at >= now() - ($4::bigint * interval '1 second'))
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM zero_nuclei_results n
+				WHERE n.program_id = t.program_id
+				  AND n.http_service_id = t.http_service_id
+				  AND n.last_seen_at >= t.last_seen_at - interval '5 minutes'
+			  )
+			ORDER BY t.confidence DESC, t.last_seen_at DESC
+			LIMIT $3
+		),
+		upserted AS (
+			INSERT INTO zero_candidate_findings(
+				program_id, http_service_id, technology_name, technology_version,
+				severity, confidence, status, evidence_hash, evidence
+			)
+			SELECT
+				program_id,
+				http_service_id,
+				technology_name,
+				technology_version,
+				'medium',
+				LEAST(GREATEST(fingerprint_confidence - 20, 45), 65),
+				'new',
+				evidence_hash,
+				jsonb_build_object(
+					'source', 'custom-fingerprint-passive',
+					'validation_status', 'potential_unconfirmed',
+					'nuclei_validation', nuclei_validation_reason,
+					'nuclei_validation_reason', nuclei_validation_reason,
+					'nuclei_skipped', nuclei_skipped,
+					'nuclei_error', nuclei_error,
+					'technology_name', technology_name,
+					'technology_version', technology_version,
+					'fingerprint_confidence', fingerprint_confidence,
+					'fingerprint_url', fingerprint_url,
+					'fingerprint_evidence', fingerprint_evidence
+				)
+			FROM candidates
+			ON CONFLICT(evidence_hash) DO UPDATE SET
+				last_seen_at = now(),
+				confidence = GREATEST(zero_candidate_findings.confidence, excluded.confidence),
+				evidence = zero_candidate_findings.evidence || excluded.evidence
+			RETURNING id, program_id, evidence_hash, severity, confidence, (xmax = 0) AS inserted
+		),
+		events AS (
+			INSERT INTO zero_change_events(program_id, scan_run_id, entity_type, entity_id, entity_key, change_type, new_value, evidence_hash)
+			SELECT
+				program_id,
+				NULLIF($2, '')::uuid,
+				'candidate_finding',
+				id,
+				evidence_hash,
+				'added',
+				jsonb_build_object(
+					'source', 'custom-fingerprint-passive',
+					'validation_status', 'potential_unconfirmed',
+					'severity', severity,
+					'confidence', confidence
+				),
+				encode(digest('candidate_finding:' || id::text || ':fingerprint-passive', 'sha256'), 'hex')
+			FROM upserted
+			WHERE inserted
+			ON CONFLICT(evidence_hash) DO NOTHING
+		)
+		SELECT count(*) FILTER (WHERE inserted) FROM upserted
+	`, programID, scanRunID, limit, maxAgeSeconds).Scan(&inserted)
+	if err != nil {
+		return 0, fmt.Errorf("upsert unconfirmed fingerprint findings: %w", err)
+	}
+	return inserted, nil
+}
+
 func (r *Repository) CreateReport(ctx context.Context, draft ReportDraft) (string, bool, error) {
 	meta, _ := json.Marshal(draft.Metadata)
 	var id string

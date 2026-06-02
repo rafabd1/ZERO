@@ -83,6 +83,7 @@ type ToolConfig struct {
 	WebanalyzeWorkers       int
 	WebanalyzeCrawl         int
 	WebanalyzeBatchSize     int
+	WebanalyzeBatchTimeout  time.Duration
 	NucleiBin               string
 	NucleiTemplateDir       string
 	NucleiUpdateTemplates   bool
@@ -178,7 +179,8 @@ func Load() (Config, error) {
 	v.SetDefault("tools.webanalyze_apps", "")
 	v.SetDefault("tools.webanalyze_workers", 4)
 	v.SetDefault("tools.webanalyze_crawl", 0)
-	v.SetDefault("tools.webanalyze_batch_size", 500)
+	v.SetDefault("tools.webanalyze_batch_size", 50)
+	v.SetDefault("tools.webanalyze_batch_timeout", "10m")
 	v.SetDefault("tools.nuclei_bin", "nuclei")
 	v.SetDefault("tools.nuclei_template_dir", "")
 	v.SetDefault("tools.nuclei_update_templates", true)
@@ -190,7 +192,7 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_proxy", "")
 	v.SetDefault("tools.nuclei_scan_strategy", "")
 	v.SetDefault("tools.nuclei_max_host_error", 0)
-	v.SetDefault("tools.nuclei_waf_detect", true)
+	v.SetDefault("tools.nuclei_waf_detect", false)
 	v.SetDefault("tools.nuclei_waf_sample_size", 8)
 	v.SetDefault("tools.nuclei_waf_probe_timeout", 5)
 	v.SetDefault("tools.nuclei_cve_limit", 100)
@@ -264,6 +266,7 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.webanalyze_workers", "ZERO_WEBANALYZE_WORKERS")
 	_ = v.BindEnv("tools.webanalyze_crawl", "ZERO_WEBANALYZE_CRAWL")
 	_ = v.BindEnv("tools.webanalyze_batch_size", "ZERO_WEBANALYZE_BATCH_SIZE")
+	_ = v.BindEnv("tools.webanalyze_batch_timeout", "ZERO_WEBANALYZE_BATCH_TIMEOUT")
 	_ = v.BindEnv("tools.nuclei_bin", "ZERO_NUCLEI_BIN")
 	_ = v.BindEnv("tools.nuclei_template_dir", "ZERO_NUCLEI_TEMPLATE_DIR")
 	_ = v.BindEnv("tools.nuclei_update_templates", "ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP")
@@ -364,6 +367,7 @@ func Load() (Config, error) {
 			WebanalyzeWorkers:       v.GetInt("tools.webanalyze_workers"),
 			WebanalyzeCrawl:         v.GetInt("tools.webanalyze_crawl"),
 			WebanalyzeBatchSize:     clampInt(v.GetInt("tools.webanalyze_batch_size"), 50, 5000),
+			WebanalyzeBatchTimeout:  v.GetDuration("tools.webanalyze_batch_timeout"),
 			NucleiBin:               v.GetString("tools.nuclei_bin"),
 			NucleiTemplateDir:       v.GetString("tools.nuclei_template_dir"),
 			NucleiUpdateTemplates:   v.GetBool("tools.nuclei_update_templates"),

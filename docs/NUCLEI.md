@@ -75,15 +75,15 @@ Optional campaign knobs:
 
 ## WAF Diagnostics
 
-Zero can run a small pre/post probe around Nuclei to classify active validation as potentially blocked. This does not change Nuclei rate, concurrency, templates, or target coverage.
+Zero can optionally run a small pre/post probe around Nuclei to classify active validation as potentially blocked. This is disabled by default because it is operational context, not vulnerability evidence. It does not change Nuclei rate, concurrency, templates, or target coverage.
 
 ```env
-ZERO_NUCLEI_WAF_DETECT=true
+ZERO_NUCLEI_WAF_DETECT=false
 ZERO_NUCLEI_WAF_SAMPLE_SIZE=8
 ZERO_NUCLEI_WAF_PROBE_TIMEOUT=5
 ```
 
-The diagnostic is stored in `scan_runs.stats.waf_diagnostic` when Nuclei returns no results or fails. High-confidence cases also emit an operational alert.
+Set `ZERO_NUCLEI_WAF_DETECT=true` for investigative campaigns where blocked validation is suspected. The diagnostic is stored in `scan_runs.stats.waf_diagnostic` when enabled and Nuclei returns no results or fails. High-confidence cases also emit an operational alert.
 
 Common reasons:
 

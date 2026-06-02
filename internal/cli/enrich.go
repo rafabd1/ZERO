@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/enrich"
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ func newEnrichCommand() *cobra.Command {
 	var workers int
 	var crawl int
 	var batchSize int
+	var batchTimeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "enrich",
@@ -50,6 +52,8 @@ func newEnrichCommand() *cobra.Command {
 			if crawlDepth < 0 {
 				crawlDepth = cfg.Tools.WebanalyzeCrawl
 			}
+			effectiveBatchSize := webanalyzeEffectiveBatchSize(batchSize, cfg.Tools.WebanalyzeBatchSize)
+			effectiveBatchTimeout := webanalyzeEffectiveBatchTimeout(batchTimeout, cfg.Tools.WebanalyzeBatchTimeout)
 			result, err := enrich.NewWebanalyzeRunner(repo, cfg.Tools.WebanalyzeBin).
 				WithScanRunID(scanID).
 				WithProgramID(programID).
@@ -59,8 +63,8 @@ func newEnrichCommand() *cobra.Command {
 				WithWorkers(workerCount).
 				WithCrawl(crawlDepth).
 				WithLimit(limit).
-				WithBatchSize(firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize)).
-				WithTimeout(cfg.Tools.ToolTimeout).
+				WithBatchSize(effectiveBatchSize).
+				WithTimeout(effectiveBatchTimeout).
 				Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, result.Targets, result.Inserted, map[string]any{
@@ -77,7 +81,8 @@ func newEnrichCommand() *cobra.Command {
 					"authoritative":  authoritative,
 					"workers":        workerCount,
 					"crawl":          crawlDepth,
-					"batch_size":     firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize),
+					"batch_size":     effectiveBatchSize,
+					"batch_timeout":  effectiveBatchTimeout.String(),
 				})
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Targets, result.Inserted, map[string]any{
@@ -94,7 +99,8 @@ func newEnrichCommand() *cobra.Command {
 				"authoritative":  authoritative,
 				"workers":        workerCount,
 				"crawl":          crawlDepth,
-				"batch_size":     firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize),
+				"batch_size":     effectiveBatchSize,
+				"batch_timeout":  effectiveBatchTimeout.String(),
 			}); err != nil {
 				return err
 			}
@@ -108,7 +114,25 @@ func newEnrichCommand() *cobra.Command {
 	webanalyze.Flags().StringArrayVar(&probePaths, "probe-path", nil, "additional relative path to fingerprint on every service, for example /admin/; repeatable")
 	webanalyze.Flags().IntVar(&workers, "workers", 0, "Webanalyze workers for this run only")
 	webanalyze.Flags().IntVar(&crawl, "crawl", -1, "Webanalyze crawl depth for this run only")
-	webanalyze.Flags().IntVar(&batchSize, "batch-size", 0, "override number of services per Webanalyze process")
+	webanalyze.Flags().IntVar(&batchSize, "batch-size", 0, "override number of expanded URLs per Webanalyze process")
+	webanalyze.Flags().DurationVar(&batchTimeout, "batch-timeout", 0, "override max wall-clock time per Webanalyze batch, for example 10m")
 	cmd.AddCommand(webanalyze)
 	return cmd
+}
+
+func webanalyzeEffectiveBatchSize(requested, configured int) int {
+	if requested > 0 {
+		return requested
+	}
+	return firstPositive(configured, 50)
+}
+
+func webanalyzeEffectiveBatchTimeout(requested, configured time.Duration) time.Duration {
+	if requested > 0 {
+		return requested
+	}
+	if configured > 0 {
+		return configured
+	}
+	return 10 * time.Minute
 }

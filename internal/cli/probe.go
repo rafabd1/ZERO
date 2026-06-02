@@ -88,8 +88,7 @@ func newProbeCommand() *cobra.Command {
 				WithBatchSize(firstPositive(httpxBatchSize, cfg.Tools.HTTPXBatchSize)).
 				WithBatchTimeout(firstDuration(httpxBatchTimeout, cfg.Tools.HTTPXBatchTimeout)).
 				WithPatternBudget(firstPositive(httpxPatternMinGroup, cfg.Tools.HTTPXPatternMinGroup), firstPositive(httpxPatternCap, cfg.Tools.HTTPXPatternCap)).
-				WithTLSProbe(httpxTLSProbe || cfg.Tools.HTTPXTLSProbe).
-				WithTimeout(cfg.Tools.ToolTimeout)
+				WithTLSProbe(httpxTLSProbe || cfg.Tools.HTTPXTLSProbe)
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, result.Hosts, result.Services, map[string]any{

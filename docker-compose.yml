@@ -8,6 +8,7 @@ services:
       - 8.8.8.8
     volumes:
       - nuclei-templates:/home/zero/nuclei-templates
+      - ./custom-assets:/home/zero/custom-assets:ro
     command: ["worker"]
     restart: unless-stopped
 
@@ -23,6 +24,7 @@ services:
     command: ["api"]
     volumes:
       - nuclei-templates:/home/zero/nuclei-templates
+      - ./custom-assets:/home/zero/custom-assets:ro
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped

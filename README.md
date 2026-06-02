@@ -85,6 +85,8 @@ docker compose run --rm zero run schedule \
   --webanalyze-probe-path /admin/ \
   --webanalyze-probe-path /api/version \
   --webanalyze-workers 4 \
+  --webanalyze-batch-size 50 \
+  --webanalyze-batch-timeout 10m \
   --nuclei-tech-filter "product-name" \
   --nuclei-template /work/custom/nuclei/CVE-YYYY-NNNN.yaml \
   --nuclei-force \
@@ -100,6 +102,8 @@ Campaigns are durable. They create one parent row and one child request per sele
 Use `--reuse-active-services` for campaigns that should skip fresh `dnsx/httpx` probing and load active HTTP services already stored in Postgres. This is useful when several focused scans run close together and the alive inventory was just refreshed. In that mode, `httpx` flags are intentionally ignored.
 
 Normal fingerprints are authoritative for the technologies they own: fresh `httpx` and full Webanalyze runs reactivate newly observed technologies and mark missing old observations inactive. A custom `--webanalyze-apps` run is treated as partial intelligence, so it can add focused matches without clearing the full technology inventory. Add `--webanalyze-probe-path` when a product fingerprint lives on known paths such as `/admin/`, `/console/`, or `/api/jolokia/version`; these path probes are also treated as partial intelligence. When a campaign runs fingerprinting before Nuclei, Zero keeps `--nuclei-tech-filter` tied to fresh observations automatically. Use `--nuclei-tech-max-age` only when skipping fingerprinting and relying on existing database observations.
+
+Custom fingerprint matches can produce potential/unconfirmed reports when Nuclei does not confirm the target. Add `--disable-passive-fingerprint-reports` when the campaign should only report Nuclei-confirmed findings.
 
 For a single program, use `--program-id <uuid>` instead of `--all-programs`.
 
@@ -127,6 +131,7 @@ docker compose logs -f zero
 
 - [Architecture](docs/ARCHITECTURE.md): how the pipeline and state model fit together.
 - [Operations](docs/OPERATIONS.md): configuration, schedules, custom campaigns, and runtime tuning.
+- [Custom Campaigns](docs/CUSTOM_CAMPAIGNS.md): efficient targeted scan recipes and custom template guidance.
 - [API](docs/API.md): read endpoints and custom scan request examples.
 - [Database](docs/DATABASE.md): state tables and deduplication rules.
 - [Nuclei](docs/NUCLEI.md): validation policy and how template selection works.

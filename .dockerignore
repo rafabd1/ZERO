@@ -11,3 +11,4 @@ configs/subfinder/provider-config.yaml
 .env
 .env.*
 README.local.md
+custom-assets

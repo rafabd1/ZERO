@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/report"
 	"github.com/spf13/cobra"
@@ -12,6 +13,8 @@ import (
 func newReportCommand() *cobra.Command {
 	var limit int
 	var programID string
+	var includePassiveFingerprints bool
+	var passiveFingerprintMaxAge time.Duration
 	var exportLimit int
 	var exportProgramID string
 	var exportStatus string
@@ -36,21 +39,30 @@ func newReportCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := report.NewGenerator(repo).WithScanRunID(scanID).WithProgramID(programID).WithLimit(limit).WithCVEMinYear(cfg.Intel.CVEMinYear).Run(ctx)
+			result, err := report.NewGenerator(repo).
+				WithScanRunID(scanID).
+				WithProgramID(programID).
+				WithLimit(limit).
+				WithCVEMinYear(cfg.Intel.CVEMinYear).
+				WithPassiveFingerprintFindings(includePassiveFingerprints, passiveFingerprintMaxAge).
+				Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Findings, result.Inserted, map[string]any{
-				"findings":         result.Findings,
-				"passive_findings": result.PassiveFindings,
-				"reports":          result.Reports,
-				"inserted":         result.Inserted,
-				"program_id":       programID,
-				"cve_min_year":     cfg.Intel.CVEMinYear,
+				"findings":                             result.Findings,
+				"passive_findings":                     result.PassiveFindings,
+				"passive_fingerprint_findings":         result.PassiveFingerprintFindings,
+				"reports":                              result.Reports,
+				"inserted":                             result.Inserted,
+				"program_id":                           programID,
+				"cve_min_year":                         cfg.Intel.CVEMinYear,
+				"include_passive_fingerprint_findings": includePassiveFingerprints,
+				"passive_fingerprint_max_age":          passiveFingerprintMaxAge.String(),
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "processed %d new findings (%d passive potential), generated %d reports and inserted %d new reports\n", result.Findings, result.PassiveFindings, result.Reports, result.Inserted)
+			fmt.Fprintf(cmd.OutOrStdout(), "processed %d new findings (%d passive CVE potential, %d passive fingerprint potential), generated %d reports and inserted %d new reports\n", result.Findings, result.PassiveFindings, result.PassiveFingerprintFindings, result.Reports, result.Inserted)
 			return nil
 		},
 	}
@@ -96,6 +108,8 @@ func newReportCommand() *cobra.Command {
 	}
 	generate.Flags().IntVar(&limit, "limit", 500, "maximum new findings to report")
 	generate.Flags().StringVar(&programID, "program-id", "", "limit reporting to one program id")
+	generate.Flags().BoolVar(&includePassiveFingerprints, "include-passive-fingerprint-findings", false, "include fresh custom fingerprint matches as potential findings when Nuclei did not confirm")
+	generate.Flags().DurationVar(&passiveFingerprintMaxAge, "passive-fingerprint-max-age", 0, "with --include-passive-fingerprint-findings, only include fingerprints observed within this duration")
 	exportTriage.Flags().IntVar(&exportLimit, "limit", 100, "maximum findings to export")
 	exportTriage.Flags().StringVar(&exportProgramID, "program-id", "", "limit export to one program id")
 	exportTriage.Flags().StringVar(&exportStatus, "status", "new", "finding status to export; empty exports all statuses")

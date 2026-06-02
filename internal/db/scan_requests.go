@@ -209,6 +209,7 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 					WHEN c.status = 'canceled' THEN 'canceled'
 					WHEN counts.running > 0 THEN 'running'
 					WHEN counts.queued > 0 THEN 'queued'
+					WHEN counts.failed > 0 AND counts.succeeded > 0 THEN 'partial'
 					WHEN counts.failed > 0 THEN 'failed'
 					WHEN counts.canceled > 0 THEN 'canceled'
 					ELSE 'succeeded'
@@ -220,7 +221,8 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 				END,
 				updated_at = now(),
 				error = CASE
-					WHEN counts.failed > 0 THEN 'one or more campaign scan requests failed'
+					WHEN counts.failed > 0 AND counts.succeeded > 0 THEN counts.failed::text || ' campaign scan request(s) failed; completed partially'
+					WHEN counts.failed > 0 THEN 'all campaign scan requests failed'
 					ELSE ''
 				END
 			FROM counts
@@ -548,6 +550,7 @@ func (r *Repository) RefreshScanCampaign(ctx context.Context, campaignID string)
 				WHEN c.status = 'canceled' THEN 'canceled'
 				WHEN counts.running > 0 THEN 'running'
 				WHEN counts.queued > 0 THEN 'queued'
+				WHEN counts.failed > 0 AND counts.succeeded > 0 THEN 'partial'
 				WHEN counts.failed > 0 THEN 'failed'
 				WHEN counts.canceled > 0 THEN 'canceled'
 				ELSE 'succeeded'
@@ -558,7 +561,8 @@ func (r *Repository) RefreshScanCampaign(ctx context.Context, campaignID string)
 			END,
 			updated_at = now(),
 			error = CASE
-				WHEN counts.failed > 0 THEN 'one or more campaign scan requests failed'
+				WHEN counts.failed > 0 AND counts.succeeded > 0 THEN counts.failed::text || ' campaign scan request(s) failed; completed partially'
+				WHEN counts.failed > 0 THEN 'all campaign scan requests failed'
 				ELSE ''
 			END
 		FROM counts
