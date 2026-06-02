@@ -90,6 +90,10 @@ type ToolConfig struct {
 	NucleiTags              string
 	NucleiSeverities        string
 	NucleiTemplateIDs       string
+	NucleiHeaders           string
+	NucleiProxy             string
+	NucleiScanStrategy      string
+	NucleiMaxHostError      int
 	NucleiCVELimit          int
 	NucleiRate              int
 	NucleiC                 int
@@ -176,6 +180,10 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_tags", "cve")
 	v.SetDefault("tools.nuclei_severities", "medium,high,critical")
 	v.SetDefault("tools.nuclei_template_ids", "")
+	v.SetDefault("tools.nuclei_headers", defaultNucleiHeaders())
+	v.SetDefault("tools.nuclei_proxy", "")
+	v.SetDefault("tools.nuclei_scan_strategy", "")
+	v.SetDefault("tools.nuclei_max_host_error", 0)
 	v.SetDefault("tools.nuclei_cve_limit", 100)
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
@@ -251,6 +259,10 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.nuclei_tags", "ZERO_NUCLEI_TAGS")
 	_ = v.BindEnv("tools.nuclei_severities", "ZERO_NUCLEI_SEVERITIES")
 	_ = v.BindEnv("tools.nuclei_template_ids", "ZERO_NUCLEI_TEMPLATE_IDS")
+	_ = v.BindEnv("tools.nuclei_headers", "ZERO_NUCLEI_HEADERS")
+	_ = v.BindEnv("tools.nuclei_proxy", "ZERO_NUCLEI_PROXY")
+	_ = v.BindEnv("tools.nuclei_scan_strategy", "ZERO_NUCLEI_SCAN_STRATEGY")
+	_ = v.BindEnv("tools.nuclei_max_host_error", "ZERO_NUCLEI_MAX_HOST_ERROR")
 	_ = v.BindEnv("tools.nuclei_cve_limit", "ZERO_NUCLEI_CVE_LIMIT")
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
@@ -341,6 +353,10 @@ func Load() (Config, error) {
 			NucleiTags:              v.GetString("tools.nuclei_tags"),
 			NucleiSeverities:        v.GetString("tools.nuclei_severities"),
 			NucleiTemplateIDs:       v.GetString("tools.nuclei_template_ids"),
+			NucleiHeaders:           v.GetString("tools.nuclei_headers"),
+			NucleiProxy:             v.GetString("tools.nuclei_proxy"),
+			NucleiScanStrategy:      v.GetString("tools.nuclei_scan_strategy"),
+			NucleiMaxHostError:      clampInt(v.GetInt("tools.nuclei_max_host_error"), 0, 100000),
 			NucleiCVELimit:          v.GetInt("tools.nuclei_cve_limit"),
 			NucleiRate:              v.GetInt("tools.nuclei_rate"),
 			NucleiC:                 v.GetInt("tools.nuclei_c"),
@@ -405,6 +421,14 @@ func loadDotEnv() {
 		}
 		_ = os.Setenv(key, value)
 	}
+}
+
+func defaultNucleiHeaders() string {
+	return strings.Join([]string{
+		"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Accept-Language: en-US,en;q=0.9",
+	}, "|")
 }
 
 func DefaultCommandTimeout() time.Duration {

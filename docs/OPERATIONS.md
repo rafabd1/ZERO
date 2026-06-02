@@ -71,6 +71,7 @@ docker compose run --rm zero run schedule \
   --name "targeted-template-check" \
   --skip-sync \
   --nuclei-template ./templates/custom.yaml \
+  --nuclei-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36" \
   --nuclei-rate-limit 40 \
   --nuclei-concurrency 10
 ```
@@ -110,8 +111,12 @@ For Nuclei:
 
 - use specific template IDs or paths when possible;
 - keep `ZERO_NUCLEI_SEVERITIES=medium,high,critical` for broad runs;
+- set `ZERO_NUCLEI_HEADERS` or `--nuclei-header` to use normal browser-like request headers without reducing scan coverage;
+- optionally set `ZERO_NUCLEI_PROXY`, `ZERO_NUCLEI_SCAN_STRATEGY`, or `ZERO_NUCLEI_MAX_HOST_ERROR` for controlled campaigns;
 - tune `ZERO_NUCLEI_RATE`, `ZERO_NUCLEI_CONCURRENCY`, and `ZERO_NUCLEI_BULK_SIZE` for the environment;
 - avoid using Nuclei as a broad generic scanner unless that is the explicit campaign goal.
+
+`ZERO_NUCLEI_HEADERS` uses `|` as the separator, so values such as the `Accept` header can safely contain commas.
 
 ## Scope Safety
 

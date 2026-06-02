@@ -54,6 +54,11 @@ Content-Type: application/json
     "ProgramID": "00000000-0000-0000-0000-000000000000",
     "SkipSync": true,
     "NucleiTemplate": "/work/templates/custom.yaml",
+    "NucleiHeaders": [
+      "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+      "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language: en-US,en;q=0.9"
+    ],
     "NucleiRateLimit": 40,
     "NucleiConcurrency": 10,
     "NucleiLimit": 50
@@ -84,6 +89,9 @@ Content-Type: application/json
     "NucleiTemplate": "/work/templates/custom",
     "NucleiForce": true,
     "NucleiSeverity": "medium,high,critical",
+    "NucleiHeaders": [
+      "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+    ],
     "NucleiRateLimit": 40,
     "NucleiConcurrency": 10
   }

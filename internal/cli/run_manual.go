@@ -41,6 +41,10 @@ type manualRunOptions struct {
 	NucleiTemplate    string
 	NucleiTags        string
 	NucleiSeverity    string
+	NucleiHeaders     []string
+	NucleiProxy       string
+	NucleiStrategy    string
+	NucleiMaxHostErr  int
 	NucleiRateLimit   int
 	NucleiConcurrency int
 	NucleiBulkSize    int
@@ -155,6 +159,10 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().StringVar(&opts.NucleiTemplate, "nuclei-template", "", "custom Nuclei template file/directory path(s) for this run only")
 	cmd.Flags().StringVar(&opts.NucleiTags, "nuclei-tags", "", "custom Nuclei tags for this run only")
 	cmd.Flags().StringVar(&opts.NucleiSeverity, "nuclei-severity", "", "custom Nuclei severities for this run only")
+	cmd.Flags().StringArrayVar(&opts.NucleiHeaders, "nuclei-header", nil, "custom Nuclei request header for this run only, header:value; repeatable")
+	cmd.Flags().StringVar(&opts.NucleiProxy, "nuclei-proxy", "", "custom Nuclei proxy for this run only")
+	cmd.Flags().StringVar(&opts.NucleiStrategy, "nuclei-scan-strategy", "", "custom Nuclei scan strategy for this run only")
+	cmd.Flags().IntVar(&opts.NucleiMaxHostErr, "nuclei-max-host-error", 0, "custom Nuclei max errors per host for this run only")
 	cmd.Flags().IntVar(&opts.NucleiRateLimit, "nuclei-rate-limit", 0, "custom Nuclei rate limit for this run only")
 	cmd.Flags().IntVar(&opts.NucleiConcurrency, "nuclei-concurrency", 0, "custom Nuclei concurrency for this run only")
 	cmd.Flags().IntVar(&opts.NucleiBulkSize, "nuclei-bulk-size", 0, "custom Nuclei bulk size for this run only")
@@ -242,6 +250,16 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		if opts.NucleiSeverity != "" {
 			step = append(step, "--severity", opts.NucleiSeverity)
 		}
+		for _, header := range opts.NucleiHeaders {
+			step = append(step, "--header", header)
+		}
+		if opts.NucleiProxy != "" {
+			step = append(step, "--proxy", opts.NucleiProxy)
+		}
+		if opts.NucleiStrategy != "" {
+			step = append(step, "--scan-strategy", opts.NucleiStrategy)
+		}
+		step = appendIntFlag(step, "--max-host-error", opts.NucleiMaxHostErr)
 		step = appendIntFlag(step, "--rate-limit", opts.NucleiRateLimit)
 		step = appendIntFlag(step, "--concurrency", opts.NucleiConcurrency)
 		step = appendIntFlag(step, "--bulk-size", opts.NucleiBulkSize)

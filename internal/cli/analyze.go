@@ -16,6 +16,10 @@ func newAnalyzeCommand() *cobra.Command {
 	var nucleiTemplatePath string
 	var nucleiTags string
 	var nucleiSeverities string
+	var nucleiHeaders []string
+	var nucleiProxy string
+	var nucleiScanStrategy string
+	var nucleiMaxHostError int
 	var nucleiRate int
 	var nucleiConcurrency int
 	var nucleiBulkSize int
@@ -103,6 +107,13 @@ func newAnalyzeCommand() *cobra.Command {
 			rate := firstPositive(nucleiRate, cfg.Tools.NucleiRate)
 			concurrency := firstPositive(nucleiConcurrency, cfg.Tools.NucleiC)
 			bulkSize := firstPositive(nucleiBulkSize, cfg.Tools.NucleiBulkSize)
+			headers := validate.SplitHeaderConfig(cfg.Tools.NucleiHeaders)
+			if len(nucleiHeaders) > 0 {
+				headers = nucleiHeaders
+			}
+			proxy := firstNonEmpty(nucleiProxy, cfg.Tools.NucleiProxy)
+			scanStrategy := firstNonEmpty(nucleiScanStrategy, cfg.Tools.NucleiScanStrategy)
+			maxHostError := firstPositive(nucleiMaxHostError, cfg.Tools.NucleiMaxHostError)
 			retries := nucleiRetries
 			if retries < 0 {
 				retries = 1
@@ -139,6 +150,7 @@ func newAnalyzeCommand() *cobra.Command {
 			}
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
 				WithPolicy(tags, severities, templateIDs, rate, concurrency, bulkSize).
+				WithRequestProfile(headers, proxy, scanStrategy, maxHostError).
 				WithTemplates(nucleiTemplatePath).
 				WithTemplateDir(cfg.Tools.NucleiTemplateDir).
 				WithRuntime(retries, timeout).
@@ -163,6 +175,10 @@ func newAnalyzeCommand() *cobra.Command {
 				"cve_min_year":      cfg.Intel.CVEMinYear,
 				"tags":              tags,
 				"severities":        severities,
+				"headers":           headers,
+				"proxy_configured":  proxy != "",
+				"scan_strategy":     scanStrategy,
+				"max_host_error":    maxHostError,
 				"rate":              rate,
 				"concurrency":       concurrency,
 				"bulk_size":         bulkSize,
@@ -187,6 +203,10 @@ func newAnalyzeCommand() *cobra.Command {
 	nuclei.Flags().StringVar(&nucleiTemplatePath, "template-path", "", "run Nuclei template file/directory path(s)")
 	nuclei.Flags().StringVar(&nucleiTags, "tags", "", "override Nuclei tags for this run")
 	nuclei.Flags().StringVar(&nucleiSeverities, "severity", "", "override Nuclei severities for this run")
+	nuclei.Flags().StringArrayVar(&nucleiHeaders, "header", nil, "override Nuclei request header for this run, header:value; repeatable")
+	nuclei.Flags().StringVar(&nucleiProxy, "proxy", "", "override Nuclei proxy for this run")
+	nuclei.Flags().StringVar(&nucleiScanStrategy, "scan-strategy", "", "override Nuclei scan strategy for this run")
+	nuclei.Flags().IntVar(&nucleiMaxHostError, "max-host-error", 0, "override Nuclei max errors per host for this run")
 	nuclei.Flags().IntVar(&nucleiRate, "rate-limit", 0, "override Nuclei rate limit for this run")
 	nuclei.Flags().IntVar(&nucleiConcurrency, "concurrency", 0, "override Nuclei concurrency for this run")
 	nuclei.Flags().IntVar(&nucleiBulkSize, "bulk-size", 0, "override Nuclei bulk size for this run")

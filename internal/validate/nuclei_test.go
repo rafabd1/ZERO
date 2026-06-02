@@ -74,3 +74,34 @@ func TestParseNucleiLineGenericTemplateUsesEmptyCVEs(t *testing.T) {
 		t.Fatalf("Tags = %#v", result.Tags)
 	}
 }
+
+func TestSplitHeaderConfigPreservesCommaValues(t *testing.T) {
+	headers := SplitHeaderConfig("User-Agent: zero|Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8|Accept-Language: en-US,en;q=0.9")
+	if len(headers) != 3 {
+		t.Fatalf("headers = %#v", headers)
+	}
+	if headers[1] != "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" {
+		t.Fatalf("Accept header = %q", headers[1])
+	}
+}
+
+func TestBuildArgsIncludesRequestProfile(t *testing.T) {
+	runner := NewNucleiRunner(nil, "nuclei").WithRequestProfile(
+		[]string{"User-Agent: zero", "Accept: text/html"},
+		"http://127.0.0.1:8080",
+		"host-spray",
+		42,
+	)
+	args := strings.Join(runner.buildArgs(), "\n")
+	for _, want := range []string{
+		"-H\nUser-Agent: zero",
+		"-H\nAccept: text/html",
+		"-p\nhttp://127.0.0.1:8080",
+		"-ss\nhost-spray",
+		"-mhe\n42",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("args missing %q in:\n%s", want, args)
+		}
+	}
+}

@@ -25,6 +25,10 @@ type NucleiRunner struct {
 	templateIDs string
 	templates   string
 	templateDir string
+	headers     []string
+	proxy       string
+	strategy    string
+	maxHostErr  int
 	rate        int
 	concurrency int
 	bulkSize    int
@@ -79,6 +83,16 @@ func (r *NucleiRunner) WithPolicy(tags, severities, templateIDs string, rate, co
 	}
 	if bulkSize > 0 {
 		r.bulkSize = bulkSize
+	}
+	return r
+}
+
+func (r *NucleiRunner) WithRequestProfile(headers []string, proxy, strategy string, maxHostErr int) *NucleiRunner {
+	r.headers = normalizeHeaders(headers)
+	r.proxy = strings.TrimSpace(proxy)
+	r.strategy = strings.TrimSpace(strategy)
+	if maxHostErr > 0 {
+		r.maxHostErr = maxHostErr
 	}
 	return r
 }
@@ -150,21 +164,7 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	}
 
 	index := newTargetIndex(targets)
-	args := []string{
-		"-silent",
-		"-j",
-		"-duc",
-		"-ni",
-		"-pt", "http",
-		"-severity", r.severities,
-		"-rate-limit", strconv.Itoa(r.rate),
-		"-c", strconv.Itoa(r.concurrency),
-		"-bs", strconv.Itoa(r.bulkSize),
-		"-retries", strconv.Itoa(r.retries),
-		"-timeout", strconv.Itoa(r.timeout),
-		"-or",
-		"-ot",
-	}
+	args := r.buildArgs()
 	if r.templates != "" {
 		args = append(args, "-t", r.templates)
 	} else if r.templateDir != "" {
@@ -210,6 +210,37 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		return result, nil
 	}
 	return result, err
+}
+
+func (r *NucleiRunner) buildArgs() []string {
+	args := []string{
+		"-silent",
+		"-j",
+		"-duc",
+		"-ni",
+		"-pt", "http",
+		"-severity", r.severities,
+		"-rate-limit", strconv.Itoa(r.rate),
+		"-c", strconv.Itoa(r.concurrency),
+		"-bs", strconv.Itoa(r.bulkSize),
+		"-retries", strconv.Itoa(r.retries),
+		"-timeout", strconv.Itoa(r.timeout),
+		"-or",
+		"-ot",
+	}
+	for _, header := range r.headers {
+		args = append(args, "-H", header)
+	}
+	if r.proxy != "" {
+		args = append(args, "-p", r.proxy)
+	}
+	if r.strategy != "" {
+		args = append(args, "-ss", r.strategy)
+	}
+	if r.maxHostErr > 0 {
+		args = append(args, "-mhe", strconv.Itoa(r.maxHostErr))
+	}
+	return args
 }
 
 func isNoTemplatesError(err error) bool {
@@ -313,6 +344,51 @@ func stringSliceFromAny(value any) []string {
 func splitCSV(s string) []string {
 	parts := strings.Split(s, ",")
 	return cleanStrings(parts)
+}
+
+func SplitHeaderConfig(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	var parts []string
+	for _, line := range strings.Split(value, "\n") {
+		for _, part := range strings.Split(line, "|") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+	}
+	return normalizeHeaders(parts)
+}
+
+func normalizeHeaders(headers []string) []string {
+	seen := map[string]int{}
+	out := []string{}
+	for _, header := range headers {
+		header = strings.TrimSpace(header)
+		if header == "" || !strings.Contains(header, ":") {
+			continue
+		}
+		name, value, _ := strings.Cut(header, ":")
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+		canonical := strings.ToLower(name)
+		normalized := name + ": " + value
+		if idx, ok := seen[canonical]; ok {
+			out[idx] = normalized
+			continue
+		}
+		seen[canonical] = len(out)
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func cleanStrings(values []string) []string {

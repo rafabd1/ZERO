@@ -9,7 +9,7 @@ For broad runs, start with:
 - alive URLs only;
 - CVE-tagged or explicit templates;
 - `medium,high,critical` severities;
-- moderate rate and concurrency;
+- configured request headers that look like normal browser traffic;
 - JSONL output stored in `zero_nuclei_results`.
 
 Nuclei is strongest when a relevant template exists and produces vulnerability-specific evidence. If no template exists, Zero can still keep passive CVE context, but it should be reported as potential/unconfirmed.
@@ -27,6 +27,7 @@ Nuclei is strongest when a relevant template exists and produces vulnerability-s
 docker compose run --rm zero analyze nuclei \
   --limit 25 \
   --template-id CVE-YYYY-NNNN \
+  --header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36" \
   --rate-limit 40 \
   --concurrency 10 \
   --timeout 10
@@ -43,6 +44,22 @@ docker compose run --rm zero analyze nuclei \
 ```
 
 Campaigns can pass the same Nuclei options through `zero run schedule`.
+
+## Request Profile
+
+Set `ZERO_NUCLEI_HEADERS` to pass browser-like headers to every Nuclei HTTP request. Headers are separated with `|`:
+
+```env
+ZERO_NUCLEI_HEADERS="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36|Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8|Accept-Language: en-US,en;q=0.9"
+```
+
+Custom scans can override the global profile with repeated `--nuclei-header` flags or `NucleiHeaders` in scan-request JSON.
+
+Optional campaign knobs:
+
+- `ZERO_NUCLEI_PROXY` / `--nuclei-proxy`
+- `ZERO_NUCLEI_SCAN_STRATEGY` / `--nuclei-scan-strategy`
+- `ZERO_NUCLEI_MAX_HOST_ERROR` / `--nuclei-max-host-error`
 
 ## Stored Evidence
 
