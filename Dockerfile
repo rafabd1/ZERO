@@ -17,7 +17,7 @@ FROM alpine:3.21
 ARG TARGETARCH
 ARG SUBFINDER_VERSION=2.14.0
 ARG HTTPX_VERSION=1.9.0
-ARG DNSX_VERSION=1.2.2
+ARG DNSX_VERSION=1.2.3
 ARG NUCLEI_VERSION=3.8.0
 
 RUN apk add --no-cache ca-certificates bind-tools git curl unzip su-exec tini && \
@@ -44,6 +44,7 @@ RUN set -eux; \
 COPY --from=build /out/zero /usr/local/bin/zero
 COPY --from=build /out/webanalyze/webanalyze /usr/local/bin/webanalyze
 COPY --from=build /out/webanalyze/technologies.json /usr/local/share/webanalyze/technologies.json
+COPY configs/webanalyze /usr/local/share/webanalyze/custom
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

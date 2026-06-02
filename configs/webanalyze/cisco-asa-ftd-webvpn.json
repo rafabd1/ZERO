@@ -1,0 +1,37 @@
+{
+  "categories": {
+    "36": {
+      "name": "Security",
+      "priority": 1
+    }
+  },
+  "technologies": {
+    "Cisco ASA/FTD WebVPN": {
+      "cats": [36],
+      "cookies": {
+        "webvpn": "",
+        "webvpnlogin": "",
+        "webvpnLang": "",
+        "webvpncontext": "",
+        "tg": ""
+      },
+      "headers": {
+        "Set-Cookie": "(?:^|;|\\s)(?:webvpn|webvpnlogin|webvpnLang|webvpncontext|tg)="
+      },
+      "html": [
+        "\\+CSCOE\\+",
+        "\\+CSCOU\\+",
+        "Cisco SSL VPN Service",
+        "Cisco Secure Firewall",
+        "Adaptive Security Appliance",
+        "webvpn"
+      ],
+      "scripts": [
+        "\\+CSCOE\\+",
+        "\\+CSCOU\\+"
+      ],
+      "url": "\\+CSCOE\\+",
+      "website": "https://www.cisco.com/"
+    }
+  }
+}
