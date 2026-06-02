@@ -80,14 +80,10 @@ docker compose run --rm zero run schedule \
   --campaign-parallelism 8 \
   --name "focused-technology-cve-sweep" \
   --skip-sync \
-  --httpx-timeout 4 \
-  --httpx-threads 20 \
-  --httpx-batch-size 50 \
-  --httpx-batch-timeout 5m \
+  --reuse-active-services \
   --webanalyze-apps /work/custom/webanalyze/technology.json \
   --webanalyze-workers 4 \
   --nuclei-tech-filter "product-name" \
-  --nuclei-tech-max-age 2h \
   --nuclei-template /work/custom/nuclei/CVE-YYYY-NNNN.yaml \
   --nuclei-force \
   --nuclei-rate-limit 40 \
@@ -99,7 +95,9 @@ docker compose run --rm zero run schedule \
 
 Campaigns are durable. They create one parent row and one child request per selected program. If the container restarts, running child requests are requeued and completed children stay completed. The worker pool keeps campaign slots filled until the campaign drains.
 
-Normal fingerprints are authoritative for the technologies they own: fresh `httpx` and full Webanalyze runs reactivate newly observed technologies and mark missing old observations inactive. A custom `--webanalyze-apps` run is treated as partial intelligence, so it can add focused matches without clearing the full technology inventory. Use `--nuclei-tech-filter` plus `--nuclei-tech-max-age` when a campaign should validate only assets fingerprinted with the target technology during the current run.
+Use `--reuse-active-services` for campaigns that should skip fresh `dnsx/httpx` probing and load active HTTP services already stored in Postgres. This is useful when several focused scans run close together and the alive inventory was just refreshed. In that mode, `httpx` flags are intentionally ignored.
+
+Normal fingerprints are authoritative for the technologies they own: fresh `httpx` and full Webanalyze runs reactivate newly observed technologies and mark missing old observations inactive. A custom `--webanalyze-apps` run is treated as partial intelligence, so it can add focused matches without clearing the full technology inventory. When a campaign runs fingerprinting before Nuclei, Zero keeps `--nuclei-tech-filter` tied to fresh observations automatically. Use `--nuclei-tech-max-age` only when skipping fingerprinting and relying on existing database observations.
 
 For a single program, use `--program-id <uuid>` instead of `--all-programs`.
 
@@ -118,7 +116,7 @@ Zero is designed for authorized bug bounty work.
 ```bash
 docker compose run --rm zero sync all
 docker compose run --rm zero run due --dry-run --limit 5
-docker compose run --rm zero run schedule --all-programs --campaign-parallelism 4 --campaign-limit 25 --skip-sync --skip-cves --nuclei-template ./templates/custom.yaml
+docker compose run --rm zero run schedule --all-programs --campaign-parallelism 4 --campaign-limit 25 --skip-sync --reuse-active-services --skip-cves --nuclei-template ./templates/custom.yaml
 docker compose run --rm zero report export-triage --status new --limit 100 --output triage.jsonl
 docker compose logs -f zero
 ```

@@ -49,7 +49,7 @@ Every asset and result is linked back to a program. This matters because the sam
 
 ## Execution Model
 
-Continuous runs scan due programs based on `scan_interval_hours`. Custom campaigns create durable scan requests and are consumed by a worker pool. The pool keeps slots full while respecting campaign-level and global parallelism limits.
+Continuous runs scan due programs based on `scan_interval_hours`. Custom campaigns create durable scan requests and are consumed by a worker pool. Default/due scans use `ZERO_TARGET_PARALLELISM`; custom campaigns use their own campaign-level parallelism so focused work can run independently of the default schedule.
 
 The default per-program flow is:
 

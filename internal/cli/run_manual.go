@@ -10,52 +10,53 @@ import (
 )
 
 type manualRunOptions struct {
-	ProgramID         string
-	SkipSync          bool
-	SkipEnum          bool
-	SkipDNS           bool
-	SkipProbe         bool
-	SkipEnrich        bool
-	SkipCVEs          bool
-	SkipNuclei        bool
-	SkipReport        bool
-	SkipNotify        bool
-	SubfinderLimit    int
-	DNSXLimit         int
-	HTTPXLimit        int
-	HTTPXTimeout      int
-	HTTPXThreads      int
-	HTTPXBatchSize    int
-	HTTPXBatchTimeout string
-	HTTPXPatternMin   int
-	HTTPXPatternCap   int
-	HTTPXTLSProbe     bool
-	WebanalyzeLimit   int
-	CVELimit          int
-	WebanalyzeApps    string
-	WebanalyzeWorkers int
-	WebanalyzeCrawl   int
-	WebanalyzeBatch   int
-	NucleiLimit       int
-	NucleiTemplateID  string
-	NucleiTemplate    string
-	NucleiTechFilter  string
-	NucleiTechMaxAge  string
-	NucleiTags        string
-	NucleiSeverity    string
-	NucleiHeaders     []string
-	NucleiProxy       string
-	NucleiStrategy    string
-	NucleiMaxHostErr  int
-	NucleiRateLimit   int
-	NucleiConcurrency int
-	NucleiBulkSize    int
-	NucleiRetries     int
-	NucleiTimeout     int
-	NucleiFromCVEs    bool
-	NucleiAllCVEs     bool
-	NucleiForce       bool
-	NucleiCVELimit    int
+	ProgramID           string
+	SkipSync            bool
+	SkipEnum            bool
+	SkipDNS             bool
+	SkipProbe           bool
+	ReuseActiveServices bool
+	SkipEnrich          bool
+	SkipCVEs            bool
+	SkipNuclei          bool
+	SkipReport          bool
+	SkipNotify          bool
+	SubfinderLimit      int
+	DNSXLimit           int
+	HTTPXLimit          int
+	HTTPXTimeout        int
+	HTTPXThreads        int
+	HTTPXBatchSize      int
+	HTTPXBatchTimeout   string
+	HTTPXPatternMin     int
+	HTTPXPatternCap     int
+	HTTPXTLSProbe       bool
+	WebanalyzeLimit     int
+	CVELimit            int
+	WebanalyzeApps      string
+	WebanalyzeWorkers   int
+	WebanalyzeCrawl     int
+	WebanalyzeBatch     int
+	NucleiLimit         int
+	NucleiTemplateID    string
+	NucleiTemplate      string
+	NucleiTechFilter    string
+	NucleiTechMaxAge    string
+	NucleiTags          string
+	NucleiSeverity      string
+	NucleiHeaders       []string
+	NucleiProxy         string
+	NucleiStrategy      string
+	NucleiMaxHostErr    int
+	NucleiRateLimit     int
+	NucleiConcurrency   int
+	NucleiBulkSize      int
+	NucleiRetries       int
+	NucleiTimeout       int
+	NucleiFromCVEs      bool
+	NucleiAllCVEs       bool
+	NucleiForce         bool
+	NucleiCVELimit      int
 }
 
 func addManualRunCommand(parent *cobra.Command) {
@@ -134,7 +135,8 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().BoolVar(&opts.SkipSync, "skip-sync", false, "skip the daily scope-sync guard")
 	cmd.Flags().BoolVar(&opts.SkipEnum, "skip-enum", false, "skip subfinder")
 	cmd.Flags().BoolVar(&opts.SkipDNS, "skip-dns", false, "skip dnsx resolution")
-	cmd.Flags().BoolVar(&opts.SkipProbe, "skip-probe", false, "skip httpx")
+	cmd.Flags().BoolVar(&opts.SkipProbe, "skip-probe", false, "skip dnsx/httpx active probing")
+	cmd.Flags().BoolVar(&opts.ReuseActiveServices, "reuse-active-services", false, "skip dnsx/httpx and load active HTTP services already stored in the database")
 	cmd.Flags().BoolVar(&opts.SkipEnrich, "skip-enrich", false, "skip Webanalyze enrichment")
 	cmd.Flags().BoolVar(&opts.SkipCVEs, "skip-cves", false, "skip passive CVE matching")
 	cmd.Flags().BoolVar(&opts.SkipNuclei, "skip-nuclei", false, "skip Nuclei validation")
@@ -181,6 +183,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 	ctx := commandContext()
 	cfg := loadConfig()
+	opts = normalizeManualRunOptions(opts)
 
 	if !opts.SkipSync {
 		fmt.Fprintln(parent.OutOrStdout(), "zero manual step: [scope sync if due]")
@@ -336,6 +339,14 @@ func appendStringFlag(step []string, name string, value string) []string {
 	return step
 }
 
+func normalizeManualRunOptions(opts manualRunOptions) manualRunOptions {
+	if opts.ReuseActiveServices {
+		opts.SkipDNS = true
+		opts.SkipProbe = true
+	}
+	return opts
+}
+
 func runRefreshesFingerprint(opts manualRunOptions) bool {
 	return !opts.SkipProbe || !opts.SkipEnrich
 }
@@ -371,5 +382,5 @@ func manualRunOptionsFromJSON(raw json.RawMessage) (manualRunOptions, error) {
 	if err := json.Unmarshal(raw, &opts); err != nil {
 		return opts, fmt.Errorf("decode scan request params: %w", err)
 	}
-	return opts, nil
+	return normalizeManualRunOptions(opts), nil
 }

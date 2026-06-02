@@ -53,6 +53,7 @@ Content-Type: application/json
   "params": {
     "ProgramID": "00000000-0000-0000-0000-000000000000",
     "SkipSync": true,
+    "ReuseActiveServices": true,
     "NucleiTemplate": "/work/templates/custom.yaml",
     "NucleiTechFilter": "product-name",
     "NucleiHeaders": [
@@ -83,8 +84,7 @@ Content-Type: application/json
   "due_only": false,
   "params": {
     "SkipSync": true,
-    "HTTPXBatchSize": 50,
-    "HTTPXBatchTimeout": "5m",
+    "ReuseActiveServices": true,
     "WebanalyzeApps": "/work/custom-technologies.json",
     "WebanalyzeWorkers": 4,
     "NucleiTemplate": "/work/templates/custom",
@@ -112,6 +112,8 @@ Campaigns are durable. If the worker restarts, running child requests are requeu
 Custom campaign parallelism is independent from `ZERO_TARGET_PARALLELISM`. The worker adds capacity from active campaigns, so two campaigns with `parallelism: 8` can use up to 16 custom scan workers if the host has capacity.
 
 When a request or campaign runs `httpx` and/or Webanalyze before Nuclei, Zero automatically keeps `NucleiTechFilter` tied to fresh fingerprints from that run. Use `NucleiTechMaxAge` only for requests that skip fingerprinting and intentionally gate Nuclei from existing database observations.
+
+Set `ReuseActiveServices: true` to skip fresh `dnsx/httpx` probing and load active HTTP services already present in the database. This is meant for back-to-back focused campaigns where the alive inventory was recently refreshed. In this mode, `HTTPX*` params are intentionally ignored.
 
 ## Cancel Work
 
