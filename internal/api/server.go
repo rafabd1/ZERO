@@ -756,6 +756,11 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 				'id', f.id,
 				'program_id', f.program_id,
 				'http_service_id', f.http_service_id,
+				'service_url', COALESCE(s.url, ''),
+				'service_host', COALESCE(s.host, ''),
+				'service_status_code', s.status_code,
+				'service_title', COALESCE(s.title, ''),
+				'service_webserver', COALESCE(s.webserver, ''),
 				'nuclei_result_id', f.nuclei_result_id,
 				'severity', f.severity,
 				'confidence', f.confidence,
@@ -766,6 +771,7 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 				'last_seen_at', f.last_seen_at
 			)
 			FROM zero_candidate_findings f
+			LEFT JOIN zero_http_services s ON s.id = f.http_service_id
 			WHERE ($1 = '' OR f.program_id::text = $1)
 			  AND ($2 = '' OR f.status = $2)
 			  AND ($3 = '' OR f.severity = $3)

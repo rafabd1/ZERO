@@ -452,6 +452,36 @@ dd {
   gap: 10px;
 }
 
+.target-asset {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid rgba(78, 198, 154, 0.45);
+  border-radius: 8px;
+  background: #102119;
+}
+
+.target-asset span {
+  display: block;
+  color: #7ee5bc;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.target-asset strong {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.target-asset small {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+}
+
 .detail-card {
   min-width: 0;
   padding: 12px;

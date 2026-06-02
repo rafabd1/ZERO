@@ -450,10 +450,22 @@ function renderFindingDetail(finding) {
   const validation = finding.nuclei_result_id
     ? "confirmed by Nuclei"
     : evidence.nuclei_validation_reason || evidence.nuclei_validation || "passive/unconfirmed";
+  const targetURL = firstNonEmpty(finding.service_url, evidence.url, evidence.matched_at, evidence.target, "-");
+  const targetMeta = [
+    finding.service_host,
+    finding.service_status_code ? `HTTP ${finding.service_status_code}` : "",
+    finding.service_title,
+    finding.service_webserver,
+  ].filter((item) => firstNonEmpty(item)).join(" | ");
   $("findingDetailPanel").classList.remove("hidden");
   setText("findingDetailTitle", `${String(finding.severity || "unknown").toUpperCase()} finding`);
   setText("findingDetailMeta", `${shortID(finding.id)} | confidence ${fmt(finding.confidence)} | ${timeAgo(finding.first_seen_at)}`);
   $("findingDetailBody").innerHTML = `
+    <div class="target-asset">
+      <span>Target Asset</span>
+      <strong>${escapeHTML(targetURL)}</strong>
+      <small>${escapeHTML(targetMeta || "No HTTP service metadata stored.")}</small>
+    </div>
     <div class="drawer-grid">
       ${detailCard("Validation", escapeHTML(validation), finding.nuclei_result_id ? "active evidence linked" : "passive or not confirmed")}
       ${detailCard("Status", escapeHTML(finding.status || "unknown"), finding.report_id ? `report ${shortID(finding.report_id)}` : "not reported")}
