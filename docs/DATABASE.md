@@ -37,7 +37,9 @@ Data is deactivated conservatively instead of deleted immediately. `ZERO_STALE_A
 
 Fingerprint lifecycle is source-aware. A normal `httpx` run updates the service's latest `technologies` JSON and marks missing `source=httpx` observations inactive for that service. A full Webanalyze run does the same for `source=webanalyze` observations after all selected services are processed. Custom Webanalyze app files are treated as partial intelligence and do not deactivate missing technologies.
 
-Scan runs and custom scan requests keep execution history, recovery metadata, and campaign progress.
+Scan runs and custom scan requests keep execution history, recovery metadata, and campaign progress. Queued or running requests and campaigns can be canceled through the API or CLI; canceled requests cannot be marked succeeded by a late-finishing worker step.
+
+Inactive inventory cleanup removes old inactive scope assets, subdomains, services, technology observations, and passive technology/CVE rows after the configured retention window or after they have been absent from the configured number of successful full scans. HTTP services linked to Nuclei results or candidate findings are preserved for evidence integrity.
 
 ## Supabase Notes
 

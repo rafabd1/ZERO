@@ -93,6 +93,13 @@ func newWorkerCommand() *cobra.Command {
 					return err
 				}
 			}
+			if err := addJob("cleanup-inactive", cfg.Schedule.Cleanup, func() {
+				if err := runChildE(cmd, "run", "cleanup"); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "cleanup inactive failed: %v\n", err)
+				}
+			}); err != nil {
+				return err
+			}
 
 			c.Start()
 			if cfg.Worker.RunOnStartup {

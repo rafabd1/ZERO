@@ -40,7 +40,88 @@ func newRunCommand() *cobra.Command {
 	cmd.AddCommand(due)
 	addManualRunCommand(cmd)
 	addScheduledRunCommand(cmd)
+	addCancelRunCommand(cmd)
+	addCleanupRunCommand(cmd)
 	return cmd
+}
+
+func addCancelRunCommand(parent *cobra.Command) {
+	var campaignID string
+	var requestID string
+	cmd := &cobra.Command{
+		Use:   "cancel",
+		Short: "Cancel a queued or running scan request/campaign.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if campaignID == "" && requestID == "" {
+				return fmt.Errorf("set --campaign-id or --request-id")
+			}
+			if campaignID != "" && requestID != "" {
+				return fmt.Errorf("set only one of --campaign-id or --request-id")
+			}
+			ctx := commandContext()
+			cfg := loadConfig()
+			repo, err := openRepositoryE(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer repo.Close()
+			var result db.CancelScanResult
+			if campaignID != "" {
+				result, err = repo.CancelScanCampaign(ctx, campaignID)
+			} else {
+				result, err = repo.CancelScanRequest(ctx, requestID)
+			}
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "canceled %s %s: requests=%d queued=%d running=%d status=%s\n", result.Type, result.ID, result.RequestsCanceled, result.QueuedCanceled, result.RunningCanceled, result.Status)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&campaignID, "campaign-id", "", "scan campaign id to cancel")
+	cmd.Flags().StringVar(&requestID, "request-id", "", "scan request id to cancel")
+	parent.AddCommand(cmd)
+}
+
+func addCleanupRunCommand(parent *cobra.Command) {
+	var retentionHours int
+	var retentionScans int
+	cmd := &cobra.Command{
+		Use:   "cleanup",
+		Short: "Delete inactive inventory rows outside the configured retention window.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext()
+			cfg := loadConfig()
+			if retentionHours <= 0 {
+				retentionHours = cfg.Data.InactiveRetentionHours
+			}
+			if retentionScans < 0 {
+				retentionScans = cfg.Data.InactiveRetentionScans
+			}
+			repo, err := openRepositoryE(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer repo.Close()
+			result, err := repo.CleanupInactiveEntities(ctx, retentionHours, retentionScans)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "cleanup deleted inactive rows: scope_assets=%d subdomains=%d http_services=%d technologies=%d technology_vulnerability_matches=%d retention_hours=%d retention_scans=%d\n",
+				result.ScopeAssets,
+				result.Subdomains,
+				result.HTTPServices,
+				result.TechnologyObservations,
+				result.TechnologyVulnerabilityRows,
+				retentionHours,
+				retentionScans,
+			)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&retentionHours, "retention-hours", 0, "delete inactive rows older than this many hours; defaults to ZERO_INACTIVE_RETENTION_HOURS")
+	cmd.Flags().IntVar(&retentionScans, "retention-scans", -1, "delete inactive rows not seen in the latest N successful full scans; defaults to ZERO_INACTIVE_RETENTION_SCANS")
+	parent.AddCommand(cmd)
 }
 
 func runPipeline(parent *cobra.Command) error {

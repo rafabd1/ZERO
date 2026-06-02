@@ -160,6 +160,10 @@ func (s *Server) routes() {
 		LIMIT 100
 	`))
 	s.mux.HandleFunc("POST /v1/scan-requests", s.createScanRequest)
+	s.mux.HandleFunc("POST /v1/scan-requests/{request_id}/cancel", s.cancelScanRequest)
+	s.mux.HandleFunc("DELETE /v1/scan-requests/{request_id}", s.cancelScanRequest)
+	s.mux.HandleFunc("POST /v1/scan-campaigns/{campaign_id}/cancel", s.cancelScanCampaign)
+	s.mux.HandleFunc("DELETE /v1/scan-campaigns/{campaign_id}", s.cancelScanCampaign)
 	s.mux.HandleFunc("GET /v1/changes", s.changes(""))
 	s.mux.HandleFunc("GET /v1/notifications/discord", s.query(`
 		SELECT jsonb_build_object(
@@ -814,6 +818,42 @@ func (s *Server) createScanRequest(w http.ResponseWriter, r *http.Request) {
 		"program_id": body.ProgramID,
 		"run_after":  runAfter,
 	})
+}
+
+func (s *Server) cancelScanRequest(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("request_id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "request id is required")
+		return
+	}
+	result, err := s.repo.CancelScanRequest(r.Context(), id)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (s *Server) cancelScanCampaign(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("campaign_id"))
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "campaign id is required")
+		return
+	}
+	result, err := s.repo.CancelScanCampaign(r.Context(), id)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, result)
 }
 
 func parseRunAfter(value string) (time.Time, error) {

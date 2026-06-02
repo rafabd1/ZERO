@@ -130,7 +130,9 @@ type IntelConfig struct {
 }
 
 type DataConfig struct {
-	StaleAfterHours int
+	StaleAfterHours        int
+	InactiveRetentionHours int
+	InactiveRetentionScans int
 }
 
 type ScheduleConfig struct {
@@ -141,6 +143,7 @@ type ScheduleConfig struct {
 	CVE             string
 	Nuclei          string
 	NucleiTemplates string
+	Cleanup         string
 }
 
 func Load() (Config, error) {
@@ -203,6 +206,7 @@ func Load() (Config, error) {
 	v.SetDefault("schedule.cve", "0 15 5 * * *")
 	v.SetDefault("schedule.nuclei", "0 45 5 * * *")
 	v.SetDefault("schedule.nuclei_templates", "0 5 3 * * *")
+	v.SetDefault("schedule.cleanup", "0 25 * * * *")
 	v.SetDefault("api.addr", "127.0.0.1:8080")
 	v.SetDefault("worker.run_on_startup", true)
 	v.SetDefault("worker.recover_running_scans", true)
@@ -211,6 +215,8 @@ func Load() (Config, error) {
 	v.SetDefault("database.retries", 4)
 	v.SetDefault("database.retry_wait", "3s")
 	v.SetDefault("data.stale_after_hours", 168)
+	v.SetDefault("data.inactive_retention_hours", 72)
+	v.SetDefault("data.inactive_retention_scans", 2)
 	v.SetDefault("intel.cve_min_year", 2018)
 	v.SetDefault("intel.nvd_retries", 3)
 	v.SetDefault("intel.nvd_retry_wait", "3s")
@@ -285,6 +291,7 @@ func Load() (Config, error) {
 	_ = v.BindEnv("schedule.cve", "ZERO_SCHEDULE_CVE")
 	_ = v.BindEnv("schedule.nuclei", "ZERO_SCHEDULE_NUCLEI")
 	_ = v.BindEnv("schedule.nuclei_templates", "ZERO_SCHEDULE_NUCLEI_TEMPLATES")
+	_ = v.BindEnv("schedule.cleanup", "ZERO_SCHEDULE_CLEANUP")
 	_ = v.BindEnv("api.addr", "ZERO_API_ADDR")
 	_ = v.BindEnv("api.token", "ZERO_API_TOKEN")
 	_ = v.BindEnv("notify.discord_webhook_url", "ZERO_DISCORD_WEBHOOK_URL")
@@ -299,6 +306,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("intel.nvd_retries", "ZERO_NVD_RETRIES")
 	_ = v.BindEnv("intel.nvd_retry_wait", "ZERO_NVD_RETRY_WAIT")
 	_ = v.BindEnv("data.stale_after_hours", "ZERO_STALE_AFTER_HOURS")
+	_ = v.BindEnv("data.inactive_retention_hours", "ZERO_INACTIVE_RETENTION_HOURS")
+	_ = v.BindEnv("data.inactive_retention_scans", "ZERO_INACTIVE_RETENTION_SCANS")
 
 	return Config{
 		DatabaseURL:       v.GetString("database_url"),
@@ -383,6 +392,7 @@ func Load() (Config, error) {
 			CVE:             v.GetString("schedule.cve"),
 			Nuclei:          v.GetString("schedule.nuclei"),
 			NucleiTemplates: v.GetString("schedule.nuclei_templates"),
+			Cleanup:         v.GetString("schedule.cleanup"),
 		},
 		API: APIConfig{
 			Addr:  v.GetString("api.addr"),
@@ -406,7 +416,9 @@ func Load() (Config, error) {
 			NVDRetryWait:    v.GetDuration("intel.nvd_retry_wait"),
 		},
 		Data: DataConfig{
-			StaleAfterHours: v.GetInt("data.stale_after_hours"),
+			StaleAfterHours:        v.GetInt("data.stale_after_hours"),
+			InactiveRetentionHours: clampInt(v.GetInt("data.inactive_retention_hours"), 0, 24*365),
+			InactiveRetentionScans: clampInt(v.GetInt("data.inactive_retention_scans"), 0, 100),
 		},
 	}, nil
 }

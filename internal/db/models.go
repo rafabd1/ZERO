@@ -43,6 +43,23 @@ type ScanCampaignCreateResult struct {
 	Parallel int
 }
 
+type CancelScanResult struct {
+	ID               string `json:"id"`
+	Type             string `json:"type"`
+	Status           string `json:"status"`
+	QueuedCanceled   int    `json:"queued_canceled"`
+	RunningCanceled  int    `json:"running_canceled"`
+	RequestsCanceled int    `json:"requests_canceled"`
+}
+
+type CleanupResult struct {
+	ScopeAssets                 int `json:"scope_assets"`
+	Subdomains                  int `json:"subdomains"`
+	HTTPServices                int `json:"http_services"`
+	TechnologyObservations      int `json:"technology_observations"`
+	TechnologyVulnerabilityRows int `json:"technology_vulnerability_rows"`
+}
+
 type DomainRoot struct {
 	ScopeAssetID string
 	ProgramID    string

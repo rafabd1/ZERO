@@ -55,7 +55,7 @@ docker compose run --rm zero analyze nuclei \
   --severity high,critical
 ```
 
-`--tech-filter` matches active technology observations, `httpx` technology names, titles, and server banners. `--tech-max-age` makes the gate freshness-aware, which is useful for campaigns where `httpx` and Webanalyze run immediately before Nuclei. Custom Webanalyze app files are partial by design and do not deactivate the normal full fingerprint inventory.
+`--tech-filter` matches active technology observations, `httpx` technology names, titles, and server banners. In full custom campaigns that run `httpx` and/or Webanalyze immediately before Nuclei, Zero automatically applies a freshness window to keep the gate tied to that run. `--tech-max-age` is mainly useful when you skip fingerprinting and intentionally want to validate against recent database observations. Custom Webanalyze app files are partial by design and do not deactivate the normal full fingerprint inventory.
 
 ## Request Profile
 

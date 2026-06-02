@@ -50,6 +50,7 @@ The worker is the normal execution mode.
 - `ZERO_DEFAULT_SCAN_INTERVAL_HOURS=72` is the default per-program scan interval.
 - `ZERO_TARGET_PARALLELISM=12` caps total concurrent program scans.
 - `ZERO_TOOL_TIMEOUT=20m` bounds each external tool invocation.
+- `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
 
 The main pipeline per due program is:
 
@@ -88,7 +89,6 @@ docker compose run --rm zero run schedule \
   --httpx-batch-timeout 5m \
   --webanalyze-apps ./custom-technologies.json \
   --nuclei-tech-filter "product-name" \
-  --nuclei-tech-max-age 2h \
   --nuclei-template ./templates/custom \
   --nuclei-severity medium,high,critical
 ```
@@ -97,7 +97,35 @@ Use `--due-only` if the campaign should respect each program's normal scan inter
 
 The worker pool keeps campaign slots filled while respecting both the campaign's `--campaign-parallelism` and the global `ZERO_TARGET_PARALLELISM`.
 
-Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. For targeted validation, pair `--nuclei-tech-filter` with `--nuclei-tech-max-age` so Nuclei only receives services that matched the target technology recently.
+Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. For targeted validation, pair `--nuclei-tech-filter` with fresh fingerprinting in the same campaign; Zero automatically applies a freshness window before Nuclei. Use `--nuclei-tech-max-age` only when skipping fingerprint stages and intentionally relying on observations already in the database.
+
+## Cancel Work
+
+Cancel one queued/running request:
+
+```bash
+docker compose run --rm zero run cancel --request-id <scan-request-id>
+```
+
+Cancel an entire campaign:
+
+```bash
+docker compose run --rm zero run cancel --campaign-id <scan-campaign-id>
+```
+
+The API exposes the same operation through `POST /v1/scan-requests/{id}/cancel` and `POST /v1/scan-campaigns/{id}/cancel`.
+
+## Cleanup
+
+The worker schedules inactive-inventory cleanup with `ZERO_SCHEDULE_CLEANUP`. By default it removes inactive scope assets, subdomains, HTTP services, technology observations, and passive technology-CVE rows after 72 hours or after they have been absent from the last two successful full scans for the program.
+
+Manual cleanup:
+
+```bash
+docker compose run --rm zero run cleanup --retention-hours 72 --retention-scans 2
+```
+
+HTTP services linked to Nuclei results or candidate findings are preserved for evidence integrity.
 
 ## Tuning
 

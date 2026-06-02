@@ -251,8 +251,12 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		if opts.NucleiTechFilter != "" {
 			step = append(step, "--tech-filter", opts.NucleiTechFilter)
 		}
-		if opts.NucleiTechMaxAge != "" {
-			step = append(step, "--tech-max-age", opts.NucleiTechMaxAge)
+		techMaxAge := strings.TrimSpace(opts.NucleiTechMaxAge)
+		if techMaxAge == "" && opts.NucleiTechFilter != "" && runRefreshesFingerprint(opts) {
+			techMaxAge = automaticTechMaxAge(cfg.Tools.ToolTimeout)
+		}
+		if techMaxAge != "" {
+			step = append(step, "--tech-max-age", techMaxAge)
 		}
 		if opts.NucleiTags != "" {
 			step = append(step, "--tags", opts.NucleiTags)
@@ -330,6 +334,18 @@ func appendStringFlag(step []string, name string, value string) []string {
 		step = append(step, name, value)
 	}
 	return step
+}
+
+func runRefreshesFingerprint(opts manualRunOptions) bool {
+	return !opts.SkipProbe || !opts.SkipEnrich
+}
+
+func automaticTechMaxAge(toolTimeout time.Duration) string {
+	window := 30 * time.Minute
+	if toolTimeout > 0 && toolTimeout+10*time.Minute > window {
+		window = toolTimeout + 10*time.Minute
+	}
+	return window.String()
 }
 
 func parseRunAfter(value string) (time.Time, error) {

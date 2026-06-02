@@ -279,6 +279,146 @@ func (r *Repository) RecoverRunningScanRequests(ctx context.Context) (int, error
 	return int(tag.RowsAffected()), nil
 }
 
+func (r *Repository) CancelScanRequest(ctx context.Context, requestID string) (CancelScanResult, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return CancelScanResult{}, fmt.Errorf("request id is required")
+	}
+	var result CancelScanResult
+	var campaignID string
+	err := r.pool.QueryRow(ctx, `
+		WITH before AS (
+			SELECT id, status, COALESCE(campaign_id::text, '') AS campaign_id
+			FROM zero_scan_requests
+			WHERE id = $1::uuid
+		), updated AS (
+			UPDATE zero_scan_requests r
+			SET status = 'canceled',
+				finished_at = now(),
+				locked_at = NULL,
+				error = CASE
+					WHEN r.error = '' THEN 'canceled by operator'
+					ELSE r.error
+				END,
+				updated_at = now()
+			FROM before b
+			WHERE r.id = b.id
+			  AND r.status IN ('queued', 'running')
+			RETURNING b.status
+		)
+		SELECT
+			COALESCE((SELECT id::text FROM before), ''),
+			COALESCE((SELECT status FROM before), ''),
+			COALESCE((SELECT campaign_id FROM before), ''),
+			(SELECT count(*)::int FROM updated),
+			(SELECT count(*)::int FROM updated WHERE status = 'queued'),
+			(SELECT count(*)::int FROM updated WHERE status = 'running')
+	`, requestID).Scan(&result.ID, &result.Status, &campaignID, &result.RequestsCanceled, &result.QueuedCanceled, &result.RunningCanceled)
+	if err != nil {
+		return CancelScanResult{}, fmt.Errorf("cancel scan request: %w", err)
+	}
+	if result.ID == "" {
+		return CancelScanResult{}, fmt.Errorf("scan request not found")
+	}
+	result.Type = "scan_request"
+	if campaignID != "" {
+		if err := r.RefreshScanCampaign(ctx, campaignID); err != nil {
+			return result, err
+		}
+	}
+	if result.RequestsCanceled > 0 {
+		result.Status = "canceled"
+	}
+	return result, nil
+}
+
+func (r *Repository) CancelScanCampaign(ctx context.Context, campaignID string) (CancelScanResult, error) {
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" {
+		return CancelScanResult{}, fmt.Errorf("campaign id is required")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return CancelScanResult{}, fmt.Errorf("begin cancel scan campaign: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM zero_scan_campaigns WHERE id = $1::uuid)`, campaignID).Scan(&exists); err != nil {
+		return CancelScanResult{}, fmt.Errorf("lookup scan campaign: %w", err)
+	}
+	if !exists {
+		return CancelScanResult{}, fmt.Errorf("scan campaign not found")
+	}
+
+	var queuedCanceled, runningCanceled int
+	if err := tx.QueryRow(ctx, `
+		WITH candidates AS (
+			SELECT id, status
+			FROM zero_scan_requests
+			WHERE campaign_id = $1::uuid
+			  AND status IN ('queued', 'running')
+		), updated AS (
+			UPDATE zero_scan_requests
+			SET status = 'canceled',
+				finished_at = now(),
+				locked_at = NULL,
+				error = CASE
+					WHEN error = '' THEN 'canceled by operator'
+					ELSE error
+				END,
+				updated_at = now()
+			FROM candidates c
+			WHERE zero_scan_requests.id = c.id
+			RETURNING c.status
+		)
+		SELECT
+			count(*) FILTER (WHERE status = 'queued')::int,
+			count(*) FILTER (WHERE status = 'running')::int
+		FROM updated
+	`, campaignID).Scan(&queuedCanceled, &runningCanceled); err != nil {
+		return CancelScanResult{}, fmt.Errorf("cancel scan campaign requests: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		WITH counts AS (
+			SELECT
+				count(*) FILTER (WHERE status = 'queued') AS queued,
+				count(*) FILTER (WHERE status = 'running') AS running,
+				count(*) FILTER (WHERE status = 'succeeded') AS succeeded,
+				count(*) FILTER (WHERE status = 'failed') AS failed,
+				count(*) FILTER (WHERE status = 'canceled') AS canceled
+			FROM zero_scan_requests
+			WHERE campaign_id = $1::uuid
+		)
+		UPDATE zero_scan_campaigns c
+		SET status = 'canceled',
+			queued_requests = counts.queued::int,
+			running_requests = counts.running::int,
+			succeeded_requests = counts.succeeded::int,
+			failed_requests = counts.failed::int,
+			finished_at = now(),
+			updated_at = now(),
+			error = 'canceled by operator'
+		FROM counts
+		WHERE c.id = $1::uuid
+	`, campaignID)
+	if err != nil {
+		return CancelScanResult{}, fmt.Errorf("update scan campaign: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return CancelScanResult{}, fmt.Errorf("commit cancel scan campaign: %w", err)
+	}
+	return CancelScanResult{
+		ID:               campaignID,
+		Type:             "scan_campaign",
+		Status:           "canceled",
+		QueuedCanceled:   queuedCanceled,
+		RunningCanceled:  runningCanceled,
+		RequestsCanceled: queuedCanceled + runningCanceled,
+	}, nil
+}
+
 func (r *Repository) RecoverRunningScanCampaigns(ctx context.Context) (int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text
@@ -328,6 +468,7 @@ func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr er
 			error = $3,
 			updated_at = now()
 		WHERE id = $1::uuid
+		  AND status <> 'canceled'
 	`, id, status, errorText)
 	if err != nil {
 		return fmt.Errorf("finish scan request: %w", err)

@@ -55,7 +55,6 @@ Content-Type: application/json
     "SkipSync": true,
     "NucleiTemplate": "/work/templates/custom.yaml",
     "NucleiTechFilter": "product-name",
-    "NucleiTechMaxAge": "2h",
     "NucleiHeaders": [
       "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
       "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -91,7 +90,6 @@ Content-Type: application/json
     "NucleiTemplate": "/work/templates/custom",
     "NucleiForce": true,
     "NucleiTechFilter": "product-name",
-    "NucleiTechMaxAge": "2h",
     "NucleiSeverity": "medium,high,critical",
     "NucleiHeaders": [
       "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
@@ -110,6 +108,22 @@ GET /v1/scan-requests
 ```
 
 Campaigns are durable. If the worker restarts, running child requests are requeued and completed child requests stay completed.
+
+When a request or campaign runs `httpx` and/or Webanalyze before Nuclei, Zero automatically keeps `NucleiTechFilter` tied to fresh fingerprints from that run. Use `NucleiTechMaxAge` only for requests that skip fingerprinting and intentionally gate Nuclei from existing database observations.
+
+## Cancel Work
+
+```http
+POST /v1/scan-requests/{request_id}/cancel
+Authorization: Bearer <ZERO_API_TOKEN>
+```
+
+```http
+POST /v1/scan-campaigns/{campaign_id}/cancel
+Authorization: Bearer <ZERO_API_TOKEN>
+```
+
+`DELETE` aliases are also available for both endpoints. Canceling a campaign marks queued and running child requests as canceled. A tool already running in a child process may finish its current step, but the request cannot be marked succeeded afterward.
 
 ## Reports And Notifications
 
