@@ -260,6 +260,41 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 	return requests, nil
 }
 
+func (r *Repository) ScanRequestWorkerCapacity(ctx context.Context) (int, error) {
+	var capacity int
+	err := r.pool.QueryRow(ctx, `
+		WITH campaign_capacity AS (
+			SELECT COALESCE(sum(c.parallelism), 0)::int AS capacity
+			FROM zero_scan_campaigns c
+			WHERE c.status IN ('queued', 'running')
+			  AND c.run_after <= now()
+			  AND EXISTS (
+				SELECT 1
+				FROM zero_scan_requests r
+				WHERE r.campaign_id = c.id
+				  AND (
+					r.status = 'running'
+					OR (r.status = 'queued' AND r.run_after <= now())
+				  )
+			  )
+		), standalone_capacity AS (
+			SELECT count(*)::int AS capacity
+			FROM zero_scan_requests r
+			WHERE r.campaign_id IS NULL
+			  AND (
+				r.status = 'running'
+				OR (r.status = 'queued' AND r.run_after <= now())
+			  )
+		)
+		SELECT GREATEST(1, campaign_capacity.capacity + standalone_capacity.capacity)
+		FROM campaign_capacity, standalone_capacity
+	`).Scan(&capacity)
+	if err != nil {
+		return 0, fmt.Errorf("scan request worker capacity: %w", err)
+	}
+	return capacity, nil
+}
+
 func (r *Repository) RecoverRunningScanRequests(ctx context.Context) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE zero_scan_requests

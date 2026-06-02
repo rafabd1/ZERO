@@ -48,7 +48,7 @@ The worker is the normal execution mode.
 - `ZERO_RUN_ON_STARTUP=true` runs a startup scope-sync guard and due-program planner.
 - `ZERO_SCOPE_SYNC_MAX_AGE=24h` prevents scope sync from running on every restart.
 - `ZERO_DEFAULT_SCAN_INTERVAL_HOURS=72` is the default per-program scan interval.
-- `ZERO_TARGET_PARALLELISM=12` caps total concurrent program scans.
+- `ZERO_TARGET_PARALLELISM=12` controls default/due pipeline program parallelism.
 - `ZERO_TOOL_TIMEOUT=20m` bounds each external tool invocation.
 - `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
 
@@ -95,7 +95,7 @@ docker compose run --rm zero run schedule \
 
 Use `--due-only` if the campaign should respect each program's normal scan interval. Use `--campaign-limit` for staged rollouts.
 
-The worker pool keeps campaign slots filled while respecting both the campaign's `--campaign-parallelism` and the global `ZERO_TARGET_PARALLELISM`.
+The worker pool keeps custom campaign slots filled from each campaign's own `--campaign-parallelism`. Multiple custom campaigns can run side by side; their capacity is additive and is not capped by `ZERO_TARGET_PARALLELISM`, which only controls default/due scans.
 
 Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. For targeted validation, pair `--nuclei-tech-filter` with fresh fingerprinting in the same campaign; Zero automatically applies a freshness window before Nuclei. Use `--nuclei-tech-max-age` only when skipping fingerprint stages and intentionally relying on observations already in the database.
 

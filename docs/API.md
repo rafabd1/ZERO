@@ -109,6 +109,8 @@ GET /v1/scan-requests
 
 Campaigns are durable. If the worker restarts, running child requests are requeued and completed child requests stay completed.
 
+Custom campaign parallelism is independent from `ZERO_TARGET_PARALLELISM`. The worker adds capacity from active campaigns, so two campaigns with `parallelism: 8` can use up to 16 custom scan workers if the host has capacity.
+
 When a request or campaign runs `httpx` and/or Webanalyze before Nuclei, Zero automatically keeps `NucleiTechFilter` tied to fresh fingerprints from that run. Use `NucleiTechMaxAge` only for requests that skip fingerprinting and intentionally gate Nuclei from existing database observations.
 
 ## Cancel Work

@@ -140,15 +140,11 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 	}
 	defer repo.Close()
 
-	limit := cfg.TargetParallelism
-	if limit <= 0 {
-		limit = 5
-	}
 	type scanRequestResult struct {
 		id  string
 		err error
 	}
-	done := make(chan scanRequestResult, limit)
+	done := make(chan scanRequestResult)
 	var firstErr error
 	active := 0
 	totalStarted := 0
@@ -165,6 +161,17 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 	}
 
 	for {
+		limit, err := repo.ScanRequestWorkerCapacity(ctx)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			if active == 0 {
+				return firstErr
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "scan request capacity lookup failed with %d active worker(s): %v\n", active, err)
+			limit = active
+		}
 		for active < limit {
 			requests, err := repo.ClaimDueScanRequests(ctx, limit-active)
 			if err != nil {
