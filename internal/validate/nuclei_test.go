@@ -56,3 +56,21 @@ func TestParseNucleiLineEvidenceHashIgnoresVolatileTimestamp(t *testing.T) {
 		t.Fatalf("EvidenceHash changed across timestamp-only output: %s != %s", left.EvidenceHash, right.EvidenceHash)
 	}
 }
+
+func TestParseNucleiLineGenericTemplateUsesEmptyCVEs(t *testing.T) {
+	line := `{"timestamp":"2026-06-02T11:27:00Z","template-id":"http-missing-security-headers","template-path":"/templates/http/misconfiguration/http-missing-security-headers.yaml","matched-at":"https://app.example.com","type":"http","info":{"severity":"info","tags":"headers,misconfig"}}`
+
+	result, err := parseNucleiLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CVEs == nil {
+		t.Fatal("CVEs is nil")
+	}
+	if len(result.CVEs) != 0 {
+		t.Fatalf("CVEs = %#v", result.CVEs)
+	}
+	if len(result.Tags) != 2 || result.Tags[0] != "headers" || result.Tags[1] != "misconfig" {
+		t.Fatalf("Tags = %#v", result.Tags)
+	}
+}

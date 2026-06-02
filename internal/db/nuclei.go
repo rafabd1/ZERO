@@ -34,6 +34,12 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 	if len(result.Raw) == 0 {
 		result.Raw = json.RawMessage(`{}`)
 	}
+	if result.CVEs == nil {
+		result.CVEs = []string{}
+	}
+	if result.Tags == nil {
+		result.Tags = []string{}
+	}
 	var id string
 	var inserted bool
 	err := r.pool.QueryRow(ctx, `

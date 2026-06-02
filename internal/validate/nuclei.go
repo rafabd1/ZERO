@@ -267,6 +267,13 @@ func parseNucleiLine(line string) (db.NucleiResult, error) {
 	if len(cves) == 0 {
 		cves = stringSliceFromAny(parsed.Info.Metadata["cve"])
 	}
+	if cves == nil {
+		cves = []string{}
+	}
+	tags := stringSliceFromAny(parsed.Info.Tags)
+	if tags == nil {
+		tags = []string{}
+	}
 	evidenceHash := hashParts(parsed.TemplateID, parsed.MatchedAt, parsed.Type, parsed.ExtractorName, strings.Join(cves, ","))
 	return db.NucleiResult{
 		TemplateID:    parsed.TemplateID,
@@ -274,7 +281,7 @@ func parseNucleiLine(line string) (db.NucleiResult, error) {
 		MatchedAt:     parsed.MatchedAt,
 		Severity:      strings.ToLower(parsed.Info.Severity),
 		CVEs:          cves,
-		Tags:          stringSliceFromAny(parsed.Info.Tags),
+		Tags:          tags,
 		Type:          parsed.Type,
 		ExtractorName: parsed.ExtractorName,
 		EvidenceHash:  evidenceHash,
