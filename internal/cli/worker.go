@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -133,30 +132,71 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 		return err
 	}
 	defer repo.Close()
-	requests, err := repo.ClaimDueScanRequests(ctx, cfg.TargetParallelism)
-	if err != nil {
-		return err
+
+	limit := cfg.TargetParallelism
+	if limit <= 0 {
+		limit = 5
 	}
+	type scanRequestResult struct {
+		id  string
+		err error
+	}
+	done := make(chan scanRequestResult, limit)
 	var firstErr error
-	var firstErrMu sync.Mutex
-	var wg sync.WaitGroup
-	for _, request := range requests {
-		request := request
-		wg.Add(1)
+	active := 0
+	totalStarted := 0
+
+	startRequest := func(request db.ScanRequest) {
+		active++
+		totalStarted++
 		go func() {
-			defer wg.Done()
-			err := runQueuedScanRequest(cmd, repo, request)
-			if err != nil {
-				firstErrMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				firstErrMu.Unlock()
+			done <- scanRequestResult{
+				id:  request.ID,
+				err: runQueuedScanRequest(cmd, repo, request),
 			}
 		}()
 	}
-	wg.Wait()
-	return firstErr
+
+	for {
+		for active < limit {
+			requests, err := repo.ClaimDueScanRequests(ctx, limit-active)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				if active == 0 {
+					return firstErr
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "scan request claim failed with %d active worker(s): %v\n", active, err)
+				break
+			}
+			if len(requests) == 0 {
+				break
+			}
+			for _, request := range requests {
+				startRequest(request)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "scan request pool claimed %d request(s), active=%d/%d\n", len(requests), active, limit)
+		}
+
+		if active == 0 {
+			if totalStarted > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "scan request pool drained after %d request(s)\n", totalStarted)
+			}
+			return firstErr
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case result := <-done:
+			active--
+			if result.err != nil && firstErr == nil {
+				firstErr = result.err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "scan request pool slot released: %s active=%d/%d\n", result.id, active, limit)
+		}
+	}
 }
 
 func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.ScanRequest) error {
