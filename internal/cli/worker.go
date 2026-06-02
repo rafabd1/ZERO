@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,16 +20,33 @@ func newWorkerCommand() *cobra.Command {
 		Short: "Run scheduled monitoring tasks.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := loadConfig()
+			ctx := commandContext()
 			if cfg.AutoMigrate {
-				if err := db.Migrate(commandContext(), cfg.DatabaseURL); err != nil {
-					return err
+				fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup migration\n", time.Now().UTC().Format(time.RFC3339))
+				migrateCtx, cancel := workerStartupContext(ctx)
+				err := db.Migrate(migrateCtx, cfg.DatabaseURL)
+				cancel()
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "startup migration failed: %v\n", err)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup migration\n", time.Now().UTC().Format(time.RFC3339))
 				}
+				// The worker performs the startup migration once. Child commands run in
+				// the same process and should not try to acquire the migration lock for
+				// every scan step.
+				_ = os.Setenv("ZERO_AUTO_MIGRATE", "false")
+				cfg.AutoMigrate = false
 			}
 			c := cron.New(cron.WithSeconds())
 			if cfg.Worker.RecoverRunningScans {
-				if err := recoverWorkerState(cmd, cfg); err != nil {
-					return err
+				fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup recovery\n", time.Now().UTC().Format(time.RFC3339))
+				recoveryCtx, cancel := workerRecoveryContext(ctx)
+				if err := recoverWorkerState(recoveryCtx, cmd, cfg); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "startup recovery failed: %v\n", err)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup recovery\n", time.Now().UTC().Format(time.RFC3339))
 				}
+				cancel()
 			}
 
 			addJob := func(name, spec string, fn func()) error {
@@ -91,12 +110,20 @@ func newWorkerCommand() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup due-pipeline\n", time.Now().UTC().Format(time.RFC3339))
 				}()
 			}
-			<-commandContext().Done()
-			ctx := c.Stop()
 			<-ctx.Done()
+			stopCtx := c.Stop()
+			<-stopCtx.Done()
 			return nil
 		},
 	}
+}
+
+func workerStartupContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, 2*time.Minute)
+}
+
+func workerRecoveryContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, 30*time.Second)
 }
 
 func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
@@ -153,21 +180,23 @@ func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.Sc
 	return nil
 }
 
-func recoverWorkerState(cmd *cobra.Command, cfg config.Config) error {
-	ctx := commandContext()
+func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Config) error {
 	repo, err := openRepositoryE(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer repo.Close()
+	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: scan runs")
 	recovered, err := repo.RecoverRunningScanRuns(ctx)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: scan requests")
 	requeued, err := repo.RecoverRunningScanRequests(ctx)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: scan campaigns")
 	recoveredCampaigns, err := repo.RecoverRunningScanCampaigns(ctx)
 	if err != nil {
 		return err

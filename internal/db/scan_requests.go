@@ -182,13 +182,49 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 			WHERE r.id = due.id
 			RETURNING r.id, r.program_id, r.campaign_id, r.name, r.params
 		),
-		started_campaigns AS (
+		affected_campaigns AS (
+			SELECT DISTINCT campaign_id
+			FROM claimed
+			WHERE campaign_id IS NOT NULL
+		),
+		counts AS (
+			SELECT
+				r.campaign_id,
+				count(*) FILTER (WHERE r.status = 'queued') AS queued,
+				count(*) FILTER (WHERE r.status = 'running') AS running,
+				count(*) FILTER (WHERE r.status = 'succeeded') AS succeeded,
+				count(*) FILTER (WHERE r.status = 'failed') AS failed,
+				count(*) FILTER (WHERE r.status = 'canceled') AS canceled
+			FROM zero_scan_requests r
+			JOIN affected_campaigns ac ON ac.campaign_id = r.campaign_id
+			GROUP BY r.campaign_id
+		),
+		refreshed_campaigns AS (
 			UPDATE zero_scan_campaigns c
-			SET status = 'running',
+			SET queued_requests = counts.queued::int,
+				running_requests = counts.running::int,
+				succeeded_requests = counts.succeeded::int,
+				failed_requests = counts.failed::int,
+				status = CASE
+					WHEN c.status = 'canceled' THEN 'canceled'
+					WHEN counts.running > 0 THEN 'running'
+					WHEN counts.queued > 0 THEN 'queued'
+					WHEN counts.failed > 0 THEN 'failed'
+					WHEN counts.canceled > 0 THEN 'canceled'
+					ELSE 'succeeded'
+				END,
 				started_at = COALESCE(c.started_at, now()),
-				updated_at = now()
-			WHERE c.id IN (SELECT campaign_id FROM claimed WHERE campaign_id IS NOT NULL)
-			  AND c.status = 'queued'
+				finished_at = CASE
+					WHEN counts.running = 0 AND counts.queued = 0 THEN COALESCE(c.finished_at, now())
+					ELSE NULL
+				END,
+				updated_at = now(),
+				error = CASE
+					WHEN counts.failed > 0 THEN 'one or more campaign scan requests failed'
+					ELSE ''
+				END
+			FROM counts
+			WHERE c.id = counts.campaign_id
 			RETURNING c.id
 		)
 		SELECT
@@ -204,14 +240,24 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 	}
 	defer rows.Close()
 	requests := []ScanRequest{}
+	campaignIDs := map[string]struct{}{}
 	for rows.Next() {
 		var req ScanRequest
 		if err := rows.Scan(&req.ID, &req.ProgramID, &req.CampaignID, &req.Name, &req.Params); err != nil {
 			return nil, err
 		}
 		requests = append(requests, req)
+		if req.CampaignID != "" {
+			campaignIDs[req.CampaignID] = struct{}{}
+		}
 	}
-	return requests, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for campaignID := range campaignIDs {
+		_ = r.RefreshScanCampaign(ctx, campaignID)
+	}
+	return requests, nil
 }
 
 func (r *Repository) RecoverRunningScanRequests(ctx context.Context) (int, error) {
@@ -244,18 +290,27 @@ func (r *Repository) RecoverRunningScanCampaigns(ctx context.Context) (int, erro
 	}
 	defer rows.Close()
 
-	count := 0
+	ids := []string{}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return count, err
+			return len(ids), err
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return len(ids), err
+	}
+	rows.Close()
+
+	count := 0
+	for _, id := range ids {
 		if err := r.RefreshScanCampaign(ctx, id); err != nil {
 			return count, err
 		}
 		count++
 	}
-	return count, rows.Err()
+	return count, nil
 }
 
 func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr error) error {
