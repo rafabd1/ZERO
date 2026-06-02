@@ -49,7 +49,7 @@ func main() {
 }
 
 func proxyAPI(w http.ResponseWriter, r *http.Request, client *http.Client, apiBase *url.URL, apiToken string) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodDelete {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
@@ -62,7 +62,11 @@ func proxyAPI(w http.ResponseWriter, r *http.Request, client *http.Client, apiBa
 	target.Path = strings.TrimRight(apiBase.Path, "/") + apiPath
 	target.RawQuery = r.URL.RawQuery
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target.String(), nil)
+	var reqBody io.Reader = http.NoBody
+	if r.Method != http.MethodGet {
+		reqBody = r.Body
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), reqBody)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -71,6 +75,9 @@ func proxyAPI(w http.ResponseWriter, r *http.Request, client *http.Client, apiBa
 		req.Header.Set("Authorization", "Bearer "+apiToken)
 	}
 	req.Header.Set("Accept", "application/json")
+	if contentType := strings.TrimSpace(r.Header.Get("Content-Type")); contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 
 	res, err := client.Do(req)
 	if err != nil {

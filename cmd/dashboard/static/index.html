@@ -153,6 +153,16 @@
               <tbody id="findingRows"></tbody>
             </table>
           </div>
+          <div id="findingDetailPanel" class="detail-drawer hidden">
+            <div class="drawer-head">
+              <div>
+                <h3 id="findingDetailTitle">Finding Detail</h3>
+                <p id="findingDetailMeta">Select a finding row.</p>
+              </div>
+              <button id="closeFindingDetail" class="ghost-button" type="button">Close</button>
+            </div>
+            <div id="findingDetailBody"></div>
+          </div>
         </div>
       </section>
 
@@ -170,10 +180,24 @@
                 <th>Progress</th>
                 <th>Parallelism</th>
                 <th>Updated</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="campaignRows"></tbody>
           </table>
+        </div>
+        <div id="campaignDetailPanel" class="detail-drawer hidden">
+          <div class="drawer-head">
+            <div>
+              <h3 id="campaignDetailTitle">Campaign Detail</h3>
+              <p id="campaignDetailMeta">Select a campaign row.</p>
+            </div>
+            <div class="drawer-actions">
+              <button id="cancelCampaignButton" class="danger-button" type="button">Cancel Campaign</button>
+              <button id="closeCampaignDetail" class="ghost-button" type="button">Close</button>
+            </div>
+          </div>
+          <div id="campaignDetailBody"></div>
         </div>
       </section>
     </main>

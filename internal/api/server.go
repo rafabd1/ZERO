@@ -159,6 +159,7 @@ func (s *Server) routes() {
 		ORDER BY c.created_at DESC
 		LIMIT 100
 	`))
+	s.mux.HandleFunc("GET /v1/scan-campaigns/{campaign_id}", s.scanCampaignDetail)
 	s.mux.HandleFunc("POST /v1/scan-requests", s.createScanRequest)
 	s.mux.HandleFunc("POST /v1/scan-requests/{request_id}/cancel", s.cancelScanRequest)
 	s.mux.HandleFunc("DELETE /v1/scan-requests/{request_id}", s.cancelScanRequest)
@@ -493,6 +494,158 @@ func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRawJSONArray(w, rows)
+}
+
+func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
+	campaignID := strings.TrimSpace(r.PathValue("campaign_id"))
+	if campaignID == "" {
+		writeError(w, http.StatusBadRequest, "campaign id is required")
+		return
+	}
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		WITH campaign AS (
+			SELECT *
+			FROM zero_scan_campaigns
+			WHERE id = $1::uuid
+		), campaign_programs AS (
+			SELECT DISTINCT program_id
+			FROM zero_scan_requests
+			WHERE campaign_id = $1::uuid
+			  AND program_id IS NOT NULL
+		), campaign_window AS (
+			SELECT COALESCE(started_at, created_at) AS since
+			FROM campaign
+		)
+		SELECT jsonb_build_object(
+			'campaign', (
+				SELECT jsonb_build_object(
+					'id', c.id,
+					'name', c.name,
+					'status', c.status,
+					'requested_by', c.requested_by,
+					'run_after', c.run_after,
+					'parallelism', c.parallelism,
+					'total_requests', c.total_requests,
+					'queued_requests', c.queued_requests,
+					'running_requests', c.running_requests,
+					'succeeded_requests', c.succeeded_requests,
+					'failed_requests', c.failed_requests,
+					'params', c.params,
+					'program_filter', c.program_filter,
+					'started_at', c.started_at,
+					'finished_at', c.finished_at,
+					'error', c.error,
+					'created_at', c.created_at,
+					'updated_at', c.updated_at
+				)
+				FROM campaign c
+			),
+			'request_counts', COALESCE((
+				SELECT jsonb_object_agg(status, total)
+				FROM (
+					SELECT status, count(*)::int AS total
+					FROM zero_scan_requests
+					WHERE campaign_id = $1::uuid
+					GROUP BY status
+				) counts
+			), '{}'::jsonb),
+			'recent_requests', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', r.id,
+							'program_id', r.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'program_platform', COALESCE(p.platform, ''),
+							'status', r.status,
+							'attempt_count', r.attempt_count,
+							'started_at', r.started_at,
+							'finished_at', r.finished_at,
+							'error', r.error,
+							'updated_at', r.updated_at
+						) AS row,
+						COALESCE(r.updated_at, r.created_at) AS sort_at
+					FROM zero_scan_requests r
+					LEFT JOIN zero_programs p ON p.id = r.program_id
+					WHERE r.campaign_id = $1::uuid
+					ORDER BY COALESCE(r.updated_at, r.created_at) DESC
+					LIMIT 25
+				) recent
+			), '[]'::jsonb),
+			'findings', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', f.id,
+							'program_id', f.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'program_platform', COALESCE(p.platform, ''),
+							'service_url', COALESCE(s.url, ''),
+							'nuclei_template_id', COALESCE(n.template_id, ''),
+							'vulnerability_id', COALESCE(v.vuln_id, ''),
+							'nuclei_result_id', f.nuclei_result_id,
+							'severity', f.severity,
+							'confidence', f.confidence,
+							'status', f.status,
+							'evidence', f.evidence,
+							'report_id', f.report_id,
+							'first_seen_at', f.first_seen_at,
+							'last_seen_at', f.last_seen_at
+						) AS row,
+						f.first_seen_at AS sort_at
+					FROM zero_candidate_findings f
+					JOIN campaign_programs cp ON cp.program_id = f.program_id
+					JOIN campaign_window cw ON true
+					LEFT JOIN zero_programs p ON p.id = f.program_id
+					LEFT JOIN zero_http_services s ON s.id = f.http_service_id
+					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					LEFT JOIN zero_vulnerability_records v ON v.id = f.vulnerability_id
+					WHERE f.first_seen_at >= cw.since
+					ORDER BY f.first_seen_at DESC
+					LIMIT 50
+				) recent_findings
+			), '[]'::jsonb),
+			'nuclei_results', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', n.id,
+							'program_id', n.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'service_url', COALESCE(s.url, ''),
+							'template_id', n.template_id,
+							'matched_at', n.matched_at,
+							'severity', n.severity,
+							'cves', n.cves,
+							'tags', n.tags,
+							'first_seen_at', n.first_seen_at
+						) AS row,
+						n.first_seen_at AS sort_at
+					FROM zero_nuclei_results n
+					JOIN campaign_programs cp ON cp.program_id = n.program_id
+					JOIN campaign_window cw ON true
+					LEFT JOIN zero_programs p ON p.id = n.program_id
+					LEFT JOIN zero_http_services s ON s.id = n.http_service_id
+					WHERE n.first_seen_at >= cw.since
+					ORDER BY n.first_seen_at DESC
+					LIMIT 50
+				) recent_nuclei
+			), '[]'::jsonb)
+		)
+		FROM campaign
+	`, campaignID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusNotFound, "scan campaign not found")
+		return
+	}
+	writeRawJSON(w, rows[0])
 }
 
 func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {

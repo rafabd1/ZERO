@@ -5,6 +5,9 @@ const state = {
   campaigns: [],
   findings: [],
   selectedProgramId: "",
+  selectedCampaignId: "",
+  selectedCampaignDetail: null,
+  selectedFindingId: "",
   autoTimer: null,
 };
 
@@ -15,6 +18,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("autoRefresh").addEventListener("change", () => configureAutoRefresh());
   $("programSearch").addEventListener("input", () => renderPrograms());
   $("programFilter").addEventListener("change", () => renderPrograms());
+  $("closeCampaignDetail").addEventListener("click", () => clearCampaignDetail());
+  $("cancelCampaignButton").addEventListener("click", () => cancelSelectedCampaign());
+  $("closeFindingDetail").addEventListener("click", () => clearFindingDetail());
   configureAutoRefresh();
   loadAll();
 });
@@ -54,6 +60,17 @@ async function loadAll(showLoading = true) {
     if (state.selectedProgramId) {
       await loadProgramDetail(state.selectedProgramId);
     }
+    if (state.selectedCampaignId) {
+      await loadCampaignDetail(state.selectedCampaignId, false);
+    }
+    if (state.selectedFindingId) {
+      const finding = state.findings.find((item) => item.id === state.selectedFindingId);
+      if (finding) {
+        renderFindingDetail(finding);
+      } else {
+        clearFindingDetail();
+      }
+    }
     setStatus(`Updated ${new Date().toLocaleTimeString()}`);
   } catch (error) {
     setStatus(`Error: ${error.message}`);
@@ -61,7 +78,19 @@ async function loadAll(showLoading = true) {
 }
 
 async function getJSON(path) {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  return apiJSON(path, { method: "GET" });
+}
+
+async function postJSON(path) {
+  return apiJSON(path, { method: "POST" });
+}
+
+async function apiJSON(path, options = {}) {
+  const response = await fetch(path, {
+    method: options.method || "GET",
+    headers: { Accept: "application/json", ...(options.headers || {}) },
+    body: options.body,
+  });
   const text = await response.text();
   let payload = null;
   try {
@@ -207,18 +236,184 @@ function renderCampaigns() {
   tbody.innerHTML = "";
   for (const campaign of state.campaigns) {
     const tr = document.createElement("tr");
+    if (campaign.id === state.selectedCampaignId) {
+      tr.className = "selected";
+    }
+    tr.addEventListener("click", () => loadCampaignDetail(campaign.id));
+    const canCancel = campaign.status === "queued" || campaign.status === "running";
     tr.innerHTML = `
       <td><strong>${escapeHTML(campaign.name || shortID(campaign.id) || "custom scan")}</strong><small>${escapeHTML(shortID(campaign.id))}</small></td>
       <td>${scanStatusPill(campaign.status)}</td>
       <td>${escapeHTML(campaignProgress(campaign))}</td>
       <td>${fmt(campaign.parallelism)}</td>
       <td>${timeAgo(campaign.updated_at || campaign.created_at)}</td>
+      <td>${canCancel ? `<button class="danger-button row-action" type="button" data-cancel-campaign="${escapeHTML(campaign.id)}">Cancel</button>` : `<span class="muted">-</span>`}</td>
     `;
+    const cancelButton = tr.querySelector("[data-cancel-campaign]");
+    if (cancelButton) {
+      cancelButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        cancelCampaign(campaign.id, campaign.name || shortID(campaign.id));
+      });
+    }
     tbody.appendChild(tr);
   }
   if (state.campaigns.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="muted">No custom scan campaigns yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">No custom scan campaigns yet.</td></tr>`;
   }
+}
+
+async function loadCampaignDetail(campaignID, showLoading = true) {
+  if (!campaignID) return;
+  state.selectedCampaignId = campaignID;
+  renderCampaigns();
+  const panel = $("campaignDetailPanel");
+  panel.classList.remove("hidden");
+  if (showLoading) {
+    setText("campaignDetailTitle", "Campaign Detail");
+    setText("campaignDetailMeta", "Loading...");
+    $("campaignDetailBody").innerHTML = "";
+  }
+  try {
+    const detail = await getJSON(`/api/v1/scan-campaigns/${encodeURIComponent(campaignID)}`);
+    state.selectedCampaignDetail = detail;
+    renderCampaignDetail(detail);
+  } catch (error) {
+    setText("campaignDetailMeta", `Error: ${error.message}`);
+    $("campaignDetailBody").innerHTML = "";
+  }
+}
+
+function renderCampaignDetail(detail) {
+  const campaign = detail.campaign || {};
+  const counts = detail.request_counts || {};
+  const findings = Array.isArray(detail.findings) ? detail.findings : [];
+  const requests = Array.isArray(detail.recent_requests) ? detail.recent_requests : [];
+  const nuclei = Array.isArray(detail.nuclei_results) ? detail.nuclei_results : [];
+  const canCancel = campaign.status === "queued" || campaign.status === "running";
+
+  setText("campaignDetailTitle", campaign.name || shortID(campaign.id) || "Campaign Detail");
+  setText("campaignDetailMeta", `${shortID(campaign.id)} | ${campaignProgress(campaign)} | ${timeAgo(campaign.updated_at || campaign.created_at)}`);
+  $("cancelCampaignButton").disabled = !canCancel;
+  $("cancelCampaignButton").textContent = canCancel ? "Cancel Campaign" : "Cancel Unavailable";
+
+  $("campaignDetailBody").innerHTML = `
+    <div class="drawer-grid">
+      ${detailCard("Status", scanStatusPill(campaign.status), campaign.error || "")}
+      ${detailCard("Requests", `${fmt(campaign.succeeded_requests)} succeeded`, `${fmt(campaign.running_requests)} running, ${fmt(campaign.queued_requests)} queued, ${fmt(campaign.failed_requests)} failed`)}
+      ${detailCard("Findings", fmt(findings.length), "new since campaign start")}
+      ${detailCard("Nuclei", fmt(nuclei.length), "recent validation results")}
+    </div>
+    <div class="drawer-section">
+      <h4>Request Counts</h4>
+      <div class="inline-pills">${renderCountPills(counts)}</div>
+    </div>
+    <div class="drawer-section">
+      <h4>Recent Requests</h4>
+      ${renderCampaignRequests(requests)}
+    </div>
+    <div class="drawer-section">
+      <h4>Campaign Findings</h4>
+      ${renderCampaignFindings(findings)}
+    </div>
+    <div class="drawer-section">
+      <h4>Nuclei Results</h4>
+      ${renderCampaignNuclei(nuclei)}
+    </div>
+    <div class="drawer-section">
+      <h4>Parameters</h4>
+      <pre class="json-box">${escapeHTML(JSON.stringify(campaign.params || {}, null, 2))}</pre>
+    </div>
+  `;
+}
+
+function renderCampaignRequests(requests) {
+  if (requests.length === 0) {
+    return `<p class="muted">No child requests available.</p>`;
+  }
+  return `
+    <div class="mini-list">
+      ${requests.map((request) => `
+        <div class="mini-row">
+          <div>
+            <strong>${escapeHTML(request.program_handle || shortID(request.program_id) || "unknown")}</strong>
+            <small>${escapeHTML(request.error || `${request.attempt_count || 0} attempt(s)`)}</small>
+          </div>
+          <div>${scanStatusPill(request.status)}<small>${timeAgo(request.updated_at || request.started_at)}</small></div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderCampaignFindings(findings) {
+  if (findings.length === 0) {
+    return `<p class="muted">No findings have been associated with this campaign window yet.</p>`;
+  }
+  return `
+    <div class="mini-list">
+      ${findings.map((finding) => {
+        const evidence = finding.evidence || {};
+        const validation = finding.nuclei_result_id ? "confirmed by Nuclei" : evidence.nuclei_validation_reason || evidence.nuclei_validation || "passive";
+        return `
+          <div class="mini-row">
+            <div>
+              <strong>${escapeHTML(finding.program_handle || shortID(finding.program_id) || "unknown")}</strong>
+              <small>${escapeHTML(firstNonEmpty(finding.service_url, evidence.url, evidence.technology_name, finding.vulnerability_id, shortID(finding.id)))}</small>
+            </div>
+            <div>${severityPill(finding.severity)}<small>${escapeHTML(validation)}</small></div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderCampaignNuclei(results) {
+  if (results.length === 0) {
+    return `<p class="muted">No Nuclei results have been associated with this campaign window yet.</p>`;
+  }
+  return `
+    <div class="mini-list">
+      ${results.map((result) => `
+        <div class="mini-row">
+          <div>
+            <strong>${escapeHTML(result.template_id || shortID(result.id))}</strong>
+            <small>${escapeHTML(firstNonEmpty(result.service_url, result.program_handle, result.matched_at))}</small>
+          </div>
+          <div>${severityPill(result.severity)}<small>${timeAgo(result.first_seen_at)}</small></div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function cancelSelectedCampaign() {
+  const campaign = (state.selectedCampaignDetail || {}).campaign || state.campaigns.find((item) => item.id === state.selectedCampaignId);
+  if (!campaign || !campaign.id) return;
+  await cancelCampaign(campaign.id, campaign.name || shortID(campaign.id));
+}
+
+async function cancelCampaign(campaignID, name) {
+  if (!campaignID) return;
+  const ok = window.confirm(`Cancel campaign "${name || shortID(campaignID)}"? Queued and running child requests will be marked canceled.`);
+  if (!ok) return;
+  try {
+    setStatus("Canceling campaign...");
+    await postJSON(`/api/v1/scan-campaigns/${encodeURIComponent(campaignID)}/cancel`);
+    await loadAll(false);
+    await loadCampaignDetail(campaignID, false);
+    setStatus("Campaign canceled");
+  } catch (error) {
+    setStatus(`Cancel failed: ${error.message}`);
+  }
+}
+
+function clearCampaignDetail() {
+  state.selectedCampaignId = "";
+  state.selectedCampaignDetail = null;
+  $("campaignDetailPanel").classList.add("hidden");
+  renderCampaigns();
 }
 
 function renderFindings() {
@@ -231,6 +426,10 @@ function renderFindings() {
       ? "confirmed"
       : evidence.nuclei_validation_reason || evidence.nuclei_validation || "passive";
     const tr = document.createElement("tr");
+    if (finding.id === state.selectedFindingId) {
+      tr.className = "selected";
+    }
+    tr.addEventListener("click", () => renderFindingDetail(finding));
     tr.innerHTML = `
       <td>${severityPill(finding.severity)}</td>
       <td>${fmt(finding.confidence)}</td>
@@ -242,6 +441,49 @@ function renderFindings() {
   if (state.findings.length === 0) {
     tbody.innerHTML = `<tr><td colspan="4" class="muted">No findings available.</td></tr>`;
   }
+}
+
+function renderFindingDetail(finding) {
+  state.selectedFindingId = finding.id;
+  renderFindings();
+  const evidence = finding.evidence || {};
+  const validation = finding.nuclei_result_id
+    ? "confirmed by Nuclei"
+    : evidence.nuclei_validation_reason || evidence.nuclei_validation || "passive/unconfirmed";
+  $("findingDetailPanel").classList.remove("hidden");
+  setText("findingDetailTitle", `${String(finding.severity || "unknown").toUpperCase()} finding`);
+  setText("findingDetailMeta", `${shortID(finding.id)} | confidence ${fmt(finding.confidence)} | ${timeAgo(finding.first_seen_at)}`);
+  $("findingDetailBody").innerHTML = `
+    <div class="drawer-grid">
+      ${detailCard("Validation", escapeHTML(validation), finding.nuclei_result_id ? "active evidence linked" : "passive or not confirmed")}
+      ${detailCard("Status", escapeHTML(finding.status || "unknown"), finding.report_id ? `report ${shortID(finding.report_id)}` : "not reported")}
+      ${detailCard("Technology", escapeHTML(firstNonEmpty(evidence.technology_name, evidence.technology, "-")), escapeHTML(firstNonEmpty(evidence.technology_version, evidence.version, "")))}
+      ${detailCard("CVEs", escapeHTML(asList(evidence.cves).join(", ") || evidence.vulnerability_id || "-"), escapeHTML(firstNonEmpty(evidence.nuclei_template_id, "")))}
+    </div>
+    <div class="drawer-section">
+      <h4>Summary</h4>
+      <p>${escapeHTML(firstNonEmpty(evidence.summary, evidence.cve_summary, evidence.description, "No summary stored."))}</p>
+    </div>
+    <div class="drawer-section">
+      <h4>Timing</h4>
+      <dl class="compact-kv">
+        <div><dt>First Seen</dt><dd>${escapeHTML(finding.first_seen_at || "-")}</dd></div>
+        <div><dt>Last Seen</dt><dd>${escapeHTML(finding.last_seen_at || "-")}</dd></div>
+        <div><dt>Service ID</dt><dd>${escapeHTML(shortID(finding.http_service_id) || "-")}</dd></div>
+        <div><dt>Nuclei Result</dt><dd>${escapeHTML(shortID(finding.nuclei_result_id) || "-")}</dd></div>
+      </dl>
+    </div>
+    <div class="drawer-section">
+      <h4>Evidence</h4>
+      <pre class="json-box">${escapeHTML(JSON.stringify(evidence, null, 2))}</pre>
+    </div>
+  `;
+}
+
+function clearFindingDetail() {
+  state.selectedFindingId = "";
+  $("findingDetailPanel").classList.add("hidden");
+  renderFindings();
 }
 
 function campaignProgress(campaign) {
@@ -311,6 +553,24 @@ function formatLatestScan(scan) {
   return JSON.stringify(payload, null, 2);
 }
 
+function detailCard(label, value, note = "") {
+  return `
+    <div class="detail-card">
+      <span>${escapeHTML(label)}</span>
+      <strong>${value || "-"}</strong>
+      <small>${escapeHTML(note || "")}</small>
+    </div>
+  `;
+}
+
+function renderCountPills(counts) {
+  const keys = ["queued", "running", "succeeded", "failed", "canceled"];
+  const rendered = keys
+    .filter((key) => Number(counts[key] || 0) > 0)
+    .map((key) => `<span class="pill">${escapeHTML(key)} ${fmt(counts[key])}</span>`);
+  return rendered.length > 0 ? rendered.join("") : `<span class="muted">No request counts available.</span>`;
+}
+
 function scanSummary(scan) {
   const stats = scan.stats || {};
   const parts = [];
@@ -354,6 +614,21 @@ function fmt(value) {
 function shortID(value) {
   if (!value) return "";
   return String(value).slice(0, 8);
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const clean = String(value).trim();
+    if (clean !== "") return clean;
+  }
+  return "";
+}
+
+function asList(value) {
+  if (Array.isArray(value)) return value.filter((item) => item !== null && item !== undefined).map(String);
+  if (value === null || value === undefined || value === "") return [];
+  return [String(value)];
 }
 
 function escapeHTML(value) {
