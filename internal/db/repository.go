@@ -338,6 +338,25 @@ func buildDomainRootsFromAssets(assets []domainRootAsset) []DomainRoot {
 				queryRoot:    queryRoot,
 			})
 		case "domain", "url":
+			if asset.AssetType == "url" {
+				scopeRoot, ok := wildcardRootFromAsset(asset)
+				if ok {
+					queryRoot, ok := sanitize.RegisteredDomain(scopeRoot)
+					if !ok {
+						continue
+					}
+					if scopeRoot == queryRoot {
+						authorizedRoots[rootAuthKey(asset.ProgramID, queryRoot)] = true
+					}
+					candidates = append(candidates, wildcardCandidate{
+						scopeAssetID: asset.ScopeAssetID,
+						programID:    asset.ProgramID,
+						scopeRoot:    scopeRoot,
+						queryRoot:    queryRoot,
+					})
+					continue
+				}
+			}
 			host, ok := sanitize.DomainFromScopeTarget(firstNonEmpty(asset.TargetRaw, asset.TargetNormalized))
 			if !ok {
 				continue

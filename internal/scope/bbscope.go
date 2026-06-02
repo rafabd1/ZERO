@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/rafabd1/ZERO/internal/db"
+	"github.com/rafabd1/ZERO/internal/sanitize"
 	"github.com/sw33tLie/bbscope/v2/pkg/platforms"
 	bcplatform "github.com/sw33tLie/bbscope/v2/pkg/platforms/bugcrowd"
 	h1platform "github.com/sw33tLie/bbscope/v2/pkg/platforms/hackerone"
@@ -252,7 +253,7 @@ func buildAssets(programID, scanRunID, platform, handle string, elements []bbsco
 	assets := make([]db.ScopeAsset, 0, len(elements))
 	allowedCategories := categorySet(categories)
 	for _, element := range elements {
-		assetType := bbscope.NormalizeCategory(element.Category)
+		assetType := assetTypeForElement(element)
 		if !categoryAllowed(assetType, allowedCategories) {
 			continue
 		}
@@ -276,6 +277,13 @@ func buildAssets(programID, scanRunID, platform, handle string, elements []bbsco
 		})
 	}
 	return assets
+}
+
+func assetTypeForElement(element bbscope.ScopeElement) string {
+	if _, ok := sanitize.WildcardRootFromScopeTarget(element.Target); ok {
+		return "wildcard"
+	}
+	return bbscope.NormalizeCategory(element.Category)
 }
 
 func categorySet(categories string) map[string]struct{} {

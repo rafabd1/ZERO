@@ -48,18 +48,19 @@ func TestBuildAssetsFiltersConfiguredCategories(t *testing.T) {
 	elements := []bbscope.ScopeElement{
 		{Target: "https://app.example.com", Category: "Url", IsBBP: true},
 		{Target: "*.example.com", Category: "Wildcard", IsBBP: true},
+		{Target: "*.classified-as-url.example.com", Category: "Url", IsBBP: true},
 		{Target: "com.example.mobile", Category: "Android", IsBBP: true},
 		{Target: "repository", Category: "SourceCode", IsBBP: true},
 	}
 
 	assets := buildAssets("program-id", "scan-id", "intigriti", "example/example", elements, true, "url,wildcard")
-	if len(assets) != 2 {
+	if len(assets) != 3 {
 		t.Fatalf("got %d assets; want only url and wildcard assets: %#v", len(assets), assets)
 	}
 	if assets[0].TargetNormalized != "app.example.com" || assets[1].TargetNormalized != "example.com" {
 		t.Fatalf("unexpected filtered assets: %#v", assets)
 	}
-	if assets[0].AssetType != "url" || assets[1].AssetType != "wildcard" {
+	if assets[0].AssetType != "url" || assets[1].AssetType != "wildcard" || assets[2].AssetType != "wildcard" {
 		t.Fatalf("asset categories were not normalized: %#v", assets)
 	}
 }

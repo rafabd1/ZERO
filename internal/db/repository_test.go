@@ -65,6 +65,8 @@ func TestBuildDomainRootsUsesOnlyAuthorizedOwnedRoots(t *testing.T) {
 		{ScopeAssetID: "wild-owned", ProgramID: "p1", AssetType: "wildcard", TargetRaw: "*.example.com"},
 		{ScopeAssetID: "wild-nested", ProgramID: "p1", AssetType: "wildcard", TargetRaw: "*.api.example.com"},
 		{ScopeAssetID: "wild-provider", ProgramID: "p1", AssetType: "wildcard", TargetRaw: "*.sub.heroku.com"},
+		{ScopeAssetID: "url-wildcard-owned", ProgramID: "p4", AssetType: "url", TargetRaw: "*.bitdefender.com"},
+		{ScopeAssetID: "url-wildcard-provider", ProgramID: "p4", AssetType: "url", TargetRaw: "*.sub.heroku.com"},
 		{ScopeAssetID: "wild-owned-by-domain", ProgramID: "p2", AssetType: "wildcard", TargetRaw: "*.api.acme.com"},
 		{ScopeAssetID: "domain-owned", ProgramID: "p2", AssetType: "domain", TargetRaw: "acme.com"},
 		{ScopeAssetID: "wild-not-authorized", ProgramID: "p3", AssetType: "wildcard", TargetRaw: "*.api.vendor.com"},
@@ -88,6 +90,12 @@ func TestBuildDomainRootsUsesOnlyAuthorizedOwnedRoots(t *testing.T) {
 	}
 	if _, ok := got["wild-provider"]; ok {
 		t.Fatalf("provider subdomain wildcard should not be sent to subfinder: %#v", got["wild-provider"])
+	}
+	if root, ok := got["url-wildcard-owned"]; !ok || root.RootDomain != "bitdefender.com" || root.QueryDomain != "bitdefender.com" {
+		t.Fatalf("url-wildcard-owned root = %#v; want scope/query bitdefender.com", root)
+	}
+	if _, ok := got["url-wildcard-provider"]; ok {
+		t.Fatalf("provider url wildcard should not be sent to subfinder: %#v", got["url-wildcard-provider"])
 	}
 	if _, ok := got["wild-not-authorized"]; ok {
 		t.Fatalf("nested wildcard without owned root authorization should not be sent to subfinder: %#v", got["wild-not-authorized"])
