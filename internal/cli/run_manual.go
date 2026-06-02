@@ -24,6 +24,8 @@ type manualRunOptions struct {
 	SkipNotify                       bool
 	SubfinderLimit                   int
 	DNSXLimit                        int
+	DNSXBatchSize                    int
+	DNSXBatchTimeout                 string
 	HTTPXLimit                       int
 	HTTPXTimeout                     int
 	HTTPXThreads                     int
@@ -35,6 +37,7 @@ type manualRunOptions struct {
 	WebanalyzeLimit                  int
 	CVELimit                         int
 	WebanalyzeApps                   string
+	WebanalyzeAppFiles               []string
 	WebanalyzeProbePaths             []string
 	WebanalyzeWorkers                int
 	WebanalyzeCrawl                  int
@@ -43,6 +46,7 @@ type manualRunOptions struct {
 	NucleiLimit                      int
 	NucleiTemplateID                 string
 	NucleiTemplate                   string
+	NucleiTemplates                  []string
 	NucleiTechFilter                 string
 	NucleiTechMaxAge                 string
 	NucleiTags                       string
@@ -148,6 +152,8 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().BoolVar(&opts.SkipNotify, "skip-notify", false, "skip Discord notification")
 	cmd.Flags().IntVar(&opts.SubfinderLimit, "subfinder-limit", 0, "manual subfinder root limit")
 	cmd.Flags().IntVar(&opts.DNSXLimit, "dnsx-limit", 0, "manual dnsx host limit")
+	cmd.Flags().IntVar(&opts.DNSXBatchSize, "dnsx-batch-size", 0, "manual dnsx hosts per process")
+	cmd.Flags().StringVar(&opts.DNSXBatchTimeout, "dnsx-batch-timeout", "", "manual max wall-clock time per dnsx batch, for example 10m")
 	cmd.Flags().IntVar(&opts.HTTPXLimit, "httpx-limit", 0, "manual httpx target limit")
 	cmd.Flags().IntVar(&opts.HTTPXTimeout, "httpx-timeout", 0, "manual httpx per-request timeout seconds")
 	cmd.Flags().IntVar(&opts.HTTPXThreads, "httpx-threads", 0, "manual httpx worker threads")
@@ -158,7 +164,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().BoolVar(&opts.HTTPXTLSProbe, "httpx-tls-probe", false, "enable httpx TLS probe for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeLimit, "webanalyze-limit", 0, "manual Webanalyze service limit")
 	cmd.Flags().IntVar(&opts.CVELimit, "cve-limit", 0, "manual passive CVE technology limit")
-	cmd.Flags().StringVar(&opts.WebanalyzeApps, "webanalyze-apps", "", "custom Webanalyze apps file for this run only")
+	cmd.Flags().StringArrayVar(&opts.WebanalyzeAppFiles, "webanalyze-apps", nil, "custom Webanalyze apps file for this run only; repeatable")
 	cmd.Flags().StringArrayVar(&opts.WebanalyzeProbePaths, "webanalyze-probe-path", nil, "additional relative path to fingerprint on every service, for example /admin/; repeatable")
 	cmd.Flags().IntVar(&opts.WebanalyzeWorkers, "webanalyze-workers", 0, "custom Webanalyze workers for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeCrawl, "webanalyze-crawl", -1, "custom Webanalyze crawl depth for this run only")
@@ -166,7 +172,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().StringVar(&opts.WebanalyzeBatchTimeout, "webanalyze-batch-timeout", "", "custom max wall-clock time per Webanalyze batch, for example 10m")
 	cmd.Flags().IntVar(&opts.NucleiLimit, "nuclei-limit", 0, "manual Nuclei URL limit")
 	cmd.Flags().StringVar(&opts.NucleiTemplateID, "nuclei-template-id", "", "custom Nuclei template id(s) for this run only")
-	cmd.Flags().StringVar(&opts.NucleiTemplate, "nuclei-template", "", "custom Nuclei template file/directory path(s) for this run only")
+	cmd.Flags().StringArrayVar(&opts.NucleiTemplates, "nuclei-template", nil, "custom Nuclei template file/directory path for this run only; repeatable")
 	cmd.Flags().StringVar(&opts.NucleiTechFilter, "nuclei-tech-filter", "", "limit Nuclei targets to services with matching fingerprint technology/title/server text")
 	cmd.Flags().StringVar(&opts.NucleiTechMaxAge, "nuclei-tech-max-age", "", "with --nuclei-tech-filter, only accept fingerprints reobserved within this duration, for example 2h")
 	cmd.Flags().StringVar(&opts.NucleiTags, "nuclei-tags", "", "custom Nuclei tags for this run only")
@@ -211,6 +217,8 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 			step := []string{"probe", "dnsx"}
 			step = appendProgramFlag(step, opts.ProgramID)
 			step = appendIntFlag(step, "--limit", opts.DNSXLimit)
+			step = appendIntFlag(step, "--batch-size", opts.DNSXBatchSize)
+			step = appendStringFlag(step, "--batch-timeout", opts.DNSXBatchTimeout)
 			steps = append(steps, step)
 		}
 		step := []string{"probe", "httpx"}
@@ -231,8 +239,8 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		step := []string{"enrich", "webanalyze"}
 		step = appendProgramFlag(step, opts.ProgramID)
 		step = appendIntFlag(step, "--limit", opts.WebanalyzeLimit)
-		if opts.WebanalyzeApps != "" {
-			step = append(step, "--apps", opts.WebanalyzeApps)
+		for _, app := range manualWebanalyzeApps(opts) {
+			step = append(step, "--apps", app)
 		}
 		for _, path := range opts.WebanalyzeProbePaths {
 			step = append(step, "--probe-path", path)
@@ -258,8 +266,8 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		if opts.NucleiTemplateID != "" {
 			step = append(step, "--template-id", opts.NucleiTemplateID)
 		}
-		if opts.NucleiTemplate != "" {
-			step = append(step, "--template-path", opts.NucleiTemplate)
+		for _, template := range manualNucleiTemplates(opts) {
+			step = append(step, "--template-path", template)
 		}
 		if opts.NucleiTechFilter != "" {
 			step = append(step, "--tech-filter", opts.NucleiTechFilter)
@@ -369,7 +377,42 @@ func shouldIncludePassiveFingerprintReports(opts manualRunOptions) bool {
 	if opts.DisablePassiveFingerprintReports || opts.SkipEnrich {
 		return false
 	}
-	return strings.TrimSpace(opts.WebanalyzeApps) != "" || len(opts.WebanalyzeProbePaths) > 0
+	return len(manualWebanalyzeApps(opts)) > 0 || len(opts.WebanalyzeProbePaths) > 0
+}
+
+func manualWebanalyzeApps(opts manualRunOptions) []string {
+	values := []string{}
+	if strings.TrimSpace(opts.WebanalyzeApps) != "" {
+		values = append(values, opts.WebanalyzeApps)
+	}
+	values = append(values, opts.WebanalyzeAppFiles...)
+	return uniqueTrimmed(values)
+}
+
+func manualNucleiTemplates(opts manualRunOptions) []string {
+	values := []string{}
+	if strings.TrimSpace(opts.NucleiTemplate) != "" {
+		values = append(values, opts.NucleiTemplate)
+	}
+	values = append(values, opts.NucleiTemplates...)
+	return uniqueTrimmed(values)
+}
+
+func uniqueTrimmed(values []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func automaticTechMaxAge(toolTimeout time.Duration) string {

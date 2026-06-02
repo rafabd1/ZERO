@@ -58,7 +58,7 @@ base URL + every --webanalyze-probe-path
 
 For example, 250 services with 5 probe paths means up to 1500 Webanalyze URLs.
 
-Zero defaults Webanalyze batches to 50 expanded URLs and 10 minutes per batch. `ZERO_TOOL_TIMEOUT` applies to external steps that do not have a dedicated batch timeout, such as subfinder, dnsx, Nuclei, and template updates. Use a larger explicit `--webanalyze-batch-size` only after a staged run shows it is stable.
+Zero defaults Webanalyze batches to 50 expanded URLs and 10 minutes per batch. `ZERO_TOOL_TIMEOUT` applies to external steps that do not have a dedicated batch timeout, such as subfinder, Nuclei, and template updates. Use a larger explicit `--webanalyze-batch-size` only after a staged run shows it is stable.
 
 Use `--nuclei-tech-filter` to run Nuclei only on services where `httpx`, Webanalyze, title, server text, or stored technology observations match the target product.
 
@@ -69,6 +69,13 @@ Use `--disable-passive-fingerprint-reports` when the campaign should emit only N
 ## Webanalyze Templates
 
 Custom Webanalyze files follow Wappalyzer-style JSON. Keep them specific enough to avoid matching generic pages.
+
+`--webanalyze-apps` is repeatable. Zero merges multiple custom Webanalyze JSON files for the run:
+
+```bash
+--webanalyze-apps /home/zero/custom-assets/product-a.webanalyze.json \
+--webanalyze-apps /home/zero/custom-assets/product-b.webanalyze.json
+```
 
 Minimal example:
 
@@ -131,6 +138,8 @@ Path probes are partial fingerprints. They add focused observations but do not c
 ## Nuclei Templates
 
 Use Nuclei for active validation, not broad discovery, unless that is the explicit campaign goal.
+
+`--nuclei-template` is repeatable. When paired with `--nuclei-tech-filter`, Zero first selects only services whose latest fingerprint/title/server/banner/technology observations match the filter, then runs the configured Nuclei templates on that reduced target set.
 
 Minimal HTTP template shape:
 
@@ -196,6 +205,7 @@ docker compose run --rm zero run schedule \
   --webanalyze-batch-size 50 \
   --webanalyze-batch-timeout 10m \
   --nuclei-template /home/zero/custom-assets/example-product-cve.yaml \
+  --nuclei-template /home/zero/custom-assets/example-product-exposure.yaml \
   --nuclei-tech-filter "Example Product|ExampleProduct" \
   --nuclei-force \
   --nuclei-rate-limit 30 \

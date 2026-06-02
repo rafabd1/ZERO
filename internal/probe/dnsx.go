@@ -20,6 +20,8 @@ type DNSXRunner struct {
 	bin       string
 	resolvers string
 	rate      int
+	batchSize int
+	batchTO   time.Duration
 	scanRunID string
 	programID string
 	limit     int
@@ -58,6 +60,20 @@ func (r *DNSXRunner) WithRate(rate int) *DNSXRunner {
 	return r
 }
 
+func (r *DNSXRunner) WithBatchSize(batchSize int) *DNSXRunner {
+	if batchSize > 0 {
+		r.batchSize = batchSize
+	}
+	return r
+}
+
+func (r *DNSXRunner) WithBatchTimeout(timeout time.Duration) *DNSXRunner {
+	if timeout > 0 {
+		r.batchTO = timeout
+	}
+	return r
+}
+
 func (r *DNSXRunner) WithLimit(limit int) *DNSXRunner {
 	r.limit = limit
 	return r
@@ -85,9 +101,9 @@ func (r *DNSXRunner) Run(ctx context.Context) (DNSXResult, error) {
 	if err != nil {
 		return DNSXResult{}, err
 	}
-	var input bytes.Buffer
 	known := map[string]db.Subdomain{}
 	byProgram := map[string]map[string]bool{}
+	hosts := []string{}
 	for _, target := range targets {
 		fqdn, ok := sanitize.CanonicalDomain(target.FQDN)
 		if !ok {
@@ -103,8 +119,7 @@ func (r *DNSXRunner) Run(ctx context.Context) (DNSXResult, error) {
 			byProgram[target.ProgramID] = map[string]bool{}
 		}
 		byProgram[target.ProgramID][fqdn] = false
-		input.WriteString(fqdn)
-		input.WriteByte('\n')
+		hosts = append(hosts, fqdn)
 	}
 	result := DNSXResult{Hosts: len(known)}
 	if result.Hosts == 0 {
@@ -115,7 +130,40 @@ func (r *DNSXRunner) Run(ctx context.Context) (DNSXResult, error) {
 	if r.resolvers != "" {
 		args = append(args, "-r", r.resolvers)
 	}
-	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
+	batchSize := r.batchSize
+	if batchSize <= 0 {
+		batchSize = len(hosts)
+	}
+	batchTimeout := r.timeout
+	if r.batchTO > 0 {
+		batchTimeout = r.batchTO
+	}
+	for start := 0; start < len(hosts); start += batchSize {
+		end := start + batchSize
+		if end > len(hosts) {
+			end = len(hosts)
+		}
+		if err := r.runBatch(ctx, batchTimeout, args, hosts[start:end], known, byProgram, &result); err != nil {
+			return result, err
+		}
+	}
+	for programID, resolved := range byProgram {
+		updated, err := r.repo.UpdateSubdomainResolution(ctx, programID, resolved, r.scanRunID)
+		if err != nil {
+			return result, err
+		}
+		result.Updated += updated
+	}
+	return result, nil
+}
+
+func (r *DNSXRunner) runBatch(ctx context.Context, timeout time.Duration, args []string, hosts []string, known map[string]db.Subdomain, byProgram map[string]map[string]bool, result *DNSXResult) error {
+	var input bytes.Buffer
+	for _, host := range hosts {
+		input.WriteString(host)
+		input.WriteByte('\n')
+	}
+	return tools.RunLinesWithTimeout(ctx, timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		var parsed dnsxLine
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			return fmt.Errorf("parse dnsx json: %w", err)
@@ -135,15 +183,4 @@ func (r *DNSXRunner) Run(ctx context.Context) (DNSXResult, error) {
 		}
 		return nil
 	})
-	if err != nil {
-		return result, err
-	}
-	for programID, resolved := range byProgram {
-		updated, err := r.repo.UpdateSubdomainResolution(ctx, programID, resolved, r.scanRunID)
-		if err != nil {
-			return result, err
-		}
-		result.Updated += updated
-	}
-	return result, nil
 }

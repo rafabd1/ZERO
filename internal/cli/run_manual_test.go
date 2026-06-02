@@ -28,3 +28,35 @@ func TestShouldIncludePassiveFingerprintReports(t *testing.T) {
 		t.Fatal("skip enrich should suppress passive fingerprint reports")
 	}
 }
+
+func TestManualWebanalyzeAppsCombinesLegacyAndRepeatedValues(t *testing.T) {
+	got := manualWebanalyzeApps(manualRunOptions{
+		WebanalyzeApps:     "/tmp/a.json",
+		WebanalyzeAppFiles: []string{"/tmp/b.json", "/tmp/a.json", " "},
+	})
+	want := []string{"/tmp/a.json", "/tmp/b.json"}
+	if len(got) != len(want) {
+		t.Fatalf("apps = %#v; want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("apps = %#v; want %#v", got, want)
+		}
+	}
+}
+
+func TestManualNucleiTemplatesCombinesLegacyAndRepeatedValues(t *testing.T) {
+	got := manualNucleiTemplates(manualRunOptions{
+		NucleiTemplate:  "/tmp/a.yaml",
+		NucleiTemplates: []string{"/tmp/b.yaml", "/tmp/a.yaml", ""},
+	})
+	want := []string{"/tmp/a.yaml", "/tmp/b.yaml"}
+	if len(got) != len(want) {
+		t.Fatalf("templates = %#v; want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("templates = %#v; want %#v", got, want)
+		}
+	}
+}

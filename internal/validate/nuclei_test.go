@@ -111,6 +111,19 @@ func TestBuildArgsIncludesRequestProfile(t *testing.T) {
 	}
 }
 
+func TestNormalizeNucleiListSplitsAndDeduplicates(t *testing.T) {
+	got := normalizeNucleiList([]string{"/tmp/a.yaml,/tmp/b.yaml", "/tmp/a.yaml", " /tmp/c.yaml "})
+	want := []string{"/tmp/a.yaml", "/tmp/b.yaml", "/tmp/c.yaml"}
+	if len(got) != len(want) {
+		t.Fatalf("list = %#v; want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("list = %#v; want %#v", got, want)
+		}
+	}
+}
+
 func TestClassifyWAFResponseDetectsBlockedCloudflarePage(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("cf-ray", "example")

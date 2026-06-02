@@ -12,7 +12,7 @@ import (
 func newEnrichCommand() *cobra.Command {
 	var limit int
 	var programID string
-	var apps string
+	var apps []string
 	var probePaths []string
 	var workers int
 	var crawl int
@@ -39,10 +39,10 @@ func newEnrichCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			appsPath := apps
-			authoritative := strings.TrimSpace(apps) == "" && len(probePaths) == 0
-			if appsPath == "" {
-				appsPath = cfg.Tools.WebanalyzeApps
+			appPaths := apps
+			authoritative := len(appPaths) == 0 && len(probePaths) == 0
+			if len(appPaths) == 0 && strings.TrimSpace(cfg.Tools.WebanalyzeApps) != "" {
+				appPaths = []string{cfg.Tools.WebanalyzeApps}
 			}
 			workerCount := workers
 			if workerCount <= 0 {
@@ -57,7 +57,7 @@ func newEnrichCommand() *cobra.Command {
 			result, err := enrich.NewWebanalyzeRunner(repo, cfg.Tools.WebanalyzeBin).
 				WithScanRunID(scanID).
 				WithProgramID(programID).
-				WithApps(appsPath).
+				WithApps(appPaths).
 				WithProbePaths(probePaths).
 				WithAuthoritative(authoritative).
 				WithWorkers(workerCount).
@@ -76,7 +76,7 @@ func newEnrichCommand() *cobra.Command {
 					"skipped_output": result.SkippedOutput,
 					"program_id":     programID,
 					"tool":           "webanalyze",
-					"apps":           appsPath,
+					"apps":           appPaths,
 					"probe_paths":    probePaths,
 					"authoritative":  authoritative,
 					"workers":        workerCount,
@@ -94,7 +94,7 @@ func newEnrichCommand() *cobra.Command {
 				"skipped_output": result.SkippedOutput,
 				"program_id":     programID,
 				"tool":           "webanalyze",
-				"apps":           appsPath,
+				"apps":           appPaths,
 				"probe_paths":    probePaths,
 				"authoritative":  authoritative,
 				"workers":        workerCount,
@@ -110,7 +110,7 @@ func newEnrichCommand() *cobra.Command {
 	}
 	webanalyze.Flags().IntVar(&limit, "limit", 0, "limit number of alive services to fingerprint")
 	webanalyze.Flags().StringVar(&programID, "program-id", "", "limit enrichment to one program id")
-	webanalyze.Flags().StringVar(&apps, "apps", "", "custom Webanalyze/Wappalyzer technologies file for this run only")
+	webanalyze.Flags().StringArrayVar(&apps, "apps", nil, "custom Webanalyze/Wappalyzer technologies file for this run only; repeatable")
 	webanalyze.Flags().StringArrayVar(&probePaths, "probe-path", nil, "additional relative path to fingerprint on every service, for example /admin/; repeatable")
 	webanalyze.Flags().IntVar(&workers, "workers", 0, "Webanalyze workers for this run only")
 	webanalyze.Flags().IntVar(&crawl, "crawl", -1, "Webanalyze crawl depth for this run only")

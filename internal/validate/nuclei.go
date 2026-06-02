@@ -23,7 +23,7 @@ type NucleiRunner struct {
 	tags        string
 	severities  string
 	templateIDs string
-	templates   string
+	templates   []string
 	templateDir string
 	techFilter  string
 	techMaxAge  time.Duration
@@ -125,10 +125,8 @@ func (r *NucleiRunner) WithWAFDetection(enabled bool, sampleSize, timeoutSeconds
 	return r
 }
 
-func (r *NucleiRunner) WithTemplates(templates string) *NucleiRunner {
-	if strings.TrimSpace(templates) != "" {
-		r.templates = strings.TrimSpace(templates)
-	}
+func (r *NucleiRunner) WithTemplates(templates []string) *NucleiRunner {
+	r.templates = normalizeNucleiList(templates)
 	return r
 }
 
@@ -197,8 +195,10 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 
 	index := newTargetIndex(targets)
 	args := r.buildArgs()
-	if r.templates != "" {
-		args = append(args, "-t", r.templates)
+	if len(r.templates) > 0 {
+		for _, template := range r.templates {
+			args = append(args, "-t", template)
+		}
 	} else if r.templateDir != "" {
 		args = append(args, "-t", r.templateDir)
 	}
@@ -245,6 +245,27 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		result.WAF = finishWAFDiagnostic(ctx, wafBase, err, result.Results)
 	}
 	return result, err
+}
+
+func normalizeNucleiList(values []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, value := range values {
+		for _, item := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == ';' || r == '\n' || r == '\r'
+		}) {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := seen[item]; ok {
+				continue
+			}
+			seen[item] = struct{}{}
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func (r *NucleiRunner) buildArgs() []string {

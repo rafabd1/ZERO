@@ -18,6 +18,8 @@ func newProbeCommand() *cobra.Command {
 	var httpxPatternCap int
 	var httpxTLSProbe bool
 	var dnsxLimit int
+	var dnsxBatchSize int
+	var dnsxBatchTimeout time.Duration
 	var dnsxProgramID string
 	var programID string
 	cmd := &cobra.Command{
@@ -46,18 +48,22 @@ func newProbeCommand() *cobra.Command {
 				WithResolvers(cfg.Tools.DNSXResolvers).
 				WithRate(cfg.Tools.DNSXRate).
 				WithLimit(dnsxLimit).
-				WithTimeout(cfg.Tools.ToolTimeout)
+				WithBatchSize(firstPositive(dnsxBatchSize, cfg.Tools.DNSXBatchSize)).
+				WithBatchTimeout(firstDuration(dnsxBatchTimeout, cfg.Tools.DNSXBatchTimeout))
 			result, err := runner.Run(ctx)
-			if err != nil {
-				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+			stats := map[string]any{
+				"hosts":         result.Hosts,
+				"resolved":      result.Resolved,
+				"updated":       result.Updated,
+				"tool":          "dnsx",
+				"program_id":    dnsxProgramID,
+				"batch_size":    firstPositive(dnsxBatchSize, cfg.Tools.DNSXBatchSize),
+				"batch_timeout": firstDuration(dnsxBatchTimeout, cfg.Tools.DNSXBatchTimeout).String(),
 			}
-			if err := finishScanRun(ctx, repo, scanID, nil, result.Hosts, result.Updated, map[string]any{
-				"hosts":      result.Hosts,
-				"resolved":   result.Resolved,
-				"updated":    result.Updated,
-				"tool":       "dnsx",
-				"program_id": dnsxProgramID,
-			}); err != nil {
+			if err != nil {
+				return finishScanRun(ctx, repo, scanID, err, result.Hosts, result.Updated, stats)
+			}
+			if err := finishScanRun(ctx, repo, scanID, nil, result.Hosts, result.Updated, stats); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "resolved %d of %d hosts and updated %d DNS states\n", result.Resolved, result.Hosts, result.Updated)
@@ -131,6 +137,8 @@ func newProbeCommand() *cobra.Command {
 		},
 	}
 	dnsx.Flags().IntVar(&dnsxLimit, "limit", 0, "limit number of hosts to resolve")
+	dnsx.Flags().IntVar(&dnsxBatchSize, "batch-size", 0, "override number of hosts per dnsx process")
+	dnsx.Flags().DurationVar(&dnsxBatchTimeout, "batch-timeout", 0, "override max wall-clock time per dnsx batch, for example 10m")
 	dnsx.Flags().StringVar(&dnsxProgramID, "program-id", "", "limit DNS validation to one program id")
 	httpx.Flags().IntVar(&httpxLimit, "limit", 0, "limit number of hosts to probe")
 	httpx.Flags().IntVar(&httpxTimeout, "timeout", 0, "override httpx per-request timeout seconds")

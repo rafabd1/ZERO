@@ -49,7 +49,7 @@ The worker is the normal execution mode.
 - `ZERO_SCOPE_SYNC_MAX_AGE=24h` prevents scope sync from running on every restart.
 - `ZERO_DEFAULT_SCAN_INTERVAL_HOURS=72` is the default per-program scan interval.
 - `ZERO_TARGET_PARALLELISM=12` controls default/due pipeline program parallelism.
-- `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder, dnsx, Nuclei, and template updates.
+- `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder, Nuclei, and template updates.
 - `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
 
 The main pipeline per due program is:
@@ -147,6 +147,12 @@ Broad scopes can contain many near-identical tenant, CDN, or default-page hosts.
 - `ZERO_HTTPX_PATTERN_MIN_GROUP=200`
 - `ZERO_HTTPX_PATTERN_CAP=120`
 - `ZERO_HTTPX_TLS_PROBE=false`
+
+For DNS resolution:
+
+- `ZERO_DNSX_RATE=200`
+- `ZERO_DNSX_BATCH_SIZE=1000`
+- `ZERO_DNSX_BATCH_TIMEOUT=10m`
 
 For Webanalyze and custom path probes:
 

@@ -17,7 +17,7 @@ import (
 type WebanalyzeRunner struct {
 	repo          *db.Repository
 	bin           string
-	apps          string
+	apps          []string
 	probePaths    []string
 	workers       int
 	crawl         int
@@ -45,8 +45,8 @@ func NewWebanalyzeRunner(repo *db.Repository, bin string) *WebanalyzeRunner {
 	return &WebanalyzeRunner{repo: repo, bin: bin, workers: 4}
 }
 
-func (r *WebanalyzeRunner) WithApps(path string) *WebanalyzeRunner {
-	r.apps = strings.TrimSpace(path)
+func (r *WebanalyzeRunner) WithApps(paths []string) *WebanalyzeRunner {
+	r.apps = normalizePathList(paths)
 	return r
 }
 
@@ -118,12 +118,17 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	if batchSize <= 0 {
 		batchSize = len(targets)
 	}
+	appsPath, cleanup, err := prepareWebanalyzeApps(r.apps)
+	if err != nil {
+		return result, err
+	}
+	defer cleanup()
 	for start := 0; start < len(targets); start += batchSize {
 		end := start + batchSize
 		if end > len(targets) {
 			end = len(targets)
 		}
-		if err := r.runBatch(ctx, targets[start:end], &result); err != nil {
+		if err := r.runBatch(ctx, targets[start:end], appsPath, &result); err != nil {
 			return result, err
 		}
 	}
@@ -228,7 +233,7 @@ func targetWithProbePath(target db.WebTechTarget, probePath string) (db.WebTechT
 	return target, true
 }
 
-func (r *WebanalyzeRunner) runBatch(ctx context.Context, targets []db.WebTechTarget, result *WebanalyzeResult) error {
+func (r *WebanalyzeRunner) runBatch(ctx context.Context, targets []db.WebTechTarget, appsPath string, result *WebanalyzeResult) error {
 	index := make(map[string][]db.WebTechTarget, len(targets))
 	hostFile, err := os.CreateTemp("", "zero-webanalyze-hosts-*.txt")
 	if err != nil {
@@ -259,8 +264,8 @@ func (r *WebanalyzeRunner) runBatch(ctx context.Context, targets []db.WebTechTar
 		"-search=false",
 		"-redirect=false",
 	}
-	if r.apps != "" {
-		args = append(args, "-apps", r.apps)
+	if appsPath != "" {
+		args = append(args, "-apps", appsPath)
 	}
 
 	return tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, nil, func(line string) error {
@@ -306,6 +311,95 @@ func (r *WebanalyzeRunner) runBatch(ctx context.Context, targets []db.WebTechTar
 			}
 		}
 		return nil
+	})
+}
+
+type webanalyzeAppsFile struct {
+	Technologies map[string]json.RawMessage `json:"technologies,omitempty"`
+	Categories   map[string]json.RawMessage `json:"categories,omitempty"`
+	Apps         map[string]json.RawMessage `json:"apps,omitempty"`
+}
+
+func prepareWebanalyzeApps(paths []string) (string, func(), error) {
+	paths = normalizePathList(paths)
+	if len(paths) == 0 {
+		return "", func() {}, nil
+	}
+	if len(paths) == 1 {
+		return paths[0], func() {}, nil
+	}
+	merged := webanalyzeAppsFile{
+		Technologies: map[string]json.RawMessage{},
+		Categories:   map[string]json.RawMessage{},
+		Apps:         map[string]json.RawMessage{},
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", func() {}, fmt.Errorf("read Webanalyze apps %s: %w", path, err)
+		}
+		var parsed webanalyzeAppsFile
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return "", func() {}, fmt.Errorf("parse Webanalyze apps %s: %w", path, err)
+		}
+		for name, raw := range parsed.Technologies {
+			merged.Technologies[name] = raw
+		}
+		for name, raw := range parsed.Categories {
+			merged.Categories[name] = raw
+		}
+		for name, raw := range parsed.Apps {
+			merged.Apps[name] = raw
+		}
+	}
+	if len(merged.Technologies) == 0 && len(merged.Apps) == 0 {
+		return "", func() {}, fmt.Errorf("merged Webanalyze apps contain no technologies")
+	}
+	if len(merged.Categories) == 0 {
+		merged.Categories = nil
+	}
+	if len(merged.Apps) == 0 {
+		merged.Apps = nil
+	}
+	file, err := os.CreateTemp("", "zero-webanalyze-apps-*.json")
+	if err != nil {
+		return "", func() {}, err
+	}
+	encoder := json.NewEncoder(file)
+	if err := encoder.Encode(merged); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return "", func() {}, err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(file.Name())
+		return "", func() {}, err
+	}
+	return file.Name(), func() { _ = os.Remove(file.Name()) }, nil
+}
+
+func normalizePathList(values []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, value := range values {
+		for _, path := range splitList(value) {
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
+			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+func splitList(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r'
 	})
 }
 

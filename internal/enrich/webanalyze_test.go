@@ -1,6 +1,8 @@
 package enrich
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/rafabd1/ZERO/internal/db"
@@ -20,6 +22,41 @@ func TestParseWebanalyzeLine(t *testing.T) {
 	if parsed.Matches[0].AppName != "Hugo" || parsed.Matches[0].Version != "0.42.1" {
 		t.Fatalf("match = %#v", parsed.Matches[0])
 	}
+}
+
+func TestPrepareWebanalyzeAppsMergesMultipleFiles(t *testing.T) {
+	first := writeTempWebanalyzeApps(t, `{"technologies":{"Product A":{"html":["A"]}},"categories":{"19":{"name":"Enterprise"}}}`)
+	second := writeTempWebanalyzeApps(t, `{"technologies":{"Product B":{"html":["B"]}}}`)
+	path, cleanup, err := prepareWebanalyzeApps([]string{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Product A", "Product B", "Enterprise"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("merged apps missing %q: %s", want, data)
+		}
+	}
+}
+
+func writeTempWebanalyzeApps(t *testing.T, body string) string {
+	t.Helper()
+	file, err := os.CreateTemp("", "zero-webanalyze-test-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(file.Name()) })
+	return file.Name()
 }
 
 func TestNormalizeURLKeyDropsQueryAndTrailingSlash(t *testing.T) {

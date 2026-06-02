@@ -70,6 +70,8 @@ type ToolConfig struct {
 	DNSXBin                 string
 	DNSXResolvers           string
 	DNSXRate                int
+	DNSXBatchSize           int
+	DNSXBatchTimeout        time.Duration
 	HTTPXBin                string
 	HTTPXTimeout            int
 	HTTPXThreads            int
@@ -167,6 +169,8 @@ func Load() (Config, error) {
 	v.SetDefault("tools.dnsx_bin", "dnsx")
 	v.SetDefault("tools.dnsx_resolvers", "")
 	v.SetDefault("tools.dnsx_rate", 200)
+	v.SetDefault("tools.dnsx_batch_size", 1000)
+	v.SetDefault("tools.dnsx_batch_timeout", "10m")
 	v.SetDefault("tools.httpx_bin", "httpx")
 	v.SetDefault("tools.httpx_timeout", 4)
 	v.SetDefault("tools.httpx_threads", 20)
@@ -253,6 +257,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.dnsx_bin", "ZERO_DNSX_BIN")
 	_ = v.BindEnv("tools.dnsx_resolvers", "ZERO_DNSX_RESOLVERS")
 	_ = v.BindEnv("tools.dnsx_rate", "ZERO_DNSX_RATE")
+	_ = v.BindEnv("tools.dnsx_batch_size", "ZERO_DNSX_BATCH_SIZE")
+	_ = v.BindEnv("tools.dnsx_batch_timeout", "ZERO_DNSX_BATCH_TIMEOUT")
 	_ = v.BindEnv("tools.httpx_bin", "ZERO_HTTPX_BIN")
 	_ = v.BindEnv("tools.httpx_timeout", "ZERO_HTTPX_TIMEOUT")
 	_ = v.BindEnv("tools.httpx_threads", "ZERO_HTTPX_THREADS")
@@ -354,6 +360,8 @@ func Load() (Config, error) {
 			DNSXBin:                 v.GetString("tools.dnsx_bin"),
 			DNSXResolvers:           v.GetString("tools.dnsx_resolvers"),
 			DNSXRate:                v.GetInt("tools.dnsx_rate"),
+			DNSXBatchSize:           clampInt(v.GetInt("tools.dnsx_batch_size"), 100, 100000),
+			DNSXBatchTimeout:        v.GetDuration("tools.dnsx_batch_timeout"),
 			HTTPXBin:                v.GetString("tools.httpx_bin"),
 			HTTPXTimeout:            clampInt(v.GetInt("tools.httpx_timeout"), 1, 60),
 			HTTPXThreads:            clampInt(v.GetInt("tools.httpx_threads"), 1, 200),

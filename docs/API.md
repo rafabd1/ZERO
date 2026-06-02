@@ -86,6 +86,9 @@ Content-Type: application/json
     "SkipSync": true,
     "ReuseActiveServices": true,
     "WebanalyzeApps": "/work/custom-technologies.json",
+    "WebanalyzeAppFiles": [
+      "/work/another-custom-technologies.json"
+    ],
     "WebanalyzeProbePaths": [
       "/admin/",
       "/api/version"
@@ -95,6 +98,9 @@ Content-Type: application/json
     "WebanalyzeBatch": 50,
     "WebanalyzeBatchTimeout": "10m",
     "NucleiTemplate": "/work/templates/custom",
+    "NucleiTemplates": [
+      "/work/templates/extra-check.yaml"
+    ],
     "NucleiForce": true,
     "NucleiTechFilter": "product-name",
     "NucleiSeverity": "medium,high,critical",
@@ -120,7 +126,7 @@ Custom campaign parallelism is independent from `ZERO_TARGET_PARALLELISM`. The w
 
 When a request or campaign runs `httpx` and/or Webanalyze before Nuclei, Zero automatically keeps `NucleiTechFilter` tied to fresh fingerprints from that run. Use `NucleiTechMaxAge` only for requests that skip fingerprinting and intentionally gate Nuclei from existing database observations.
 
-Set `ReuseActiveServices: true` to skip fresh `dnsx/httpx` probing and load active HTTP services already present in the database. This is meant for back-to-back focused campaigns where the alive inventory was recently refreshed. In this mode, `HTTPX*` params are intentionally ignored.
+Set `ReuseActiveServices: true` to skip fresh `dnsx/httpx` probing and load active HTTP services already present in the database. This is meant for back-to-back focused campaigns where the alive inventory was recently refreshed. In this mode, `DNSX*` and `HTTPX*` params are intentionally ignored.
 
 ## Cancel Work
 

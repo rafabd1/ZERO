@@ -13,7 +13,7 @@ import (
 func newAnalyzeCommand() *cobra.Command {
 	var nucleiLimit int
 	var nucleiTemplateID string
-	var nucleiTemplatePath string
+	var nucleiTemplatePaths []string
 	var nucleiTechFilter string
 	var nucleiTechMaxAge time.Duration
 	var nucleiTags string
@@ -125,7 +125,7 @@ func newAnalyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fromCVEs := (cfg.Tools.NucleiFromCVEs || nucleiFromCVEs) && !nucleiAllCVETemplates && !nucleiForce && templateIDs == "" && nucleiTemplatePath == ""
+			fromCVEs := (cfg.Tools.NucleiFromCVEs || nucleiFromCVEs) && !nucleiAllCVETemplates && !nucleiForce && templateIDs == "" && len(nucleiTemplatePaths) == 0
 			if fromCVEs {
 				cveLimit := nucleiCVELimit
 				if cveLimit <= 0 {
@@ -154,7 +154,7 @@ func newAnalyzeCommand() *cobra.Command {
 				WithPolicy(tags, severities, templateIDs, rate, concurrency, bulkSize).
 				WithRequestProfile(headers, proxy, scanStrategy, maxHostError).
 				WithTechFilter(nucleiTechFilter, nucleiTechMaxAge).
-				WithTemplates(nucleiTemplatePath).
+				WithTemplates(nucleiTemplatePaths).
 				WithTemplateDir(cfg.Tools.NucleiTemplateDir).
 				WithRuntime(retries, timeout).
 				WithScanRunID(scanID).
@@ -172,7 +172,7 @@ func newAnalyzeCommand() *cobra.Command {
 				"tool":              "nuclei",
 				"from_cves":         fromCVEs,
 				"template_ids":      templateIDs,
-				"template_paths":    nucleiTemplatePath,
+				"template_paths":    nucleiTemplatePaths,
 				"tech_filter":       nucleiTechFilter,
 				"tech_max_age":      nucleiTechMaxAge.String(),
 				"cve_min_year":      cfg.Intel.CVEMinYear,
@@ -212,7 +212,7 @@ func newAnalyzeCommand() *cobra.Command {
 	cves.Flags().IntVar(&cvesLimit, "limit", 25, "maximum versioned technologies to query")
 	nuclei.Flags().IntVar(&nucleiLimit, "limit", 0, "limit number of URLs to validate")
 	nuclei.Flags().StringVar(&nucleiTemplateID, "template-id", "", "run only matching Nuclei template id(s)")
-	nuclei.Flags().StringVar(&nucleiTemplatePath, "template-path", "", "run Nuclei template file/directory path(s)")
+	nuclei.Flags().StringArrayVar(&nucleiTemplatePaths, "template-path", nil, "run Nuclei template file/directory path; repeatable")
 	nuclei.Flags().StringVar(&nucleiTechFilter, "tech-filter", "", "limit Nuclei targets to services with matching fingerprint technology/title/server text")
 	nuclei.Flags().DurationVar(&nucleiTechMaxAge, "tech-max-age", 0, "with --tech-filter, only accept fingerprints reobserved within this duration, for example 2h")
 	nuclei.Flags().StringVar(&nucleiTags, "tags", "", "override Nuclei tags for this run")
