@@ -36,7 +36,7 @@ func newRunCommand() *cobra.Command {
 	due.Flags().IntVar(&dueLimit, "limit", 0, "maximum due programs to run; 0 means no explicit cap")
 	due.Flags().IntVar(&dueParallelism, "parallelism", 0, "maximum programs to scan concurrently; defaults to ZERO_TARGET_PARALLELISM")
 	due.Flags().BoolVar(&dueDryRun, "dry-run", false, "list due programs without syncing or scanning")
-	due.Flags().BoolVar(&skipSync, "skip-sync", false, "skip HackerOne scope sync before selecting due programs")
+	due.Flags().BoolVar(&skipSync, "skip-sync", false, "skip the daily scope-sync guard before selecting due programs")
 	cmd.AddCommand(due)
 	addManualRunCommand(cmd)
 	addScheduledRunCommand(cmd)
@@ -47,7 +47,7 @@ func runPipeline(parent *cobra.Command) error {
 	ctx := commandContext()
 	cfg := loadConfig()
 	steps := [][]string{
-		{"sync", "h1"},
+		{"sync", "all"},
 		{"enum", "subfinder"},
 		{"probe", "dnsx"},
 		{"probe", "httpx"},
@@ -78,9 +78,9 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	}
 
 	if !dryRun && !skipSync {
-		fmt.Fprintln(parent.OutOrStdout(), "zero due step: [sync h1]")
-		if err := runChildE(parent, "sync", "h1"); err != nil {
-			alertOnTimeout(ctx, parent, cfg, "", "", []string{"sync", "h1"}, err)
+		fmt.Fprintln(parent.OutOrStdout(), "zero due step: [scope sync if due]")
+		if err := runScopeSyncIfDue(parent, cfg); err != nil {
+			alertOnTimeout(ctx, parent, cfg, "", "", []string{"sync", "all"}, err)
 			return err
 		}
 	}

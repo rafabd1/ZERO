@@ -18,6 +18,8 @@ type Config struct {
 	TargetParallelism int
 
 	HackerOne HackerOneConfig
+	Bugcrowd  BugcrowdConfig
+	Intigriti IntigritiConfig
 	Scope     ScopeConfig
 	Tools     ToolConfig
 	Schedule  ScheduleConfig
@@ -39,10 +41,25 @@ type HackerOneConfig struct {
 	Token    string
 }
 
+type BugcrowdConfig struct {
+	Token      string
+	Email      string
+	Password   string
+	OTPSecret  string
+	Proxy      string
+	PublicOnly bool
+}
+
+type IntigritiConfig struct {
+	Token string
+}
+
 type ScopeConfig struct {
 	BountyOnly  bool
 	PrivateOnly bool
 	Categories  string
+	Providers   string
+	SyncMaxAge  time.Duration
 }
 
 type ToolConfig struct {
@@ -130,6 +147,8 @@ func Load() (Config, error) {
 	v.SetDefault("scope.bounty_only", true)
 	v.SetDefault("scope.private_only", false)
 	v.SetDefault("scope.categories", "url,wildcard")
+	v.SetDefault("scope.providers", "h1")
+	v.SetDefault("scope.sync_max_age", "24h")
 	v.SetDefault("tools.subfinder_bin", "subfinder")
 	v.SetDefault("tools.subfinder_provider_config", "")
 	v.SetDefault("tools.subfinder_sources", "shodan,bevigil,virustotal,securitytrails")
@@ -193,9 +212,18 @@ func Load() (Config, error) {
 	_ = v.BindEnv("supabase_service_role_key", "ZERO_SUPABASE_SERVICE_ROLE_KEY")
 	_ = v.BindEnv("h1.username", "ZERO_H1_USERNAME")
 	_ = v.BindEnv("h1.token", "ZERO_H1_TOKEN")
+	_ = v.BindEnv("bugcrowd.token", "ZERO_BUGCROWD_TOKEN")
+	_ = v.BindEnv("bugcrowd.email", "ZERO_BUGCROWD_EMAIL")
+	_ = v.BindEnv("bugcrowd.password", "ZERO_BUGCROWD_PASSWORD")
+	_ = v.BindEnv("bugcrowd.otp_secret", "ZERO_BUGCROWD_OTP_SECRET")
+	_ = v.BindEnv("bugcrowd.proxy", "ZERO_BUGCROWD_PROXY")
+	_ = v.BindEnv("bugcrowd.public_only", "ZERO_BUGCROWD_PUBLIC_ONLY")
+	_ = v.BindEnv("intigriti.token", "ZERO_INTIGRITI_TOKEN")
 	_ = v.BindEnv("scope.bounty_only", "ZERO_SCOPE_BOUNTY_ONLY")
 	_ = v.BindEnv("scope.private_only", "ZERO_SCOPE_PRIVATE_ONLY")
 	_ = v.BindEnv("scope.categories", "ZERO_SCOPE_CATEGORIES")
+	_ = v.BindEnv("scope.providers", "ZERO_SCOPE_PROVIDERS")
+	_ = v.BindEnv("scope.sync_max_age", "ZERO_SCOPE_SYNC_MAX_AGE")
 	_ = v.BindEnv("tools.subfinder_bin", "ZERO_SUBFINDER_BIN")
 	_ = v.BindEnv("tools.subfinder_provider_config", "ZERO_SUBFINDER_PROVIDER_CONFIG", "SUBFINDER_PROVIDER_CONFIG")
 	_ = v.BindEnv("tools.subfinder_sources", "ZERO_SUBFINDER_SOURCES")
@@ -267,10 +295,23 @@ func Load() (Config, error) {
 			Username: v.GetString("h1.username"),
 			Token:    v.GetString("h1.token"),
 		},
+		Bugcrowd: BugcrowdConfig{
+			Token:      v.GetString("bugcrowd.token"),
+			Email:      v.GetString("bugcrowd.email"),
+			Password:   v.GetString("bugcrowd.password"),
+			OTPSecret:  v.GetString("bugcrowd.otp_secret"),
+			Proxy:      v.GetString("bugcrowd.proxy"),
+			PublicOnly: v.GetBool("bugcrowd.public_only"),
+		},
+		Intigriti: IntigritiConfig{
+			Token: v.GetString("intigriti.token"),
+		},
 		Scope: ScopeConfig{
 			BountyOnly:  v.GetBool("scope.bounty_only"),
 			PrivateOnly: v.GetBool("scope.private_only"),
 			Categories:  v.GetString("scope.categories"),
+			Providers:   v.GetString("scope.providers"),
+			SyncMaxAge:  v.GetDuration("scope.sync_max_age"),
 		},
 		Tools: ToolConfig{
 			SubfinderBin:            v.GetString("tools.subfinder_bin"),

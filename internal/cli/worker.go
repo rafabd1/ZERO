@@ -40,8 +40,15 @@ func newWorkerCommand() *cobra.Command {
 			}
 
 			var scanRequestsRunning atomic.Bool
+			if err := addJob("scope-sync", cfg.Schedule.ScopeSync, func() {
+				if err := runScopeSync(cmd, cfg, scopeProviders(cfg.Scope.Providers)); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "scope sync failed: %v\n", err)
+				}
+			}); err != nil {
+				return err
+			}
 			if err := addJob("due-pipeline", cfg.Schedule.Full, func() {
-				if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, false); err != nil {
+				if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, true); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "full pipeline failed: %v\n", err)
 				}
 			}); err != nil {
@@ -72,8 +79,13 @@ func newWorkerCommand() *cobra.Command {
 			c.Start()
 			if cfg.Worker.RunOnStartup {
 				go func() {
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup scope-sync-if-due\n", time.Now().UTC().Format(time.RFC3339))
+					if err := runScopeSyncIfDue(cmd, cfg); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "startup scope sync failed: %v\n", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup scope-sync-if-due\n", time.Now().UTC().Format(time.RFC3339))
 					fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup due-pipeline\n", time.Now().UTC().Format(time.RFC3339))
-					if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, false); err != nil {
+					if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, true); err != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "startup full pipeline failed: %v\n", err)
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup due-pipeline\n", time.Now().UTC().Format(time.RFC3339))

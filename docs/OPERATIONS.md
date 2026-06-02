@@ -7,9 +7,11 @@ To run the first real scan, Zero needs:
 - `ZERO_DATABASE_URL`: Supabase Postgres connection string with `sslmode=require`.
 - `ZERO_DATABASE_MAX_CONNS`: max pgx pool connections per Zero process. Default: 1. Keep this low when using Supabase session pooler because parallel scans run many short-lived task processes.
 - `ZERO_DATABASE_RETRIES` and `ZERO_DATABASE_RETRY_WAIT`: retry opening/migrating the repository before a command returns failure. Defaults: `4` attempts, `3s` wait. This absorbs transient Supabase pooler/Docker DNS timeouts without killing the worker process.
-- HackerOne API credentials:
+- Scope provider credentials:
   - `ZERO_H1_USERNAME`
   - `ZERO_H1_TOKEN`
+  - `ZERO_BUGCROWD_TOKEN`, or `ZERO_BUGCROWD_EMAIL` + `ZERO_BUGCROWD_PASSWORD` + `ZERO_BUGCROWD_OTP_SECRET`
+  - `ZERO_INTIGRITI_TOKEN`
 - Supabase backend credentials for future API/admin operations:
   - Supabase project URL
   - Supabase anon key for read-only client contexts, if ever needed
@@ -46,7 +48,7 @@ Default target parallelism: 12 programs at the same time.
 
 Program-level scan cadence lives in `zero_programs.scan_interval_hours`. `zero_programs.max_parallel_tasks` is reserved for a future per-program internal task limiter; the current scheduler processes whole programs concurrently through the global `ZERO_TARGET_PARALLELISM` setting.
 
-The main continuous execution path is `zero worker`, which schedules `zero run due` using `ZERO_SCHEDULE_FULL`. It first refreshes HackerOne scope, then selects active programs whose `last_scan_finished_at` is older than their configured interval, and processes up to `ZERO_TARGET_PARALLELISM` programs concurrently.
+The main continuous execution path is `zero worker`, which schedules scope sync with `ZERO_SCHEDULE_SCOPE_SYNC` and due-program scans with `ZERO_SCHEDULE_FULL`. Scope sync is intentionally separate from scans: the worker runs `sync all` on the daily scope cron, and on startup only runs the scope sync guard when the last successful scope sync is older than `ZERO_SCOPE_SYNC_MAX_AGE` (default `24h`). Due-program scans then select active programs whose `last_scan_finished_at` is older than their configured interval and process up to `ZERO_TARGET_PARALLELISM` programs concurrently.
 
 By default the worker also runs this due-program planner immediately on container startup (`ZERO_RUN_ON_STARTUP=true`). This makes the container self-starting after deploy/restart instead of waiting for the next cron tick.
 
@@ -56,7 +58,7 @@ Database connection failures are returned as normal command errors after the con
 
 Custom one-off scans can be launched immediately with `zero run manual` or queued for the worker with `zero run schedule`. Queued requests are stored in `zero_scan_requests`, picked up every 30 seconds, and executed with the request-specific parameters instead of mutating global `.env` defaults.
 
-Broad custom scan campaigns can be queued with `zero run schedule --all-programs`. A campaign stores one durable parent row in `zero_scan_campaigns` and one child request per selected program in `zero_scan_requests`. Child requests force `SkipSync=true`, so a campaign that spans hundreds of programs does not refresh HackerOne scope before every program. Use `--campaign-parallelism` to set how many programs from that campaign may run at the same time. The worker still caps total queued custom work with `ZERO_TARGET_PARALLELISM`.
+Broad custom scan campaigns can be queued with `zero run schedule --all-programs`. A campaign stores one durable parent row in `zero_scan_campaigns` and one child request per selected program in `zero_scan_requests`. Child requests force `SkipSync=true`, so a campaign that spans hundreds of programs does not refresh platform scope before every program. Use `--campaign-parallelism` to set how many programs from that campaign may run at the same time. The worker still caps total queued custom work with `ZERO_TARGET_PARALLELISM`.
 
 Campaign selection defaults to every active program, regardless of the normal interval. Add `--due-only` when the campaign should respect each program's `scan_interval_hours`, and `--campaign-limit` for staged rollouts. A campaign survives worker/container restarts: running child requests are requeued on startup, campaign counters are refreshed, and completed children remain completed.
 
@@ -100,14 +102,19 @@ On worker startup, `ZERO_RECOVER_RUNNING_SCANS=true` marks interrupted `zero_sca
 
 HTTP services, subdomains, and technology observations are not hard-deleted when they disappear once. They remain deduped by stable keys and are marked inactive by stale cleanup after `ZERO_STALE_AFTER_HOURS`. This keeps the API focused on currently active rows while avoiding noisy deletes caused by transient DNS, WAF, or network failures.
 
-HackerOne scope sync defaults to `ZERO_SCOPE_PRIVATE_ONLY=false`, so bbscope imports both public and private open programs visible to the configured account. `ZERO_SCOPE_BOUNTY_ONLY=true` keeps VDP programs out. Assets that are listed as in-scope by the platform but are not bounty-eligible are stored as out-of-scope in Zero, so they block broad wildcard expansion instead of being scanned. Set `ZERO_SCOPE_PRIVATE_ONLY=true` only when intentionally limiting Zero to private/soft-launched programs.
+Scope sync is controlled by `ZERO_SCOPE_PROVIDERS`, a comma-separated list supporting `h1`, `bugcrowd`/`bc`, and `intigriti`/`it`. The default is `h1`. Use `zero sync all` to force all configured providers, or `zero sync h1`, `zero sync bugcrowd`, and `zero sync intigriti` for a single provider.
+
+HackerOne scope sync defaults to `ZERO_SCOPE_PRIVATE_ONLY=false`, so bbscope imports both public and private open programs visible to the configured account. Bugcrowd can use `ZERO_BUGCROWD_TOKEN`, login credentials plus OTP secret, or public-only mode. Intigriti requires `ZERO_INTIGRITI_TOKEN`. `ZERO_SCOPE_BOUNTY_ONLY=true` keeps VDP/non-bounty programs out. Assets that are listed as in-scope by the platform but are not bounty-eligible are stored as out-of-scope in Zero, so they block broad wildcard expansion instead of being scanned. Set `ZERO_SCOPE_PRIVATE_ONLY=true` only when intentionally limiting Zero to private/soft-launched programs.
 
 ## Smoke Tests
 
 Use limits when validating external tools:
 
 ```bash
+zero sync all
 zero sync h1
+zero sync bugcrowd
+zero sync intigriti
 zero enum subfinder --limit 2
 zero probe dnsx --limit 50
 zero probe httpx --limit 50

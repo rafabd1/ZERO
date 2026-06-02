@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 func (r *Repository) StartScanRun(ctx context.Context, runType, workerID, programID string) (string, error) {
@@ -63,4 +64,19 @@ func (r *Repository) RecoverRunningScanRuns(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("recover running scan runs: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+func (r *Repository) LastSuccessfulScopeSync(ctx context.Context) (*time.Time, error) {
+	var last *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT max(finished_at)
+		FROM zero_scan_runs
+		WHERE run_type = 'scope'
+		  AND status = 'succeeded'
+		  AND finished_at IS NOT NULL
+	`).Scan(&last)
+	if err != nil {
+		return nil, fmt.Errorf("last successful scope sync: %w", err)
+	}
+	return last, nil
 }

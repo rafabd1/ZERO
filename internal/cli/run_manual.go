@@ -124,7 +124,7 @@ func addScheduledRunCommand(parent *cobra.Command) {
 
 func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().StringVar(&opts.ProgramID, "program-id", "", "limit manual scan to one program id")
-	cmd.Flags().BoolVar(&opts.SkipSync, "skip-sync", false, "skip HackerOne scope sync")
+	cmd.Flags().BoolVar(&opts.SkipSync, "skip-sync", false, "skip the daily scope-sync guard")
 	cmd.Flags().BoolVar(&opts.SkipEnum, "skip-enum", false, "skip subfinder")
 	cmd.Flags().BoolVar(&opts.SkipDNS, "skip-dns", false, "skip dnsx resolution")
 	cmd.Flags().BoolVar(&opts.SkipProbe, "skip-probe", false, "skip httpx")
@@ -169,9 +169,9 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 	cfg := loadConfig()
 
 	if !opts.SkipSync {
-		fmt.Fprintln(parent.OutOrStdout(), "zero manual step: [sync h1]")
-		if err := runChildE(parent, "sync", "h1"); err != nil {
-			alertOnTimeout(ctx, parent, cfg, opts.ProgramID, "", []string{"sync", "h1"}, err)
+		fmt.Fprintln(parent.OutOrStdout(), "zero manual step: [scope sync if due]")
+		if err := runScopeSyncIfDue(parent, cfg); err != nil {
+			alertOnTimeout(ctx, parent, cfg, opts.ProgramID, "", []string{"sync", "all"}, err)
 			return err
 		}
 	}
