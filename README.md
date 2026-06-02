@@ -1,7 +1,7 @@
 # Zero
 
 <p align="center">
-  <img src="assets/zero-banner.gif" alt="Animated ASCII theta symbol" width="960">
+  <img src="assets/zero-banner.gif" alt="Animated ASCII ZERO wordmark" width="960">
 </p>
 
 Zero is a Docker-first pipeline for custom vulnerability analysis at bug bounty scale.
