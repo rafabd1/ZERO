@@ -251,6 +251,24 @@ func (r *Repository) UpsertScopeAssets(ctx context.Context, assets []ScopeAsset)
 	return len(assets), nil
 }
 
+func (r *Repository) MarkScopeAssetsOutsideCategoriesInactive(ctx context.Context, programID string, allowedCategories []string) (int, error) {
+	if len(allowedCategories) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE zero_scope_assets
+		SET active = false,
+		    metadata = metadata || jsonb_build_object('deactivated_at', now(), 'deactivated_reason', 'category_filter')
+		WHERE program_id = $1::uuid
+		  AND active = true
+		  AND NOT (asset_type = ANY($2::text[]))
+	`, programID, allowedCategories)
+	if err != nil {
+		return 0, fmt.Errorf("mark scope assets outside categories inactive: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (r *Repository) ListDomainRoots(ctx context.Context, programID string) ([]DomainRoot, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, program_id, asset_type, target_raw, target_normalized

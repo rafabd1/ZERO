@@ -3,6 +3,7 @@ package scope
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/rafabd1/ZERO/internal/db"
@@ -210,13 +211,18 @@ func (s *Service) syncPlatformProgram(ctx context.Context, opts platformSyncOpti
 	inScope, bountyExcluded := splitBountyScope(program.InScope, pollOpts.BountyOnly)
 
 	assets := make([]db.ScopeAsset, 0, len(program.InScope)+len(program.OutOfScope))
-	assets = append(assets, buildAssets(programID, opts.ScanRunID, opts.Platform, handle, inScope, true)...)
-	assets = append(assets, buildAssets(programID, opts.ScanRunID, opts.Platform, handle, bountyExcluded, false)...)
-	assets = append(assets, buildAssets(programID, opts.ScanRunID, opts.Platform, handle, program.OutOfScope, false)...)
+	assets = append(assets, buildAssets(programID, opts.ScanRunID, opts.Platform, handle, inScope, true, pollOpts.Categories)...)
+	assets = append(assets, buildAssets(programID, opts.ScanRunID, opts.Platform, handle, bountyExcluded, false, pollOpts.Categories)...)
+	assets = append(assets, buildAssets(programID, opts.ScanRunID, opts.Platform, handle, program.OutOfScope, false, pollOpts.Categories)...)
 
 	count, err := s.repo.UpsertScopeAssets(ctx, assets)
 	if err != nil {
 		return 0, 0, err
+	}
+	if allowedCategories := canonicalCategorySet(pollOpts.Categories); allowedCategories != nil {
+		if _, err := s.repo.MarkScopeAssetsOutsideCategoriesInactive(ctx, programID, allowedCategories); err != nil {
+			return 0, 0, err
+		}
 	}
 	return 1, count, nil
 }
@@ -242,9 +248,14 @@ func splitBountyScope(elements []bbscope.ScopeElement, bountyOnly bool) ([]bbsco
 	return inScope, outOfScope
 }
 
-func buildAssets(programID, scanRunID, platform, handle string, elements []bbscope.ScopeElement, inScope bool) []db.ScopeAsset {
+func buildAssets(programID, scanRunID, platform, handle string, elements []bbscope.ScopeElement, inScope bool, categories string) []db.ScopeAsset {
 	assets := make([]db.ScopeAsset, 0, len(elements))
+	allowedCategories := categorySet(categories)
 	for _, element := range elements {
+		assetType := bbscope.NormalizeCategory(element.Category)
+		if !categoryAllowed(assetType, allowedCategories) {
+			continue
+		}
 		target := element.Target
 		normalized := db.NormalizeTarget(target)
 		if normalized == "" {
@@ -255,7 +266,7 @@ func buildAssets(programID, scanRunID, platform, handle string, elements []bbsco
 			LastScanRunID:     scanRunID,
 			Platform:          platform,
 			Handle:            handle,
-			AssetType:         element.Category,
+			AssetType:         assetType,
 			TargetRaw:         target,
 			TargetNormalized:  normalized,
 			Description:       element.Description,
@@ -265,4 +276,44 @@ func buildAssets(programID, scanRunID, platform, handle string, elements []bbsco
 		})
 	}
 	return assets
+}
+
+func categorySet(categories string) map[string]struct{} {
+	selected := bbscope.GetAllStringsForCategories(categories)
+	if selected == nil {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(selected))
+	for _, category := range selected {
+		allowed[strings.ToLower(strings.TrimSpace(category))] = struct{}{}
+	}
+	return allowed
+}
+
+func categoryAllowed(category string, allowed map[string]struct{}) bool {
+	if allowed == nil {
+		return true
+	}
+	_, ok := allowed[strings.ToLower(strings.TrimSpace(category))]
+	return ok
+}
+
+func canonicalCategorySet(categories string) []string {
+	selected := bbscope.GetAllStringsForCategories(categories)
+	if selected == nil {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(selected))
+	for _, category := range selected {
+		normalized := bbscope.NormalizeCategory(category)
+		if normalized == "" {
+			continue
+		}
+		allowed[normalized] = struct{}{}
+	}
+	canonical := make([]string, 0, len(allowed))
+	for category := range allowed {
+		canonical = append(canonical, category)
+	}
+	return canonical
 }
