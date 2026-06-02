@@ -25,6 +25,7 @@ type NucleiRunner struct {
 	templateIDs string
 	templates   string
 	templateDir string
+	techFilter  string
 	headers     []string
 	proxy       string
 	strategy    string
@@ -104,6 +105,11 @@ func (r *NucleiRunner) WithRequestProfile(headers []string, proxy, strategy stri
 	return r
 }
 
+func (r *NucleiRunner) WithTechFilter(filter string) *NucleiRunner {
+	r.techFilter = strings.TrimSpace(filter)
+	return r
+}
+
 func (r *NucleiRunner) WithWAFDetection(enabled bool, sampleSize, timeoutSeconds int) *NucleiRunner {
 	r.wafDetect = enabled
 	if sampleSize > 0 {
@@ -162,7 +168,7 @@ func (r *NucleiRunner) WithScanRunID(scanRunID string) *NucleiRunner {
 }
 
 func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
-	targets, err := r.repo.ListNucleiTargets(ctx, r.programID)
+	targets, err := r.repo.ListNucleiTargets(ctx, r.programID, r.techFilter)
 	if err != nil {
 		return NucleiResult{}, err
 	}

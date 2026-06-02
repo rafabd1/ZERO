@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
-func (r *Repository) ListNucleiTargets(ctx context.Context, programID string) ([]NucleiTarget, error) {
+func (r *Repository) ListNucleiTargets(ctx context.Context, programID string, techFilter string) ([]NucleiTarget, error) {
+	filters := nucleiTechFilters(techFilter)
+	if len(filters) > 0 {
+		return r.listNucleiTargetsByTechnology(ctx, programID, filters)
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, program_id, url
 		FROM zero_http_services
@@ -28,6 +33,68 @@ func (r *Repository) ListNucleiTargets(ctx context.Context, programID string) ([
 		targets = append(targets, target)
 	}
 	return targets, rows.Err()
+}
+
+func (r *Repository) listNucleiTargetsByTechnology(ctx context.Context, programID string, filters []string) ([]NucleiTarget, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT s.id, s.program_id, s.url
+		FROM zero_http_services s
+		WHERE s.active = true
+		  AND ($1 = '' OR s.program_id::text = $1)
+		  AND (
+			lower(s.title) LIKE ANY($2::text[])
+			OR lower(s.webserver) LIKE ANY($2::text[])
+			OR EXISTS (
+				SELECT 1
+				FROM jsonb_array_elements_text(s.technologies) AS tech(name)
+				WHERE lower(tech.name) LIKE ANY($2::text[])
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM zero_technology_observations o
+				WHERE o.http_service_id = s.id
+				  AND o.active = true
+				  AND lower(o.name) LIKE ANY($2::text[])
+			)
+		  )
+		ORDER BY s.program_id, s.url
+	`, programID, filters)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var targets []NucleiTarget
+	for rows.Next() {
+		var target NucleiTarget
+		if err := rows.Scan(&target.HTTPServiceID, &target.ProgramID, &target.URL); err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	return targets, rows.Err()
+}
+
+func nucleiTechFilters(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '|' || r == '\n' || r == '\r'
+	})
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		part = strings.Trim(part, "%")
+		if part == "" {
+			continue
+		}
+		pattern := "%" + part + "%"
+		if _, ok := seen[pattern]; ok {
+			continue
+		}
+		seen[pattern] = struct{}{}
+		out = append(out, pattern)
+	}
+	return out
 }
 
 func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult) (string, bool, error) {

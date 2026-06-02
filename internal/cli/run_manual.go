@@ -39,6 +39,7 @@ type manualRunOptions struct {
 	NucleiLimit       int
 	NucleiTemplateID  string
 	NucleiTemplate    string
+	NucleiTechFilter  string
 	NucleiTags        string
 	NucleiSeverity    string
 	NucleiHeaders     []string
@@ -157,6 +158,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.NucleiLimit, "nuclei-limit", 0, "manual Nuclei URL limit")
 	cmd.Flags().StringVar(&opts.NucleiTemplateID, "nuclei-template-id", "", "custom Nuclei template id(s) for this run only")
 	cmd.Flags().StringVar(&opts.NucleiTemplate, "nuclei-template", "", "custom Nuclei template file/directory path(s) for this run only")
+	cmd.Flags().StringVar(&opts.NucleiTechFilter, "nuclei-tech-filter", "", "limit Nuclei targets to services with matching fingerprint technology/title/server text")
 	cmd.Flags().StringVar(&opts.NucleiTags, "nuclei-tags", "", "custom Nuclei tags for this run only")
 	cmd.Flags().StringVar(&opts.NucleiSeverity, "nuclei-severity", "", "custom Nuclei severities for this run only")
 	cmd.Flags().StringArrayVar(&opts.NucleiHeaders, "nuclei-header", nil, "custom Nuclei request header for this run only, header:value; repeatable")
@@ -243,6 +245,9 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		}
 		if opts.NucleiTemplate != "" {
 			step = append(step, "--template-path", opts.NucleiTemplate)
+		}
+		if opts.NucleiTechFilter != "" {
+			step = append(step, "--tech-filter", opts.NucleiTechFilter)
 		}
 		if opts.NucleiTags != "" {
 			step = append(step, "--tags", opts.NucleiTags)

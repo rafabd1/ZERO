@@ -54,6 +54,7 @@ Content-Type: application/json
     "ProgramID": "00000000-0000-0000-0000-000000000000",
     "SkipSync": true,
     "NucleiTemplate": "/work/templates/custom.yaml",
+    "NucleiTechFilter": "product-name",
     "NucleiHeaders": [
       "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
       "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -88,6 +89,7 @@ Content-Type: application/json
     "WebanalyzeWorkers": 4,
     "NucleiTemplate": "/work/templates/custom",
     "NucleiForce": true,
+    "NucleiTechFilter": "product-name",
     "NucleiSeverity": "medium,high,critical",
     "NucleiHeaders": [
       "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
