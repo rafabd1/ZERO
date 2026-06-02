@@ -87,6 +87,8 @@ docker compose run --rm zero run schedule \
   --skip-sync \
   --reuse-active-services \
   --webanalyze-apps ./custom-technologies.json \
+  --webanalyze-probe-path /admin/ \
+  --webanalyze-probe-path /api/version \
   --nuclei-tech-filter "product-name" \
   --nuclei-template ./templates/custom \
   --nuclei-severity medium,high,critical
@@ -96,7 +98,7 @@ Use `--due-only` if the campaign should respect each program's normal scan inter
 
 The worker pool keeps custom campaign slots filled from each campaign's own `--campaign-parallelism`. Multiple custom campaigns can run side by side; their capacity is additive and is not capped by `ZERO_TARGET_PARALLELISM`, which only controls default/due scans.
 
-Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. For targeted validation, pair `--nuclei-tech-filter` with fresh fingerprinting in the same campaign; Zero automatically applies a freshness window before Nuclei. Use `--nuclei-tech-max-age` only when skipping fingerprint stages and intentionally relying on observations already in the database.
+Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. Use `--webanalyze-probe-path` for products whose fingerprint appears on known paths such as `/admin/`, `/console/`, `/demo/`, or `/api/jolokia/version`; each path is derived from the already authorized alive service URL and tied back to the same HTTP service record. Path probes are partial fingerprints too, so they do not clear existing technology inventory. For targeted validation, pair `--nuclei-tech-filter` with fresh fingerprinting in the same campaign; Zero automatically applies a freshness window before Nuclei. Use `--nuclei-tech-max-age` only when skipping fingerprint stages and intentionally relying on observations already in the database.
 
 Use `--reuse-active-services` to skip `dnsx/httpx` and run enrichment, CVE context, Nuclei, reporting, and notification against active HTTP services already stored in Postgres. This avoids repeated alive probing when multiple focused campaigns are launched soon after a fresh full scan. In this mode, `httpx` tuning flags are intentionally ignored.
 

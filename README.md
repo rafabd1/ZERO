@@ -82,6 +82,8 @@ docker compose run --rm zero run schedule \
   --skip-sync \
   --reuse-active-services \
   --webanalyze-apps /work/custom/webanalyze/technology.json \
+  --webanalyze-probe-path /admin/ \
+  --webanalyze-probe-path /api/version \
   --webanalyze-workers 4 \
   --nuclei-tech-filter "product-name" \
   --nuclei-template /work/custom/nuclei/CVE-YYYY-NNNN.yaml \
@@ -97,7 +99,7 @@ Campaigns are durable. They create one parent row and one child request per sele
 
 Use `--reuse-active-services` for campaigns that should skip fresh `dnsx/httpx` probing and load active HTTP services already stored in Postgres. This is useful when several focused scans run close together and the alive inventory was just refreshed. In that mode, `httpx` flags are intentionally ignored.
 
-Normal fingerprints are authoritative for the technologies they own: fresh `httpx` and full Webanalyze runs reactivate newly observed technologies and mark missing old observations inactive. A custom `--webanalyze-apps` run is treated as partial intelligence, so it can add focused matches without clearing the full technology inventory. When a campaign runs fingerprinting before Nuclei, Zero keeps `--nuclei-tech-filter` tied to fresh observations automatically. Use `--nuclei-tech-max-age` only when skipping fingerprinting and relying on existing database observations.
+Normal fingerprints are authoritative for the technologies they own: fresh `httpx` and full Webanalyze runs reactivate newly observed technologies and mark missing old observations inactive. A custom `--webanalyze-apps` run is treated as partial intelligence, so it can add focused matches without clearing the full technology inventory. Add `--webanalyze-probe-path` when a product fingerprint lives on known paths such as `/admin/`, `/console/`, or `/api/jolokia/version`; these path probes are also treated as partial intelligence. When a campaign runs fingerprinting before Nuclei, Zero keeps `--nuclei-tech-filter` tied to fresh observations automatically. Use `--nuclei-tech-max-age` only when skipping fingerprinting and relying on existing database observations.
 
 For a single program, use `--program-id <uuid>` instead of `--all-programs`.
 

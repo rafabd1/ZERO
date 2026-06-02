@@ -10,53 +10,54 @@ import (
 )
 
 type manualRunOptions struct {
-	ProgramID           string
-	SkipSync            bool
-	SkipEnum            bool
-	SkipDNS             bool
-	SkipProbe           bool
-	ReuseActiveServices bool
-	SkipEnrich          bool
-	SkipCVEs            bool
-	SkipNuclei          bool
-	SkipReport          bool
-	SkipNotify          bool
-	SubfinderLimit      int
-	DNSXLimit           int
-	HTTPXLimit          int
-	HTTPXTimeout        int
-	HTTPXThreads        int
-	HTTPXBatchSize      int
-	HTTPXBatchTimeout   string
-	HTTPXPatternMin     int
-	HTTPXPatternCap     int
-	HTTPXTLSProbe       bool
-	WebanalyzeLimit     int
-	CVELimit            int
-	WebanalyzeApps      string
-	WebanalyzeWorkers   int
-	WebanalyzeCrawl     int
-	WebanalyzeBatch     int
-	NucleiLimit         int
-	NucleiTemplateID    string
-	NucleiTemplate      string
-	NucleiTechFilter    string
-	NucleiTechMaxAge    string
-	NucleiTags          string
-	NucleiSeverity      string
-	NucleiHeaders       []string
-	NucleiProxy         string
-	NucleiStrategy      string
-	NucleiMaxHostErr    int
-	NucleiRateLimit     int
-	NucleiConcurrency   int
-	NucleiBulkSize      int
-	NucleiRetries       int
-	NucleiTimeout       int
-	NucleiFromCVEs      bool
-	NucleiAllCVEs       bool
-	NucleiForce         bool
-	NucleiCVELimit      int
+	ProgramID            string
+	SkipSync             bool
+	SkipEnum             bool
+	SkipDNS              bool
+	SkipProbe            bool
+	ReuseActiveServices  bool
+	SkipEnrich           bool
+	SkipCVEs             bool
+	SkipNuclei           bool
+	SkipReport           bool
+	SkipNotify           bool
+	SubfinderLimit       int
+	DNSXLimit            int
+	HTTPXLimit           int
+	HTTPXTimeout         int
+	HTTPXThreads         int
+	HTTPXBatchSize       int
+	HTTPXBatchTimeout    string
+	HTTPXPatternMin      int
+	HTTPXPatternCap      int
+	HTTPXTLSProbe        bool
+	WebanalyzeLimit      int
+	CVELimit             int
+	WebanalyzeApps       string
+	WebanalyzeProbePaths []string
+	WebanalyzeWorkers    int
+	WebanalyzeCrawl      int
+	WebanalyzeBatch      int
+	NucleiLimit          int
+	NucleiTemplateID     string
+	NucleiTemplate       string
+	NucleiTechFilter     string
+	NucleiTechMaxAge     string
+	NucleiTags           string
+	NucleiSeverity       string
+	NucleiHeaders        []string
+	NucleiProxy          string
+	NucleiStrategy       string
+	NucleiMaxHostErr     int
+	NucleiRateLimit      int
+	NucleiConcurrency    int
+	NucleiBulkSize       int
+	NucleiRetries        int
+	NucleiTimeout        int
+	NucleiFromCVEs       bool
+	NucleiAllCVEs        bool
+	NucleiForce          bool
+	NucleiCVELimit       int
 }
 
 func addManualRunCommand(parent *cobra.Command) {
@@ -155,6 +156,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.WebanalyzeLimit, "webanalyze-limit", 0, "manual Webanalyze service limit")
 	cmd.Flags().IntVar(&opts.CVELimit, "cve-limit", 0, "manual passive CVE technology limit")
 	cmd.Flags().StringVar(&opts.WebanalyzeApps, "webanalyze-apps", "", "custom Webanalyze apps file for this run only")
+	cmd.Flags().StringArrayVar(&opts.WebanalyzeProbePaths, "webanalyze-probe-path", nil, "additional relative path to fingerprint on every service, for example /admin/; repeatable")
 	cmd.Flags().IntVar(&opts.WebanalyzeWorkers, "webanalyze-workers", 0, "custom Webanalyze workers for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeCrawl, "webanalyze-crawl", -1, "custom Webanalyze crawl depth for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeBatch, "webanalyze-batch-size", 0, "custom Webanalyze services per process")
@@ -227,6 +229,9 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		step = appendIntFlag(step, "--limit", opts.WebanalyzeLimit)
 		if opts.WebanalyzeApps != "" {
 			step = append(step, "--apps", opts.WebanalyzeApps)
+		}
+		for _, path := range opts.WebanalyzeProbePaths {
+			step = append(step, "--probe-path", path)
 		}
 		step = appendIntFlag(step, "--workers", opts.WebanalyzeWorkers)
 		if opts.WebanalyzeCrawl >= 0 {

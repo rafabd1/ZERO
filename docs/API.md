@@ -86,6 +86,10 @@ Content-Type: application/json
     "SkipSync": true,
     "ReuseActiveServices": true,
     "WebanalyzeApps": "/work/custom-technologies.json",
+    "WebanalyzeProbePaths": [
+      "/admin/",
+      "/api/version"
+    ],
     "WebanalyzeWorkers": 4,
     "NucleiTemplate": "/work/templates/custom",
     "NucleiForce": true,

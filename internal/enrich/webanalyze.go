@@ -18,6 +18,7 @@ type WebanalyzeRunner struct {
 	repo          *db.Repository
 	bin           string
 	apps          string
+	probePaths    []string
 	workers       int
 	crawl         int
 	scanRunID     string
@@ -46,6 +47,11 @@ func NewWebanalyzeRunner(repo *db.Repository, bin string) *WebanalyzeRunner {
 
 func (r *WebanalyzeRunner) WithApps(path string) *WebanalyzeRunner {
 	r.apps = strings.TrimSpace(path)
+	return r
+}
+
+func (r *WebanalyzeRunner) WithProbePaths(paths []string) *WebanalyzeRunner {
+	r.probePaths = normalizeProbePaths(paths)
 	return r
 }
 
@@ -106,6 +112,8 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	if len(targets) == 0 {
 		return result, nil
 	}
+	targets = expandWebTechTargets(targets, r.probePaths)
+	result.Targets = len(targets)
 	batchSize := r.batchSize
 	if batchSize <= 0 {
 		batchSize = len(targets)
@@ -128,6 +136,96 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 		result.Deactivated = deactivated
 	}
 	return result, nil
+}
+
+func normalizeProbePaths(paths []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		if strings.Contains(path, "://") {
+			parsed, err := url.Parse(path)
+			if err != nil || !parsed.IsAbs() {
+				continue
+			}
+		}
+		if parsed, err := url.Parse(path); err == nil && parsed.IsAbs() {
+			path = parsed.EscapedPath()
+			if parsed.RawQuery != "" {
+				path += "?" + parsed.RawQuery
+			}
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		parsed, err := url.Parse(path)
+		if err != nil || parsed.Host != "" || parsed.Scheme != "" {
+			continue
+		}
+		parsed.Fragment = ""
+		if parsed.Path == "" {
+			parsed.Path = "/"
+		}
+		path = parsed.RequestURI()
+		if path == "" {
+			path = "/"
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
+}
+
+func expandWebTechTargets(targets []db.WebTechTarget, probePaths []string) []db.WebTechTarget {
+	probePaths = normalizeProbePaths(probePaths)
+	if len(probePaths) == 0 {
+		return targets
+	}
+	out := make([]db.WebTechTarget, 0, len(targets)*(len(probePaths)+1))
+	seen := map[string]struct{}{}
+	for _, target := range targets {
+		addWebTechTarget(&out, seen, target)
+		for _, path := range probePaths {
+			expanded, ok := targetWithProbePath(target, path)
+			if !ok {
+				continue
+			}
+			addWebTechTarget(&out, seen, expanded)
+		}
+	}
+	return out
+}
+
+func addWebTechTarget(out *[]db.WebTechTarget, seen map[string]struct{}, target db.WebTechTarget) {
+	key := target.HTTPServiceID + "\x00" + normalizeURLKey(target.URL)
+	if _, ok := seen[key]; ok {
+		return
+	}
+	seen[key] = struct{}{}
+	*out = append(*out, target)
+}
+
+func targetWithProbePath(target db.WebTechTarget, probePath string) (db.WebTechTarget, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(target.URL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return db.WebTechTarget{}, false
+	}
+	pathURL, err := url.Parse(probePath)
+	if err != nil || pathURL.Scheme != "" || pathURL.Host != "" {
+		return db.WebTechTarget{}, false
+	}
+	parsed.Path = pathURL.Path
+	parsed.RawPath = pathURL.RawPath
+	parsed.RawQuery = pathURL.RawQuery
+	parsed.Fragment = ""
+	target.URL = parsed.String()
+	return target, true
 }
 
 func (r *WebanalyzeRunner) runBatch(ctx context.Context, targets []db.WebTechTarget, result *WebanalyzeResult) error {
