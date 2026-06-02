@@ -35,6 +35,8 @@ This lets campaigns rerun safely without repeating old reports.
 
 Data is deactivated conservatively instead of deleted immediately. `ZERO_STALE_AFTER_HOURS` controls when stale subdomains, services, and technology observations become inactive.
 
+Fingerprint lifecycle is source-aware. A normal `httpx` run updates the service's latest `technologies` JSON and marks missing `source=httpx` observations inactive for that service. A full Webanalyze run does the same for `source=webanalyze` observations after all selected services are processed. Custom Webanalyze app files are treated as partial intelligence and do not deactivate missing technologies.
+
 Scan runs and custom scan requests keep execution history, recovery metadata, and campaign progress.
 
 ## Supabase Notes

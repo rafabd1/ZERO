@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rafabd1/ZERO/internal/enrich"
 	"github.com/spf13/cobra"
@@ -36,6 +37,7 @@ func newEnrichCommand() *cobra.Command {
 				return err
 			}
 			appsPath := apps
+			authoritative := strings.TrimSpace(apps) == ""
 			if appsPath == "" {
 				appsPath = cfg.Tools.WebanalyzeApps
 			}
@@ -51,6 +53,7 @@ func newEnrichCommand() *cobra.Command {
 				WithScanRunID(scanID).
 				WithProgramID(programID).
 				WithApps(appsPath).
+				WithAuthoritative(authoritative).
 				WithWorkers(workerCount).
 				WithCrawl(crawlDepth).
 				WithLimit(limit).
@@ -63,10 +66,12 @@ func newEnrichCommand() *cobra.Command {
 					"matches":        result.Matches,
 					"inserted":       result.Inserted,
 					"versioned":      result.Versioned,
+					"deactivated":    result.Deactivated,
 					"skipped_output": result.SkippedOutput,
 					"program_id":     programID,
 					"tool":           "webanalyze",
 					"apps":           appsPath,
+					"authoritative":  authoritative,
 					"workers":        workerCount,
 					"crawl":          crawlDepth,
 					"batch_size":     firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize),
@@ -77,17 +82,19 @@ func newEnrichCommand() *cobra.Command {
 				"matches":        result.Matches,
 				"inserted":       result.Inserted,
 				"versioned":      result.Versioned,
+				"deactivated":    result.Deactivated,
 				"skipped_output": result.SkippedOutput,
 				"program_id":     programID,
 				"tool":           "webanalyze",
 				"apps":           appsPath,
+				"authoritative":  authoritative,
 				"workers":        workerCount,
 				"crawl":          crawlDepth,
 				"batch_size":     firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize),
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "webanalyze processed %d services, observed %d tech matches, inserted %d new observations and %d versioned matches\n", result.Targets, result.Matches, result.Inserted, result.Versioned)
+			fmt.Fprintf(cmd.OutOrStdout(), "webanalyze processed %d services, observed %d tech matches, inserted %d new observations, %d versioned matches and deactivated %d stale observations\n", result.Targets, result.Matches, result.Inserted, result.Versioned, result.Deactivated)
 			return nil
 		},
 	}

@@ -26,6 +26,7 @@ type NucleiRunner struct {
 	templates   string
 	templateDir string
 	techFilter  string
+	techMaxAge  time.Duration
 	headers     []string
 	proxy       string
 	strategy    string
@@ -105,8 +106,11 @@ func (r *NucleiRunner) WithRequestProfile(headers []string, proxy, strategy stri
 	return r
 }
 
-func (r *NucleiRunner) WithTechFilter(filter string) *NucleiRunner {
+func (r *NucleiRunner) WithTechFilter(filter string, maxAge time.Duration) *NucleiRunner {
 	r.techFilter = strings.TrimSpace(filter)
+	if maxAge > 0 {
+		r.techMaxAge = maxAge
+	}
 	return r
 }
 
@@ -168,7 +172,7 @@ func (r *NucleiRunner) WithScanRunID(scanRunID string) *NucleiRunner {
 }
 
 func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
-	targets, err := r.repo.ListNucleiTargets(ctx, r.programID, r.techFilter)
+	targets, err := r.repo.ListNucleiTargets(ctx, r.programID, r.techFilter, int64(r.techMaxAge.Seconds()))
 	if err != nil {
 		return NucleiResult{}, err
 	}

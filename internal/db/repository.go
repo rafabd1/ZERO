@@ -829,6 +829,11 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 			return "", fmt.Errorf("upsert technology observation: %w", err)
 		}
 	}
+	if strings.TrimSpace(service.LastScanRunID) != "" {
+		if _, err := r.MarkMissingTechnologyObservationsInactive(ctx, service.ProgramID, service.LastScanRunID, "httpx", []string{id}); err != nil {
+			return "", err
+		}
+	}
 
 	return id, nil
 }

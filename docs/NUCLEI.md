@@ -45,6 +45,18 @@ docker compose run --rm zero analyze nuclei \
 
 Campaigns can pass the same Nuclei options through `zero run schedule`.
 
+Technology-gated validation:
+
+```bash
+docker compose run --rm zero analyze nuclei \
+  --tech-filter "product-name" \
+  --tech-max-age 2h \
+  --template-path ./templates/custom.yaml \
+  --severity high,critical
+```
+
+`--tech-filter` matches active technology observations, `httpx` technology names, titles, and server banners. `--tech-max-age` makes the gate freshness-aware, which is useful for campaigns where `httpx` and Webanalyze run immediately before Nuclei. Custom Webanalyze app files are partial by design and do not deactivate the normal full fingerprint inventory.
+
 ## Request Profile
 
 Set `ZERO_NUCLEI_HEADERS` to pass browser-like headers to every Nuclei HTTP request. Headers are separated with `|`:

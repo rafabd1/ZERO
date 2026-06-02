@@ -86,6 +86,8 @@ docker compose run --rm zero run schedule \
   --httpx-batch-timeout 5m \
   --webanalyze-apps /work/custom/webanalyze/technology.json \
   --webanalyze-workers 4 \
+  --nuclei-tech-filter "product-name" \
+  --nuclei-tech-max-age 2h \
   --nuclei-template /work/custom/nuclei/CVE-YYYY-NNNN.yaml \
   --nuclei-force \
   --nuclei-rate-limit 40 \
@@ -96,6 +98,8 @@ docker compose run --rm zero run schedule \
 ```
 
 Campaigns are durable. They create one parent row and one child request per selected program. If the container restarts, running child requests are requeued and completed children stay completed. The worker pool keeps campaign slots filled until the campaign drains.
+
+Normal fingerprints are authoritative for the technologies they own: fresh `httpx` and full Webanalyze runs reactivate newly observed technologies and mark missing old observations inactive. A custom `--webanalyze-apps` run is treated as partial intelligence, so it can add focused matches without clearing the full technology inventory. Use `--nuclei-tech-filter` plus `--nuclei-tech-max-age` when a campaign should validate only assets fingerprinted with the target technology during the current run.
 
 For a single program, use `--program-id <uuid>` instead of `--all-programs`.
 

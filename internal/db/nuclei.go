@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-func (r *Repository) ListNucleiTargets(ctx context.Context, programID string, techFilter string) ([]NucleiTarget, error) {
+func (r *Repository) ListNucleiTargets(ctx context.Context, programID string, techFilter string, techMaxAgeSeconds int64) ([]NucleiTarget, error) {
 	filters := nucleiTechFilters(techFilter)
 	if len(filters) > 0 {
-		return r.listNucleiTargetsByTechnology(ctx, programID, filters)
+		return r.listNucleiTargetsByTechnology(ctx, programID, filters, techMaxAgeSeconds)
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, program_id, url
@@ -35,35 +35,41 @@ func (r *Repository) ListNucleiTargets(ctx context.Context, programID string, te
 	return targets, rows.Err()
 }
 
-func (r *Repository) listNucleiTargetsByTechnology(ctx context.Context, programID string, filters []string) ([]NucleiTarget, error) {
+func (r *Repository) listNucleiTargetsByTechnology(ctx context.Context, programID string, filters []string, techMaxAgeSeconds int64) ([]NucleiTarget, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT s.id, s.program_id, s.url
 		FROM zero_http_services s
 		WHERE s.active = true
 		  AND ($1 = '' OR s.program_id::text = $1)
 		  AND (
-			lower(s.title) LIKE ANY($2::text[])
-			OR lower(s.webserver) LIKE ANY($2::text[])
-			OR EXISTS (
-				SELECT 1
-				FROM jsonb_array_elements_text(
-					CASE
-						WHEN jsonb_typeof(s.technologies) = 'array' THEN s.technologies
-						ELSE '[]'::jsonb
-					END
-				) AS tech(name)
-				WHERE lower(tech.name) LIKE ANY($2::text[])
+			(
+				($3::bigint <= 0 OR s.last_seen_at >= now() - ($3::bigint * interval '1 second'))
+				AND (
+					lower(s.title) LIKE ANY($2::text[])
+					OR lower(s.webserver) LIKE ANY($2::text[])
+					OR EXISTS (
+						SELECT 1
+						FROM jsonb_array_elements_text(
+							CASE
+								WHEN jsonb_typeof(s.technologies) = 'array' THEN s.technologies
+								ELSE '[]'::jsonb
+							END
+						) AS tech(name)
+						WHERE lower(tech.name) LIKE ANY($2::text[])
+					)
+				)
 			)
 			OR EXISTS (
 				SELECT 1
 				FROM zero_technology_observations o
 				WHERE o.http_service_id = s.id
 				  AND o.active = true
+				  AND ($3::bigint <= 0 OR o.last_seen_at >= now() - ($3::bigint * interval '1 second'))
 				  AND lower(o.name) LIKE ANY($2::text[])
 			)
 		  )
 		ORDER BY s.program_id, s.url
-	`, programID, filters)
+	`, programID, filters, techMaxAgeSeconds)
 	if err != nil {
 		return nil, err
 	}

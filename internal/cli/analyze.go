@@ -15,6 +15,7 @@ func newAnalyzeCommand() *cobra.Command {
 	var nucleiTemplateID string
 	var nucleiTemplatePath string
 	var nucleiTechFilter string
+	var nucleiTechMaxAge time.Duration
 	var nucleiTags string
 	var nucleiSeverities string
 	var nucleiHeaders []string
@@ -152,7 +153,7 @@ func newAnalyzeCommand() *cobra.Command {
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
 				WithPolicy(tags, severities, templateIDs, rate, concurrency, bulkSize).
 				WithRequestProfile(headers, proxy, scanStrategy, maxHostError).
-				WithTechFilter(nucleiTechFilter).
+				WithTechFilter(nucleiTechFilter, nucleiTechMaxAge).
 				WithTemplates(nucleiTemplatePath).
 				WithTemplateDir(cfg.Tools.NucleiTemplateDir).
 				WithRuntime(retries, timeout).
@@ -173,6 +174,7 @@ func newAnalyzeCommand() *cobra.Command {
 				"template_ids":      templateIDs,
 				"template_paths":    nucleiTemplatePath,
 				"tech_filter":       nucleiTechFilter,
+				"tech_max_age":      nucleiTechMaxAge.String(),
 				"cve_min_year":      cfg.Intel.CVEMinYear,
 				"tags":              tags,
 				"severities":        severities,
@@ -212,6 +214,7 @@ func newAnalyzeCommand() *cobra.Command {
 	nuclei.Flags().StringVar(&nucleiTemplateID, "template-id", "", "run only matching Nuclei template id(s)")
 	nuclei.Flags().StringVar(&nucleiTemplatePath, "template-path", "", "run Nuclei template file/directory path(s)")
 	nuclei.Flags().StringVar(&nucleiTechFilter, "tech-filter", "", "limit Nuclei targets to services with matching fingerprint technology/title/server text")
+	nuclei.Flags().DurationVar(&nucleiTechMaxAge, "tech-max-age", 0, "with --tech-filter, only accept fingerprints reobserved within this duration, for example 2h")
 	nuclei.Flags().StringVar(&nucleiTags, "tags", "", "override Nuclei tags for this run")
 	nuclei.Flags().StringVar(&nucleiSeverities, "severity", "", "override Nuclei severities for this run")
 	nuclei.Flags().StringArrayVar(&nucleiHeaders, "header", nil, "override Nuclei request header for this run, header:value; repeatable")

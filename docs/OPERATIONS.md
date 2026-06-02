@@ -87,6 +87,8 @@ docker compose run --rm zero run schedule \
   --httpx-batch-size 50 \
   --httpx-batch-timeout 5m \
   --webanalyze-apps ./custom-technologies.json \
+  --nuclei-tech-filter "product-name" \
+  --nuclei-tech-max-age 2h \
   --nuclei-template ./templates/custom \
   --nuclei-severity medium,high,critical
 ```
@@ -94,6 +96,8 @@ docker compose run --rm zero run schedule \
 Use `--due-only` if the campaign should respect each program's normal scan interval. Use `--campaign-limit` for staged rollouts.
 
 The worker pool keeps campaign slots filled while respecting both the campaign's `--campaign-parallelism` and the global `ZERO_TARGET_PARALLELISM`.
+
+Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. For targeted validation, pair `--nuclei-tech-filter` with `--nuclei-tech-max-age` so Nuclei only receives services that matched the target technology recently.
 
 ## Tuning
 

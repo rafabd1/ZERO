@@ -15,16 +15,17 @@ import (
 )
 
 type WebanalyzeRunner struct {
-	repo      *db.Repository
-	bin       string
-	apps      string
-	workers   int
-	crawl     int
-	scanRunID string
-	programID string
-	limit     int
-	timeout   time.Duration
-	batchSize int
+	repo          *db.Repository
+	bin           string
+	apps          string
+	workers       int
+	crawl         int
+	scanRunID     string
+	programID     string
+	limit         int
+	timeout       time.Duration
+	batchSize     int
+	authoritative bool
 }
 
 type WebanalyzeResult struct {
@@ -33,6 +34,7 @@ type WebanalyzeResult struct {
 	Inserted      int
 	Versioned     int
 	SkippedOutput int
+	Deactivated   int
 }
 
 func NewWebanalyzeRunner(repo *db.Repository, bin string) *WebanalyzeRunner {
@@ -90,6 +92,11 @@ func (r *WebanalyzeRunner) WithBatchSize(batchSize int) *WebanalyzeRunner {
 	return r
 }
 
+func (r *WebanalyzeRunner) WithAuthoritative(authoritative bool) *WebanalyzeRunner {
+	r.authoritative = authoritative
+	return r
+}
+
 func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	targets, err := r.repo.ListWebTechTargets(ctx, r.programID, r.limit)
 	if err != nil {
@@ -111,6 +118,14 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 		if err := r.runBatch(ctx, targets[start:end], &result); err != nil {
 			return result, err
 		}
+	}
+	if r.authoritative && strings.TrimSpace(r.scanRunID) != "" {
+		ids := uniqueWebTechServiceIDs(targets)
+		deactivated, err := r.repo.MarkMissingTechnologyObservationsInactive(ctx, r.programID, r.scanRunID, "webanalyze", ids)
+		if err != nil {
+			return result, err
+		}
+		result.Deactivated = deactivated
 	}
 	return result, nil
 }
@@ -253,4 +268,21 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func uniqueWebTechServiceIDs(targets []db.WebTechTarget) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		id := strings.TrimSpace(target.HTTPServiceID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }

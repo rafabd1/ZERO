@@ -236,6 +236,62 @@ func (r *Repository) UpsertTechnologyObservation(ctx context.Context, obs Techno
 	return id, inserted, nil
 }
 
+func (r *Repository) MarkMissingTechnologyObservationsInactive(ctx context.Context, programID, scanRunID, source string, httpServiceIDs []string) (int, error) {
+	scanRunID = strings.TrimSpace(scanRunID)
+	source = strings.TrimSpace(source)
+	if scanRunID == "" || source == "" || len(httpServiceIDs) == 0 {
+		return 0, nil
+	}
+	cleanIDs := make([]string, 0, len(httpServiceIDs))
+	seen := map[string]struct{}{}
+	for _, id := range httpServiceIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanIDs = append(cleanIDs, id)
+	}
+	if len(cleanIDs) == 0 {
+		return 0, nil
+	}
+	var count int
+	if err := r.pool.QueryRow(ctx, `
+		WITH stale AS (
+			UPDATE zero_technology_observations o
+			SET active = false,
+				evidence = o.evidence || jsonb_build_object(
+					'deactivated_at', now(),
+					'deactivation_reason', 'missing_from_authoritative_fingerprint',
+					'superseded_by_scan_run_id', $2::text
+				)
+			WHERE ($1 = '' OR o.program_id::text = $1)
+			  AND o.source = $3
+			  AND o.active = true
+			  AND o.http_service_id::text = ANY($4::text[])
+			  AND COALESCE(o.last_scan_run_id::text, '') <> $2
+			RETURNING o.id, o.program_id, o.http_service_id, o.name, o.version, o.source
+		), events AS (
+			INSERT INTO zero_change_events(program_id, scan_run_id, entity_type, entity_id, entity_key, change_type, old_value, new_value, evidence_hash)
+			SELECT program_id, NULLIF($2, '')::uuid, 'technology', id,
+				http_service_id::text || ':' || lower(name) || ':' || version || ':' || source,
+				'removed',
+				jsonb_build_object('active', true),
+				jsonb_build_object('active', false, 'source', source, 'reason', 'missing_from_authoritative_fingerprint'),
+				encode(digest('fingerprint-superseded:technology:' || id::text || ':' || $2::text, 'sha256'), 'hex')
+			FROM stale
+			ON CONFLICT(evidence_hash) DO NOTHING
+		)
+		SELECT count(*) FROM stale
+	`, strings.TrimSpace(programID), scanRunID, source, cleanIDs).Scan(&count); err != nil {
+		return 0, fmt.Errorf("mark missing technology observations inactive: %w", err)
+	}
+	return count, nil
+}
+
 func cleanCSV(value string) []string {
 	parts := strings.Split(value, ",")
 	out := make([]string, 0, len(parts))
