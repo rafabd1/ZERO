@@ -93,6 +93,71 @@ func TestProductMatchingAvoidsVendorOnlyCiscoMatches(t *testing.T) {
 	}
 }
 
+func TestProductMatchingRejectsPluginNameContainingGenericSingleToken(t *testing.T) {
+	if productMatchesTech("posimyth the plus addons for elementor", "Elementor", DefaultTechnologyAliases()) {
+		t.Fatal("generic Elementor fingerprint must not match The Plus Addons for Elementor CPE")
+	}
+	if !productMatchesTech("elementor elementor", "Elementor", DefaultTechnologyAliases()) {
+		t.Fatal("exact Elementor CPE should still match Elementor")
+	}
+}
+
+func TestConditionalApacheCPEDowngradesPassiveConfidence(t *testing.T) {
+	tech := db.VersionedTechnology{Name: "Apache HTTP Server", Version: "2.4.6"}
+	cve := nvdCVE{
+		ID: "CVE-2024-CONFIG",
+		Descriptions: []nvdDescription{{
+			Lang:  "en",
+			Value: "Apache HTTP Server is affected when mod_proxy is enabled in a specific configuration.",
+		}},
+		Configurations: []nvdConfiguration{{
+			Nodes: []nvdNode{{
+				CPEMatch: []nvdCPEMatch{{
+					Vulnerable:          true,
+					Criteria:            "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*",
+					VersionEndIncluding: "2.4.6",
+				}},
+			}},
+		}},
+	}
+
+	confidence, evidence := matchConfidence(tech, cve, "Apache HTTP Server 2.4.6", DefaultTechnologyAliases())
+	if confidence >= 80 {
+		t.Fatalf("conditional Apache passive match should not be report-grade, got %d with evidence %#v", confidence, evidence)
+	}
+	if evidence["passive_gate"] != "conditional_configuration_or_module" {
+		t.Fatalf("expected conditional passive gate, got %#v", evidence)
+	}
+}
+
+func TestMajorOnlyDrupalVersionDowngradesPassiveConfidence(t *testing.T) {
+	tech := db.VersionedTechnology{Name: "Drupal", Version: "10"}
+	cve := nvdCVE{
+		ID: "CVE-2025-DRUPAL",
+		Descriptions: []nvdDescription{{
+			Lang:  "en",
+			Value: "Drupal core before 10.3.1 contains a vulnerability.",
+		}},
+		Configurations: []nvdConfiguration{{
+			Nodes: []nvdNode{{
+				CPEMatch: []nvdCPEMatch{{
+					Vulnerable:          true,
+					Criteria:            "cpe:2.3:a:drupal:drupal:*:*:*:*:*:*:*:*",
+					VersionEndExcluding: "10.3.1",
+				}},
+			}},
+		}},
+	}
+
+	confidence, evidence := matchConfidence(tech, cve, "Drupal 10", DefaultTechnologyAliases())
+	if confidence >= 80 {
+		t.Fatalf("major-only Drupal passive match should not be report-grade, got %d with evidence %#v", confidence, evidence)
+	}
+	if evidence["passive_gate"] != "major_only_version" {
+		t.Fatalf("expected major-only passive gate, got %#v", evidence)
+	}
+}
+
 func TestTextFallbackLinksVersionedTechnology(t *testing.T) {
 	tech := db.VersionedTechnology{Name: "Struts", Version: "2.5.12"}
 	cve := nvdCVE{

@@ -403,6 +403,7 @@ func (c nvdCVE) cpeConfidence(tech db.VersionedTechnology, aliases TechnologyAli
 			}
 		}
 	}
+	bestScore = applyPassiveCPEGates(tech, c, bestScore, best)
 	return bestScore, best
 }
 
@@ -437,7 +438,12 @@ func productMatchesTech(productText, techName string, aliases TechnologyAliases)
 	if techText == "" || productText == "" {
 		return false
 	}
-	if strings.Contains(productText, techText) || strings.Contains(techText, productText) {
+	tokens := significantTokens(techName)
+	if len(tokens) == 1 {
+		if singleTokenProductMatch(productText, tokens[0]) {
+			return true
+		}
+	} else if strings.Contains(productText, techText) || strings.Contains(techText, productText) {
 		return true
 	}
 	for _, alias := range aliases.MatchAliases(techName) {
@@ -445,7 +451,6 @@ func productMatchesTech(productText, techName string, aliases TechnologyAliases)
 			return true
 		}
 	}
-	tokens := significantTokens(techName)
 	hits := 0
 	for _, token := range tokens {
 		if strings.Contains(productText, token) {
@@ -453,9 +458,55 @@ func productMatchesTech(productText, techName string, aliases TechnologyAliases)
 		}
 	}
 	if len(tokens) <= 1 {
-		return hits == 1
+		return false
 	}
 	return hits >= 2
+}
+
+func singleTokenProductMatch(productText, token string) bool {
+	productTokens := significantTokens(productText)
+	if len(productTokens) == 0 {
+		return false
+	}
+	if len(productTokens) > 2 {
+		return false
+	}
+	for _, productToken := range productTokens {
+		if productToken == token {
+			return true
+		}
+	}
+	return false
+}
+
+func applyPassiveCPEGates(tech db.VersionedTechnology, cve nvdCVE, score int, evidence map[string]any) int {
+	if score < 80 {
+		return score
+	}
+	if conditionalCVEText(firstEnglishDescription(cve.Descriptions)) {
+		evidence["passive_gate"] = "conditional_configuration_or_module"
+		return minInt(score, 75)
+	}
+	if majorOnlyVersion(tech.Version) && majorOnlySensitiveProduct(tech.Name) {
+		evidence["passive_gate"] = "major_only_version"
+		return minInt(score, 75)
+	}
+	return score
+}
+
+var conditionalCVERE = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(if|when|requires|required|configuration|configured|enabled|module|mod_|cgi|ssi|suexec|vcl|proxy protocol|tls termination|http/2)([^[:alnum:]_]|$)|built with`)
+
+func conditionalCVEText(summary string) bool {
+	return conditionalCVERE.MatchString(summary)
+}
+
+func majorOnlyVersion(version string) bool {
+	return len(versionPartRE.FindAllString(version, -1)) == 1
+}
+
+func majorOnlySensitiveProduct(name string) bool {
+	text := normalizeText(name)
+	return text == "drupal" || text == "wordpress" || text == "joomla"
 }
 
 func cpeVersionScore(version, cpeVersion string, match nvdCPEMatch) (int, string) {

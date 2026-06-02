@@ -58,6 +58,17 @@ func newWorkerCommand() *cobra.Command {
 			}
 
 			var scanRequestsRunning atomic.Bool
+			var duePipelineRunning atomic.Bool
+			runDueJob := func(name string, limit int) {
+				if !duePipelineRunning.CompareAndSwap(false, true) {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s skipped: previous due pipeline still running\n", name)
+					return
+				}
+				defer duePipelineRunning.Store(false)
+				if err := runDuePrograms(cmd, limit, cfg.TargetParallelism, false, true); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s failed: %v\n", name, err)
+				}
+			}
 			if err := addJob("scope-sync", cfg.Schedule.ScopeSync, func() {
 				if err := runScopeSync(cmd, cfg, scopeProviders(cfg.Scope.Providers)); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "scope sync failed: %v\n", err)
@@ -66,9 +77,12 @@ func newWorkerCommand() *cobra.Command {
 				return err
 			}
 			if err := addJob("due-pipeline", cfg.Schedule.Full, func() {
-				if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, true); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "full pipeline failed: %v\n", err)
-				}
+				runDueJob("full pipeline", 0)
+			}); err != nil {
+				return err
+			}
+			if err := addJob("due-retry", "0 */10 * * * *", func() {
+				runDueJob("due retry", cfg.TargetParallelism)
 			}); err != nil {
 				return err
 			}
@@ -110,9 +124,7 @@ func newWorkerCommand() *cobra.Command {
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup scope-sync-if-due\n", time.Now().UTC().Format(time.RFC3339))
 					fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup due-pipeline\n", time.Now().UTC().Format(time.RFC3339))
-					if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, true); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "startup full pipeline failed: %v\n", err)
-					}
+					runDueJob("startup full pipeline", 0)
 					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup due-pipeline\n", time.Now().UTC().Format(time.RFC3339))
 				}()
 			}
