@@ -48,6 +48,11 @@
           <strong id="scansRunning">-</strong>
           <small id="scansFailed">-</small>
         </article>
+        <article class="metric">
+          <span>Custom Campaigns</span>
+          <strong id="campaignsRunning">-</strong>
+          <small id="campaignsSplit">-</small>
+        </article>
       </section>
 
       <section class="band">
@@ -148,6 +153,27 @@
               <tbody id="findingRows"></tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="section-title">
+          <h2>Custom Scan Campaigns</h2>
+          <span id="campaignCount">-</span>
+        </div>
+        <div class="table-wrap compact">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Parallelism</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="campaignRows"></tbody>
+          </table>
         </div>
       </section>
     </main>

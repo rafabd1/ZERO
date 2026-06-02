@@ -2,8 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/rafabd1/ZERO/internal/config"
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
@@ -22,7 +25,7 @@ func newWorkerCommand() *cobra.Command {
 			}
 			c := cron.New(cron.WithSeconds())
 			if cfg.Worker.RecoverRunningScans {
-				if err := recoverWorkerState(cmd, cfg.DatabaseURL); err != nil {
+				if err := recoverWorkerState(cmd, cfg); err != nil {
 					return err
 				}
 			}
@@ -36,6 +39,7 @@ func newWorkerCommand() *cobra.Command {
 				return err
 			}
 
+			var scanRequestsRunning atomic.Bool
 			if err := addJob("due-pipeline", cfg.Schedule.Full, func() {
 				if err := runDuePrograms(cmd, 0, cfg.TargetParallelism, false, false); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "full pipeline failed: %v\n", err)
@@ -44,7 +48,12 @@ func newWorkerCommand() *cobra.Command {
 				return err
 			}
 			if err := addJob("scan-requests", "*/30 * * * * *", func() {
-				if err := runQueuedScanRequests(cmd, cfg.DatabaseURL, cfg.DatabaseMaxConns); err != nil {
+				if !scanRequestsRunning.CompareAndSwap(false, true) {
+					fmt.Fprintln(cmd.OutOrStdout(), "scan request processing skipped: previous tick still running")
+					return
+				}
+				defer scanRequestsRunning.Store(false)
+				if err := runQueuedScanRequests(cmd, cfg); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "scan request processing failed: %v\n", err)
 				}
 			}); err != nil {
@@ -78,51 +87,63 @@ func newWorkerCommand() *cobra.Command {
 	}
 }
 
-func runQueuedScanRequests(cmd *cobra.Command, databaseURL string, databaseMaxConns int) error {
-	if databaseURL == "" {
-		return fmt.Errorf("ZERO_DATABASE_URL is required")
-	}
+func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 	ctx := commandContext()
-	repo, err := db.OpenWithMaxConns(ctx, databaseURL, databaseMaxConns)
+	repo, err := openRepositoryE(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer repo.Close()
-	requests, err := repo.ClaimDueScanRequests(ctx, 3)
+	requests, err := repo.ClaimDueScanRequests(ctx, cfg.TargetParallelism)
 	if err != nil {
 		return err
 	}
 	var firstErr error
+	var firstErrMu sync.Mutex
+	var wg sync.WaitGroup
 	for _, request := range requests {
-		opts, err := manualRunOptionsFromJSON(request.Params)
-		if err == nil && opts.ProgramID == "" {
-			opts.ProgramID = request.ProgramID
-		}
-		if err == nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "zero scan request starting: %s %s\n", request.ID, request.Name)
-			err = runManualPipeline(cmd, opts)
-		}
-		if finishErr := repo.FinishScanRequest(ctx, request.ID, err); finishErr != nil && err == nil {
-			err = finishErr
-		}
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "zero scan request failed %s: %v\n", request.ID, err)
-			if firstErr == nil {
-				firstErr = err
+		request := request
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := runQueuedScanRequest(cmd, repo, request)
+			if err != nil {
+				firstErrMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				firstErrMu.Unlock()
 			}
-			continue
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "zero scan request finished: %s\n", request.ID)
+		}()
 	}
+	wg.Wait()
 	return firstErr
 }
 
-func recoverWorkerState(cmd *cobra.Command, databaseURL string) error {
-	if databaseURL == "" {
-		return fmt.Errorf("ZERO_DATABASE_URL is required")
-	}
+func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.ScanRequest) error {
 	ctx := commandContext()
-	repo, err := db.Open(ctx, databaseURL)
+	opts, err := manualRunOptionsFromJSON(request.Params)
+	if err == nil && opts.ProgramID == "" {
+		opts.ProgramID = request.ProgramID
+	}
+	if err == nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "zero scan request starting: %s %s\n", request.ID, request.Name)
+		err = runManualPipeline(cmd, opts)
+	}
+	if finishErr := repo.FinishScanRequest(ctx, request.ID, err); finishErr != nil && err == nil {
+		err = finishErr
+	}
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "zero scan request failed %s: %v\n", request.ID, err)
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "zero scan request finished: %s\n", request.ID)
+	return nil
+}
+
+func recoverWorkerState(cmd *cobra.Command, cfg config.Config) error {
+	ctx := commandContext()
+	repo, err := openRepositoryE(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -135,11 +156,18 @@ func recoverWorkerState(cmd *cobra.Command, databaseURL string) error {
 	if err != nil {
 		return err
 	}
+	recoveredCampaigns, err := repo.RecoverRunningScanCampaigns(ctx)
+	if err != nil {
+		return err
+	}
 	if recovered > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "recovered %d interrupted scan run(s)\n", recovered)
 	}
 	if requeued > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d interrupted scan request(s)\n", requeued)
+	}
+	if recoveredCampaigns > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "refreshed %d interrupted scan campaign(s)\n", recoveredCampaigns)
 	}
 	return nil
 }

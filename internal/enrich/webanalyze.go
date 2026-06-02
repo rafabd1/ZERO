@@ -24,6 +24,7 @@ type WebanalyzeRunner struct {
 	programID string
 	limit     int
 	timeout   time.Duration
+	batchSize int
 }
 
 type WebanalyzeResult struct {
@@ -82,15 +83,43 @@ func (r *WebanalyzeRunner) WithTimeout(timeout time.Duration) *WebanalyzeRunner 
 	return r
 }
 
+func (r *WebanalyzeRunner) WithBatchSize(batchSize int) *WebanalyzeRunner {
+	if batchSize > 0 {
+		r.batchSize = batchSize
+	}
+	return r
+}
+
 func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	targets, err := r.repo.ListWebTechTargets(ctx, r.programID, r.limit)
 	if err != nil {
 		return WebanalyzeResult{}, err
 	}
+	result := WebanalyzeResult{Targets: len(targets)}
+	if len(targets) == 0 {
+		return result, nil
+	}
+	batchSize := r.batchSize
+	if batchSize <= 0 {
+		batchSize = len(targets)
+	}
+	for start := 0; start < len(targets); start += batchSize {
+		end := start + batchSize
+		if end > len(targets) {
+			end = len(targets)
+		}
+		if err := r.runBatch(ctx, targets[start:end], &result); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func (r *WebanalyzeRunner) runBatch(ctx context.Context, targets []db.WebTechTarget, result *WebanalyzeResult) error {
 	index := make(map[string][]db.WebTechTarget, len(targets))
 	hostFile, err := os.CreateTemp("", "zero-webanalyze-hosts-*.txt")
 	if err != nil {
-		return WebanalyzeResult{}, err
+		return err
 	}
 	hostPath := hostFile.Name()
 	defer os.Remove(hostPath)
@@ -100,17 +129,12 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 		}
 		if _, err := fmt.Fprintln(hostFile, target.URL); err != nil {
 			hostFile.Close()
-			return WebanalyzeResult{}, err
+			return err
 		}
 		index[normalizeURLKey(target.URL)] = append(index[normalizeURLKey(target.URL)], target)
 	}
 	if err := hostFile.Close(); err != nil {
-		return WebanalyzeResult{}, err
-	}
-
-	result := WebanalyzeResult{Targets: len(targets)}
-	if len(targets) == 0 {
-		return result, nil
+		return err
 	}
 
 	args := []string{
@@ -126,7 +150,7 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 		args = append(args, "-apps", r.apps)
 	}
 
-	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, nil, func(line string) error {
+	return tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, nil, func(line string) error {
 		parsed, err := parseWebanalyzeLine(line)
 		if err != nil {
 			result.SkippedOutput++
@@ -170,7 +194,6 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 		}
 		return nil
 	})
-	return result, err
 }
 
 type webanalyzeLine struct {

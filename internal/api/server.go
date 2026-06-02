@@ -137,6 +137,7 @@ func (s *Server) routes() {
 		SELECT jsonb_build_object(
 			'id', r.id,
 			'program_id', r.program_id,
+			'campaign_id', r.campaign_id,
 			'name', r.name,
 			'status', r.status,
 			'requested_by', r.requested_by,
@@ -151,6 +152,31 @@ func (s *Server) routes() {
 		)
 		FROM zero_scan_requests r
 		ORDER BY r.created_at DESC
+		LIMIT 100
+	`))
+	s.mux.HandleFunc("GET /v1/scan-campaigns", s.query(`
+		SELECT jsonb_build_object(
+			'id', c.id,
+			'name', c.name,
+			'status', c.status,
+			'requested_by', c.requested_by,
+			'run_after', c.run_after,
+			'parallelism', c.parallelism,
+			'total_requests', c.total_requests,
+			'queued_requests', c.queued_requests,
+			'running_requests', c.running_requests,
+			'succeeded_requests', c.succeeded_requests,
+			'failed_requests', c.failed_requests,
+			'params', c.params,
+			'program_filter', c.program_filter,
+			'started_at', c.started_at,
+			'finished_at', c.finished_at,
+			'error', c.error,
+			'created_at', c.created_at,
+			'updated_at', c.updated_at
+		)
+		FROM zero_scan_campaigns c
+		ORDER BY c.created_at DESC
 		LIMIT 100
 	`))
 	s.mux.HandleFunc("POST /v1/scan-requests", s.createScanRequest)
@@ -301,6 +327,13 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 				'reported', (SELECT count(*) FROM zero_candidate_findings WHERE status = 'reported'),
 				'nuclei_confirmed', (SELECT count(*) FROM zero_candidate_findings WHERE nuclei_result_id IS NOT NULL),
 				'passive_unconfirmed', (SELECT count(*) FROM zero_candidate_findings WHERE nuclei_result_id IS NULL)
+			),
+			'scan_campaigns', jsonb_build_object(
+				'running', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'running'),
+				'queued', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'queued'),
+				'succeeded', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'succeeded'),
+				'failed', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'failed'),
+				'total', (SELECT count(*) FROM zero_scan_campaigns)
 			),
 			'nuclei_results', (SELECT count(*) FROM zero_nuclei_results),
 			'reports', (SELECT count(*) FROM zero_reports),
@@ -710,10 +743,14 @@ func queryInt(r *http.Request, name string, fallback int) int {
 
 func (s *Server) createScanRequest(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ProgramID string          `json:"program_id"`
-		Name      string          `json:"name"`
-		RunAfter  string          `json:"run_after"`
-		Params    json.RawMessage `json:"params"`
+		ProgramID   string          `json:"program_id"`
+		Name        string          `json:"name"`
+		RunAfter    string          `json:"run_after"`
+		Params      json.RawMessage `json:"params"`
+		AllPrograms bool            `json:"all_programs"`
+		DueOnly     bool            `json:"due_only"`
+		Limit       int             `json:"limit"`
+		Parallelism int             `json:"parallelism"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")
@@ -731,6 +768,24 @@ func (s *Server) createScanRequest(w http.ResponseWriter, r *http.Request) {
 	params := json.RawMessage(`{}`)
 	if len(body.Params) > 0 {
 		params = body.Params
+	}
+	if body.AllPrograms {
+		result, err := s.repo.CreateScanCampaign(r.Context(), strings.TrimSpace(body.Name), "api", runAfter, params, body.DueOnly, body.Limit, body.Parallelism)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"id":          result.ID,
+			"type":        "scan_campaign",
+			"total":       result.Total,
+			"queued":      result.Queued,
+			"due_only":    result.DueOnly,
+			"limit":       result.Limit,
+			"parallelism": result.Parallel,
+			"run_after":   runAfter,
+		})
+		return
 	}
 	id, err := s.repo.CreateScanRequest(r.Context(), strings.TrimSpace(body.ProgramID), strings.TrimSpace(body.Name), "api", runAfter, params)
 	if err != nil {

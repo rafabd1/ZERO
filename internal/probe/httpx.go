@@ -24,12 +24,19 @@ type HTTPXRunner struct {
 	timeout    time.Duration
 	reqTimeout int
 	threads    int
+	batchSize  int
+	batchTO    time.Duration
+	patternMin int
+	patternCap int
 	tlsProbe   bool
 }
 
 type HTTPXResult struct {
-	Hosts    int
-	Services int
+	Hosts            int
+	Services         int
+	SkippedByPattern int
+	PriorityKept     int
+	BudgetedRoots    int
 }
 
 type httpxLine struct {
@@ -75,6 +82,26 @@ func (r *HTTPXRunner) WithRequestPolicy(reqTimeout, threads int) *HTTPXRunner {
 	return r
 }
 
+func (r *HTTPXRunner) WithBatchSize(batchSize int) *HTTPXRunner {
+	if batchSize > 0 {
+		r.batchSize = batchSize
+	}
+	return r
+}
+
+func (r *HTTPXRunner) WithBatchTimeout(timeout time.Duration) *HTTPXRunner {
+	if timeout > 0 {
+		r.batchTO = timeout
+	}
+	return r
+}
+
+func (r *HTTPXRunner) WithPatternBudget(minGroup, cap int) *HTTPXRunner {
+	r.patternMin = minGroup
+	r.patternCap = cap
+	return r
+}
+
 func (r *HTTPXRunner) WithTLSProbe(enabled bool) *HTTPXRunner {
 	r.tlsProbe = enabled
 	return r
@@ -99,8 +126,8 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		targets = targets[:r.limit]
 	}
 
-	var input bytes.Buffer
 	byHost := make(map[string][]db.ProbeTarget, len(targets))
+	hosts := make([]string, 0, len(targets))
 	for _, target := range targets {
 		fqdn, ok := sanitize.CanonicalDomain(target.FQDN)
 		if !ok || !targetAllowsHost(target, fqdn) {
@@ -108,15 +135,50 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		}
 		target.FQDN = fqdn
 		if _, ok := byHost[fqdn]; !ok {
-			input.WriteString(fqdn)
-			input.WriteByte('\n')
+			hosts = append(hosts, fqdn)
 		}
 		byHost[fqdn] = append(byHost[fqdn], target)
 	}
 
-	result := HTTPXResult{Hosts: len(byHost)}
+	budgeted := applyHostBudget(hosts, byHost, hostBudgetPolicy{
+		MinGroup: r.patternMin,
+		Cap:      r.patternCap,
+	})
+	hosts = budgeted.Hosts
+	result := HTTPXResult{
+		Hosts:            len(hosts),
+		SkippedByPattern: budgeted.Skipped,
+		PriorityKept:     budgeted.PriorityKept,
+		BudgetedRoots:    budgeted.BudgetedRoot,
+	}
 	args := buildHTTPXArgs(r.reqTimeout, r.threads, r.tlsProbe)
-	err = tools.RunLinesWithTimeout(ctx, r.timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
+	batchSize := r.batchSize
+	if batchSize <= 0 {
+		batchSize = len(hosts)
+	}
+	batchTimeout := r.timeout
+	if r.batchTO > 0 && (batchTimeout <= 0 || r.batchTO < batchTimeout) {
+		batchTimeout = r.batchTO
+	}
+	for start := 0; start < len(hosts); start += batchSize {
+		end := start + batchSize
+		if end > len(hosts) {
+			end = len(hosts)
+		}
+		if err := r.runBatch(ctx, batchTimeout, args, hosts[start:end], byHost, &result); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func (r *HTTPXRunner) runBatch(ctx context.Context, timeout time.Duration, args []string, hosts []string, byHost map[string][]db.ProbeTarget, result *HTTPXResult) error {
+	var input bytes.Buffer
+	for _, host := range hosts {
+		input.WriteString(host)
+		input.WriteByte('\n')
+	}
+	return tools.RunLinesWithTimeout(ctx, timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		var parsed httpxLine
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 			return fmt.Errorf("parse httpx json: %w", err)
@@ -134,7 +196,6 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		}
 		return nil
 	})
-	return result, err
 }
 
 func buildHTTPXArgs(reqTimeout, threads int, tlsProbe bool) []string {

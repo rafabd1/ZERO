@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -30,30 +31,173 @@ func (r *Repository) CreateScanRequest(ctx context.Context, programID, name, req
 	return id, nil
 }
 
+func (r *Repository) CreateScanCampaign(ctx context.Context, name, requestedBy string, runAfter time.Time, params any, dueOnly bool, limit, parallelism int) (ScanCampaignCreateResult, error) {
+	if requestedBy == "" {
+		requestedBy = "cli"
+	}
+	if runAfter.IsZero() {
+		runAfter = time.Now().UTC()
+	}
+	if parallelism <= 0 {
+		parallelism = 1
+	}
+	if parallelism > 32 {
+		parallelism = 32
+	}
+	programs, err := r.ListProgramsForCampaign(ctx, dueOnly, limit)
+	if err != nil {
+		return ScanCampaignCreateResult{}, err
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("marshal scan campaign params: %w", err)
+	}
+	filterRaw, err := json.Marshal(map[string]any{
+		"due_only": dueOnly,
+		"limit":    limit,
+	})
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("marshal scan campaign filter: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("begin scan campaign: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var id string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO zero_scan_campaigns(
+			name, requested_by, run_after, parallelism, params, program_filter, total_requests, queued_requests
+		)
+		VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$7)
+		RETURNING id::text
+	`, name, requestedBy, runAfter, parallelism, string(raw), string(filterRaw), len(programs)).Scan(&id)
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("create scan campaign: %w", err)
+	}
+
+	for _, program := range programs {
+		childParams, err := scanCampaignChildParams(raw, program.ID)
+		if err != nil {
+			return ScanCampaignCreateResult{}, err
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO zero_scan_requests(program_id, campaign_id, name, requested_by, run_after, params)
+			VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6::jsonb)
+		`, program.ID, id, name, requestedBy, runAfter, string(childParams))
+		if err != nil {
+			return ScanCampaignCreateResult{}, fmt.Errorf("create scan campaign child request: %w", err)
+		}
+	}
+
+	if len(programs) == 0 {
+		_, err = tx.Exec(ctx, `
+			UPDATE zero_scan_campaigns
+			SET status = 'succeeded',
+				finished_at = now(),
+				updated_at = now()
+			WHERE id = $1::uuid
+		`, id)
+		if err != nil {
+			return ScanCampaignCreateResult{}, fmt.Errorf("finish empty scan campaign: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("commit scan campaign: %w", err)
+	}
+	return ScanCampaignCreateResult{
+		ID:       id,
+		Total:    len(programs),
+		Queued:   len(programs),
+		DueOnly:  dueOnly,
+		Limit:    limit,
+		Parallel: parallelism,
+	}, nil
+}
+
+func scanCampaignChildParams(raw []byte, programID string) ([]byte, error) {
+	params := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, fmt.Errorf("decode scan campaign params: %w", err)
+		}
+	}
+	params["ProgramID"] = programID
+	params["SkipSync"] = true
+	return json.Marshal(params)
+}
+
 func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]ScanRequest, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 	rows, err := r.pool.Query(ctx, `
-		WITH due AS (
-			SELECT id
+		WITH campaign_counts AS (
+			SELECT campaign_id, count(*) FILTER (WHERE status = 'running') AS running_count
 			FROM zero_scan_requests
-			WHERE status = 'queued'
-			  AND run_after <= now()
+			WHERE campaign_id IS NOT NULL
+			GROUP BY campaign_id
+		),
+		eligible AS (
+			SELECT
+				r.id,
+				r.campaign_id,
+				r.run_after,
+				r.created_at,
+				COALESCE(c.parallelism, 1) - COALESCE(cc.running_count, 0) AS campaign_slots,
+				row_number() OVER (PARTITION BY r.campaign_id ORDER BY r.run_after, r.created_at) AS campaign_rank
+			FROM zero_scan_requests r
+			LEFT JOIN zero_scan_campaigns c ON c.id = r.campaign_id
+			LEFT JOIN campaign_counts cc ON cc.campaign_id = r.campaign_id
+			WHERE r.status = 'queued'
+			  AND r.run_after <= now()
+			  AND (
+				r.campaign_id IS NULL
+				OR (
+					c.status IN ('queued', 'running')
+					AND c.run_after <= now()
+				)
+			  )
+		),
+		due AS (
+			SELECT id
+			FROM eligible
+			WHERE campaign_id IS NULL
+			   OR (campaign_slots > 0 AND campaign_rank <= campaign_slots)
 			ORDER BY run_after, created_at
 			LIMIT $1
-			FOR UPDATE SKIP LOCKED
+		),
+		claimed AS (
+			UPDATE zero_scan_requests r
+			SET status = 'running',
+				attempt_count = attempt_count + 1,
+				started_at = now(),
+				locked_at = now(),
+				updated_at = now(),
+				error = ''
+			FROM due
+			WHERE r.id = due.id
+			RETURNING r.id, r.program_id, r.campaign_id, r.name, r.params
+		),
+		started_campaigns AS (
+			UPDATE zero_scan_campaigns c
+			SET status = 'running',
+				started_at = COALESCE(c.started_at, now()),
+				updated_at = now()
+			WHERE c.id IN (SELECT campaign_id FROM claimed WHERE campaign_id IS NOT NULL)
+			  AND c.status = 'queued'
+			RETURNING c.id
 		)
-		UPDATE zero_scan_requests r
-		SET status = 'running',
-			attempt_count = attempt_count + 1,
-			started_at = now(),
-			locked_at = now(),
-			updated_at = now(),
-			error = ''
-		FROM due
-		WHERE r.id = due.id
-		RETURNING r.id::text, COALESCE(r.program_id::text, ''), r.name, r.params
+		SELECT
+			id::text,
+			COALESCE(program_id::text, ''),
+			COALESCE(campaign_id::text, ''),
+			name,
+			params
+		FROM claimed
 	`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("claim scan requests: %w", err)
@@ -62,7 +206,7 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 	requests := []ScanRequest{}
 	for rows.Next() {
 		var req ScanRequest
-		if err := rows.Scan(&req.ID, &req.ProgramID, &req.Name, &req.Params); err != nil {
+		if err := rows.Scan(&req.ID, &req.ProgramID, &req.CampaignID, &req.Name, &req.Params); err != nil {
 			return nil, err
 		}
 		requests = append(requests, req)
@@ -89,6 +233,31 @@ func (r *Repository) RecoverRunningScanRequests(ctx context.Context) (int, error
 	return int(tag.RowsAffected()), nil
 }
 
+func (r *Repository) RecoverRunningScanCampaigns(ctx context.Context) (int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text
+		FROM zero_scan_campaigns
+		WHERE status = 'running'
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("list running scan campaigns: %w", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return count, err
+		}
+		if err := r.RefreshScanCampaign(ctx, id); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, rows.Err()
+}
+
 func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr error) error {
 	status := "succeeded"
 	errorText := ""
@@ -107,6 +276,65 @@ func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr er
 	`, id, status, errorText)
 	if err != nil {
 		return fmt.Errorf("finish scan request: %w", err)
+	}
+	return r.RefreshScanCampaignForRequest(ctx, id)
+}
+
+func (r *Repository) RefreshScanCampaignForRequest(ctx context.Context, requestID string) error {
+	var campaignID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(campaign_id::text, '')
+		FROM zero_scan_requests
+		WHERE id = $1::uuid
+	`, requestID).Scan(&campaignID)
+	if err != nil {
+		return fmt.Errorf("lookup scan request campaign: %w", err)
+	}
+	if strings.TrimSpace(campaignID) == "" {
+		return nil
+	}
+	return r.RefreshScanCampaign(ctx, campaignID)
+}
+
+func (r *Repository) RefreshScanCampaign(ctx context.Context, campaignID string) error {
+	_, err := r.pool.Exec(ctx, `
+		WITH counts AS (
+			SELECT
+				count(*) FILTER (WHERE status = 'queued') AS queued,
+				count(*) FILTER (WHERE status = 'running') AS running,
+				count(*) FILTER (WHERE status = 'succeeded') AS succeeded,
+				count(*) FILTER (WHERE status = 'failed') AS failed,
+				count(*) FILTER (WHERE status = 'canceled') AS canceled
+			FROM zero_scan_requests
+			WHERE campaign_id = $1::uuid
+		)
+		UPDATE zero_scan_campaigns c
+		SET queued_requests = counts.queued::int,
+			running_requests = counts.running::int,
+			succeeded_requests = counts.succeeded::int,
+			failed_requests = counts.failed::int,
+			status = CASE
+				WHEN c.status = 'canceled' THEN 'canceled'
+				WHEN counts.running > 0 THEN 'running'
+				WHEN counts.queued > 0 THEN 'queued'
+				WHEN counts.failed > 0 THEN 'failed'
+				WHEN counts.canceled > 0 THEN 'canceled'
+				ELSE 'succeeded'
+			END,
+			finished_at = CASE
+				WHEN counts.running = 0 AND counts.queued = 0 THEN COALESCE(c.finished_at, now())
+				ELSE NULL
+			END,
+			updated_at = now(),
+			error = CASE
+				WHEN counts.failed > 0 THEN 'one or more campaign scan requests failed'
+				ELSE ''
+			END
+		FROM counts
+		WHERE c.id = $1::uuid
+	`, campaignID)
+	if err != nil {
+		return fmt.Errorf("refresh scan campaign: %w", err)
 	}
 	return nil
 }

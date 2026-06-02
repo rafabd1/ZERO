@@ -40,9 +40,35 @@ CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_program_started
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_status
 	ON zero_scan_runs(status, run_type, started_at DESC);
 
+CREATE TABLE IF NOT EXISTS zero_scan_campaigns (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	name text NOT NULL DEFAULT '',
+	status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','canceled')),
+	requested_by text NOT NULL DEFAULT 'cli',
+	run_after timestamptz NOT NULL DEFAULT now(),
+	parallelism integer NOT NULL DEFAULT 1 CHECK (parallelism >= 1 AND parallelism <= 32),
+	total_requests integer NOT NULL DEFAULT 0,
+	queued_requests integer NOT NULL DEFAULT 0,
+	running_requests integer NOT NULL DEFAULT 0,
+	succeeded_requests integer NOT NULL DEFAULT 0,
+	failed_requests integer NOT NULL DEFAULT 0,
+	canceled_requests integer NOT NULL DEFAULT 0,
+	params jsonb NOT NULL DEFAULT '{}'::jsonb,
+	program_filter jsonb NOT NULL DEFAULT '{}'::jsonb,
+	started_at timestamptz,
+	finished_at timestamptz,
+	error text NOT NULL DEFAULT '',
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zero_scan_campaigns_status
+	ON zero_scan_campaigns(status, run_after, created_at);
+
 CREATE TABLE IF NOT EXISTS zero_scan_requests (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	program_id uuid REFERENCES zero_programs(id) ON DELETE CASCADE,
+	campaign_id uuid REFERENCES zero_scan_campaigns(id) ON DELETE CASCADE,
 	name text NOT NULL DEFAULT '',
 	status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','canceled')),
 	requested_by text NOT NULL DEFAULT 'cli',
@@ -57,10 +83,15 @@ CREATE TABLE IF NOT EXISTS zero_scan_requests (
 	updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE zero_scan_requests
+	ADD COLUMN IF NOT EXISTS campaign_id uuid REFERENCES zero_scan_campaigns(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_due
 	ON zero_scan_requests(status, run_after, created_at);
 CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_program
 	ON zero_scan_requests(program_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_campaign
+	ON zero_scan_requests(campaign_id, status, run_after, created_at);
 
 CREATE TABLE IF NOT EXISTS zero_scope_assets (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

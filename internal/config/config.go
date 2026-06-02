@@ -56,11 +56,16 @@ type ToolConfig struct {
 	HTTPXBin                string
 	HTTPXTimeout            int
 	HTTPXThreads            int
+	HTTPXBatchSize          int
+	HTTPXBatchTimeout       time.Duration
+	HTTPXPatternMinGroup    int
+	HTTPXPatternCap         int
 	HTTPXTLSProbe           bool
 	WebanalyzeBin           string
 	WebanalyzeApps          string
 	WebanalyzeWorkers       int
 	WebanalyzeCrawl         int
+	WebanalyzeBatchSize     int
 	NucleiBin               string
 	NucleiTemplateDir       string
 	NucleiUpdateTemplates   bool
@@ -96,6 +101,8 @@ type IntelConfig struct {
 	NVDAPIKey       string
 	TechAliasesFile string
 	CVEMinYear      int
+	NVDRetries      int
+	NVDRetryWait    time.Duration
 }
 
 type DataConfig struct {
@@ -133,11 +140,16 @@ func Load() (Config, error) {
 	v.SetDefault("tools.httpx_bin", "httpx")
 	v.SetDefault("tools.httpx_timeout", 4)
 	v.SetDefault("tools.httpx_threads", 20)
+	v.SetDefault("tools.httpx_batch_size", 50)
+	v.SetDefault("tools.httpx_batch_timeout", "5m")
+	v.SetDefault("tools.httpx_pattern_min_group", 200)
+	v.SetDefault("tools.httpx_pattern_cap", 120)
 	v.SetDefault("tools.httpx_tls_probe", false)
 	v.SetDefault("tools.webanalyze_bin", "webanalyze")
 	v.SetDefault("tools.webanalyze_apps", "")
 	v.SetDefault("tools.webanalyze_workers", 4)
 	v.SetDefault("tools.webanalyze_crawl", 0)
+	v.SetDefault("tools.webanalyze_batch_size", 500)
 	v.SetDefault("tools.nuclei_bin", "nuclei")
 	v.SetDefault("tools.nuclei_template_dir", "")
 	v.SetDefault("tools.nuclei_update_templates", true)
@@ -167,6 +179,8 @@ func Load() (Config, error) {
 	v.SetDefault("database.retry_wait", "3s")
 	v.SetDefault("data.stale_after_hours", 168)
 	v.SetDefault("intel.cve_min_year", 2018)
+	v.SetDefault("intel.nvd_retries", 3)
+	v.SetDefault("intel.nvd_retry_wait", "3s")
 
 	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
@@ -192,11 +206,16 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.httpx_bin", "ZERO_HTTPX_BIN")
 	_ = v.BindEnv("tools.httpx_timeout", "ZERO_HTTPX_TIMEOUT")
 	_ = v.BindEnv("tools.httpx_threads", "ZERO_HTTPX_THREADS")
+	_ = v.BindEnv("tools.httpx_batch_size", "ZERO_HTTPX_BATCH_SIZE")
+	_ = v.BindEnv("tools.httpx_batch_timeout", "ZERO_HTTPX_BATCH_TIMEOUT")
+	_ = v.BindEnv("tools.httpx_pattern_min_group", "ZERO_HTTPX_PATTERN_MIN_GROUP")
+	_ = v.BindEnv("tools.httpx_pattern_cap", "ZERO_HTTPX_PATTERN_CAP")
 	_ = v.BindEnv("tools.httpx_tls_probe", "ZERO_HTTPX_TLS_PROBE")
 	_ = v.BindEnv("tools.webanalyze_bin", "ZERO_WEBANALYZE_BIN")
 	_ = v.BindEnv("tools.webanalyze_apps", "ZERO_WEBANALYZE_APPS")
 	_ = v.BindEnv("tools.webanalyze_workers", "ZERO_WEBANALYZE_WORKERS")
 	_ = v.BindEnv("tools.webanalyze_crawl", "ZERO_WEBANALYZE_CRAWL")
+	_ = v.BindEnv("tools.webanalyze_batch_size", "ZERO_WEBANALYZE_BATCH_SIZE")
 	_ = v.BindEnv("tools.nuclei_bin", "ZERO_NUCLEI_BIN")
 	_ = v.BindEnv("tools.nuclei_template_dir", "ZERO_NUCLEI_TEMPLATE_DIR")
 	_ = v.BindEnv("tools.nuclei_update_templates", "ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP")
@@ -228,6 +247,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("intel.nvd_api_key", "ZERO_NVD_API_KEY")
 	_ = v.BindEnv("intel.tech_aliases_file", "ZERO_TECH_ALIASES_FILE")
 	_ = v.BindEnv("intel.cve_min_year", "ZERO_CVE_MIN_YEAR")
+	_ = v.BindEnv("intel.nvd_retries", "ZERO_NVD_RETRIES")
+	_ = v.BindEnv("intel.nvd_retry_wait", "ZERO_NVD_RETRY_WAIT")
 	_ = v.BindEnv("data.stale_after_hours", "ZERO_STALE_AFTER_HOURS")
 
 	return Config{
@@ -262,11 +283,16 @@ func Load() (Config, error) {
 			HTTPXBin:                v.GetString("tools.httpx_bin"),
 			HTTPXTimeout:            clampInt(v.GetInt("tools.httpx_timeout"), 1, 60),
 			HTTPXThreads:            clampInt(v.GetInt("tools.httpx_threads"), 1, 200),
+			HTTPXBatchSize:          clampInt(v.GetInt("tools.httpx_batch_size"), 50, 10000),
+			HTTPXBatchTimeout:       v.GetDuration("tools.httpx_batch_timeout"),
+			HTTPXPatternMinGroup:    clampInt(v.GetInt("tools.httpx_pattern_min_group"), 0, 100000),
+			HTTPXPatternCap:         clampInt(v.GetInt("tools.httpx_pattern_cap"), 0, 100000),
 			HTTPXTLSProbe:           v.GetBool("tools.httpx_tls_probe"),
 			WebanalyzeBin:           v.GetString("tools.webanalyze_bin"),
 			WebanalyzeApps:          v.GetString("tools.webanalyze_apps"),
 			WebanalyzeWorkers:       v.GetInt("tools.webanalyze_workers"),
 			WebanalyzeCrawl:         v.GetInt("tools.webanalyze_crawl"),
+			WebanalyzeBatchSize:     clampInt(v.GetInt("tools.webanalyze_batch_size"), 50, 5000),
 			NucleiBin:               v.GetString("tools.nuclei_bin"),
 			NucleiTemplateDir:       v.GetString("tools.nuclei_template_dir"),
 			NucleiUpdateTemplates:   v.GetBool("tools.nuclei_update_templates"),
@@ -307,6 +333,8 @@ func Load() (Config, error) {
 			NVDAPIKey:       v.GetString("intel.nvd_api_key"),
 			TechAliasesFile: v.GetString("intel.tech_aliases_file"),
 			CVEMinYear:      clampInt(v.GetInt("intel.cve_min_year"), 0, 9999),
+			NVDRetries:      clampInt(v.GetInt("intel.nvd_retries"), 1, 10),
+			NVDRetryWait:    v.GetDuration("intel.nvd_retry_wait"),
 		},
 		Data: DataConfig{
 			StaleAfterHours: v.GetInt("data.stale_after_hours"),

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/intel"
 	"github.com/rafabd1/ZERO/internal/validate"
@@ -56,6 +57,7 @@ func newAnalyzeCommand() *cobra.Command {
 				WithScanRunID(scanID).
 				WithLimit(cvesLimit).
 				WithMinYear(cfg.Intel.CVEMinYear).
+				WithRetry(cfg.Intel.NVDRetries, cfg.Intel.NVDRetryWait).
 				Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
@@ -198,6 +200,15 @@ func newAnalyzeCommand() *cobra.Command {
 }
 
 func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstDuration(values ...time.Duration) time.Duration {
 	for _, value := range values {
 		if value > 0 {
 			return value

@@ -23,6 +23,8 @@ type NVDRunner struct {
 	limit     int
 	perQuery  int
 	minYear   int
+	retries   int
+	retryWait time.Duration
 	client    *http.Client
 }
 
@@ -37,13 +39,15 @@ type NVDResult struct {
 
 func NewNVDRunner(repo *db.Repository, apiKey string) *NVDRunner {
 	return &NVDRunner{
-		repo:     repo,
-		apiKey:   strings.TrimSpace(apiKey),
-		aliases:  DefaultTechnologyAliases(),
-		limit:    25,
-		perQuery: 20,
-		minYear:  2018,
-		client:   &http.Client{Timeout: 20 * time.Second},
+		repo:      repo,
+		apiKey:    strings.TrimSpace(apiKey),
+		aliases:   DefaultTechnologyAliases(),
+		limit:     25,
+		perQuery:  20,
+		minYear:   2018,
+		retries:   3,
+		retryWait: 3 * time.Second,
+		client:    &http.Client{Timeout: 20 * time.Second},
 	}
 }
 
@@ -74,6 +78,16 @@ func (r *NVDRunner) WithLimit(limit int) *NVDRunner {
 func (r *NVDRunner) WithMinYear(year int) *NVDRunner {
 	if year >= 0 {
 		r.minYear = year
+	}
+	return r
+}
+
+func (r *NVDRunner) WithRetry(retries int, wait time.Duration) *NVDRunner {
+	if retries > 0 {
+		r.retries = retries
+	}
+	if wait > 0 {
+		r.retryWait = wait
 	}
 	return r
 }
@@ -145,24 +159,25 @@ func (r *NVDRunner) search(ctx context.Context, tech db.VersionedTechnology, key
 	q.Set("keywordSearch", keyword)
 	q.Set("resultsPerPage", fmt.Sprint(r.perQuery))
 	q.Set("noRejected", "")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+q.Encode(), nil)
-	if err != nil {
-		return nil, err
-	}
-	if r.apiKey != "" {
-		req.Header.Set("apiKey", r.apiKey)
-	}
-	res, err := r.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("nvd search %q failed with status %d", keyword, res.StatusCode)
-	}
 	var parsed nvdResponse
-	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 1; attempt <= r.retries; attempt++ {
+		parsed, lastErr = r.fetch(ctx, endpoint+"?"+q.Encode(), keyword)
+		if lastErr == nil {
+			break
+		}
+		if attempt == r.retries || !retryableNVDError(lastErr) {
+			return nil, lastErr
+		}
+		wait := time.Duration(attempt) * r.retryWait
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
 	}
 	candidates := make([]nvdCandidate, 0, len(parsed.Vulnerabilities))
 	for _, item := range parsed.Vulnerabilities {
@@ -189,6 +204,45 @@ func (r *NVDRunner) search(ctx context.Context, tech db.VersionedTechnology, key
 		})
 	}
 	return candidates, nil
+}
+
+func (r *NVDRunner) fetch(ctx context.Context, rawURL, keyword string) (nvdResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nvdResponse{}, err
+	}
+	if r.apiKey != "" {
+		req.Header.Set("apiKey", r.apiKey)
+	}
+	res, err := r.client.Do(req)
+	if err != nil {
+		return nvdResponse{}, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nvdResponse{}, nvdStatusError{keyword: keyword, status: res.StatusCode}
+	}
+	var parsed nvdResponse
+	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
+		return nvdResponse{}, err
+	}
+	return parsed, nil
+}
+
+type nvdStatusError struct {
+	keyword string
+	status  int
+}
+
+func (e nvdStatusError) Error() string {
+	return fmt.Sprintf("nvd search %q failed with status %d", e.keyword, e.status)
+}
+
+func retryableNVDError(err error) bool {
+	if statusErr, ok := err.(nvdStatusError); ok {
+		return statusErr.status == http.StatusTooManyRequests || statusErr.status >= 500
+	}
+	return true
 }
 
 func cveYear(id string) int {

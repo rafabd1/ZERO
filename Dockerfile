@@ -20,7 +20,7 @@ ARG HTTPX_VERSION=1.9.0
 ARG DNSX_VERSION=1.2.2
 ARG NUCLEI_VERSION=3.8.0
 
-RUN apk add --no-cache ca-certificates bind-tools git curl unzip su-exec && \
+RUN apk add --no-cache ca-certificates bind-tools git curl unzip su-exec tini && \
     adduser -D -h /home/zero zero && \
     mkdir -p /home/zero/.config/subfinder && \
     chown -R zero:zero /home/zero
@@ -59,5 +59,5 @@ ENV ZERO_NUCLEI_BIN=/usr/local/bin/nuclei
 ENV ZERO_NUCLEI_TEMPLATE_DIR=/home/zero/nuclei-templates
 ENV ZERO_SUBFINDER_PROVIDER_CONFIG=/home/zero/.config/subfinder/provider-config.yaml
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 CMD ["worker"]

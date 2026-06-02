@@ -2,6 +2,35 @@ package db
 
 import "testing"
 
+func TestScanCampaignChildParamsForcesProgramAndSkipSync(t *testing.T) {
+	raw := []byte(`{"ProgramID":"old","SkipSync":false,"NucleiTemplate":"/tmp/custom.yaml"}`)
+	got, err := scanCampaignChildParams(raw, "new-program")
+	if err != nil {
+		t.Fatalf("scanCampaignChildParams returned error: %v", err)
+	}
+	if string(got) == "" {
+		t.Fatal("expected non-empty child params")
+	}
+	if want := `"ProgramID":"new-program"`; !containsJSONFragment(string(got), want) {
+		t.Fatalf("child params = %s; missing %s", got, want)
+	}
+	if want := `"SkipSync":true`; !containsJSONFragment(string(got), want) {
+		t.Fatalf("child params = %s; missing %s", got, want)
+	}
+	if want := `"NucleiTemplate":"/tmp/custom.yaml"`; !containsJSONFragment(string(got), want) {
+		t.Fatalf("child params = %s; missing %s", got, want)
+	}
+}
+
+func containsJSONFragment(value, fragment string) bool {
+	for i := 0; i+len(fragment) <= len(value); i++ {
+		if value[i:i+len(fragment)] == fragment {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDomainExcludedAppliesExactAndWildcardRulesPerProgram(t *testing.T) {
 	rules := []DomainScopeRule{
 		{ProgramID: "p1", Host: "admin.example.com", MatchMode: ProbeMatchExact},

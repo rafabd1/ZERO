@@ -90,13 +90,22 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 				COALESCE(ns.stats->>'skipped', '') AS nuclei_skipped,
 				COALESCE(ns.error, '') AS nuclei_error,
 				CASE
+					WHEN v.summary ~* '(^|[^[:alnum:]_])(if|when|requires|required|configuration|configured|enabled|module|mod_|cgi|ssi|suexec|vcl|proxy protocol|tls termination|http/2)([^[:alnum:]_]|$)|built with'
+						THEN 'conditional_configuration_or_module'
+					ELSE 'version_match_only'
+				END AS passive_condition,
+				CASE
 					WHEN ns.id IS NULL THEN 'nuclei_not_run'
 					WHEN COALESCE(ns.stats->>'skipped', '') = 'no matching local Nuclei templates' THEN 'no_matching_local_nuclei_templates'
 					WHEN COALESCE(ns.stats->>'skipped', '') = 'no passive CVE/template candidates' THEN 'no_passive_cve_template_candidates'
 					WHEN COALESCE(ns.error, '') <> '' THEN 'nuclei_error'
 					ELSE 'no_confirming_result'
 				END AS nuclei_validation_reason,
-				LEAST(GREATEST(m.confidence, 45), 65) AS report_confidence,
+				CASE
+					WHEN v.summary ~* '(^|[^[:alnum:]_])(if|when|requires|required|configuration|configured|enabled|module|mod_|cgi|ssi|suexec|vcl|proxy protocol|tls termination|http/2)([^[:alnum:]_]|$)|built with'
+						THEN LEAST(GREATEST(m.confidence - 40, 35), 50)
+					ELSE LEAST(GREATEST(m.confidence, 45), 65)
+				END AS report_confidence,
 				'passive:' || encode(digest(
 					m.program_id::text || ':' || m.http_service_id::text || ':' || v.vuln_id || ':' ||
 					lower(m.technology_name) || ':' || m.technology_version,
@@ -165,6 +174,8 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 					'nuclei_validation_reason', nuclei_validation_reason,
 					'nuclei_skipped', nuclei_skipped,
 					'nuclei_error', nuclei_error,
+					'passive_condition', passive_condition,
+					'conditional_passive', passive_condition <> 'version_match_only',
 					'cves', jsonb_build_array(vuln_id),
 					'cvss_score', cvss_score,
 					'summary', summary,

@@ -2,6 +2,7 @@ const state = {
   stats: null,
   programs: [],
   scans: [],
+  campaigns: [],
   findings: [],
   selectedProgramId: "",
   autoTimer: null,
@@ -33,19 +34,22 @@ async function loadAll(showLoading = true) {
     setStatus("Refreshing...");
   }
   try {
-    const [stats, programs, scans, findings] = await Promise.all([
+    const [stats, programs, scans, campaigns, findings] = await Promise.all([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/programs"),
       getJSON("/api/v1/scans/latest?run_type=full"),
+      getJSON("/api/v1/scan-campaigns"),
       getJSON("/api/v1/findings?limit=100"),
     ]);
     state.stats = stats;
     state.programs = Array.isArray(programs) ? programs : [];
     state.scans = Array.isArray(scans) ? scans : [];
+    state.campaigns = Array.isArray(campaigns) ? campaigns : [];
     state.findings = Array.isArray(findings) ? findings : [];
     renderGlobalStats();
     renderPrograms();
     renderScans();
+    renderCampaigns();
     renderFindings();
     if (state.selectedProgramId) {
       await loadProgramDetail(state.selectedProgramId);
@@ -78,6 +82,7 @@ function renderGlobalStats() {
   const assets = stats.assets || {};
   const findings = stats.findings || {};
   const scanRuns = stats.scan_runs || {};
+  const campaigns = stats.scan_campaigns || {};
 
   setText("programsActive", fmt(programs.active));
   setText("programsTotal", `${fmt(programs.total)} total`);
@@ -89,6 +94,8 @@ function renderGlobalStats() {
   setText("findingsSplit", `${fmt(findings.nuclei_confirmed)} confirmed, ${fmt(findings.passive_unconfirmed)} passive`);
   setText("scansRunning", fmt(scanRuns.running_programs || scanRuns.running));
   setText("scansFailed", `${fmt(scanRuns.failed)} failed program scans, ${fmt((scanRuns.task_runs || {}).running)} tool tasks running`);
+  setText("campaignsRunning", fmt(campaigns.running));
+  setText("campaignsSplit", `${fmt(campaigns.queued)} queued, ${fmt(campaigns.failed)} failed`);
 
   const active = Number(programs.active || 0);
   const scanned = Number(programs.scanned || 0);
@@ -194,6 +201,26 @@ function renderScans() {
   }
 }
 
+function renderCampaigns() {
+  setText("campaignCount", `${state.campaigns.length} rows`);
+  const tbody = $("campaignRows");
+  tbody.innerHTML = "";
+  for (const campaign of state.campaigns) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><strong>${escapeHTML(campaign.name || shortID(campaign.id) || "custom scan")}</strong><small>${escapeHTML(shortID(campaign.id))}</small></td>
+      <td>${scanStatusPill(campaign.status)}</td>
+      <td>${escapeHTML(campaignProgress(campaign))}</td>
+      <td>${fmt(campaign.parallelism)}</td>
+      <td>${timeAgo(campaign.updated_at || campaign.created_at)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (state.campaigns.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">No custom scan campaigns yet.</td></tr>`;
+  }
+}
+
 function renderFindings() {
   setText("findingCount", `${state.findings.length} rows`);
   const tbody = $("findingRows");
@@ -215,6 +242,16 @@ function renderFindings() {
   if (state.findings.length === 0) {
     tbody.innerHTML = `<tr><td colspan="4" class="muted">No findings available.</td></tr>`;
   }
+}
+
+function campaignProgress(campaign) {
+  const total = Number(campaign.total_requests || 0);
+  const succeeded = Number(campaign.succeeded_requests || 0);
+  const failed = Number(campaign.failed_requests || 0);
+  const running = Number(campaign.running_requests || 0);
+  const queued = Number(campaign.queued_requests || 0);
+  if (total <= 0) return "no programs";
+  return `${fmt(succeeded + failed)}/${fmt(total)} done, ${fmt(running)} running, ${fmt(queued)} queued`;
 }
 
 function statusPill(program) {

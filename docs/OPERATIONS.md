@@ -22,6 +22,7 @@ To run the first real scan, Zero needs:
 - Optional NVD API key:
   - `ZERO_NVD_API_KEY` reduces NVD rate-limit delays during passive CVE matching.
   - `ZERO_CVE_MIN_YEAR` controls the minimum CVE year allowed into passive matching, CVE-derived Nuclei template selection, and passive reports. Default: `2018`.
+  - `ZERO_NVD_RETRIES` and `ZERO_NVD_RETRY_WAIT` control retry/backoff for transient NVD DNS, 429, and 5xx failures. Defaults: `3` attempts, `3s` base wait.
 - External tools installed or available in Docker:
   - `subfinder`
   - `dnsx`
@@ -55,6 +56,10 @@ Database connection failures are returned as normal command errors after the con
 
 Custom one-off scans can be launched immediately with `zero run manual` or queued for the worker with `zero run schedule`. Queued requests are stored in `zero_scan_requests`, picked up every 30 seconds, and executed with the request-specific parameters instead of mutating global `.env` defaults.
 
+Broad custom scan campaigns can be queued with `zero run schedule --all-programs`. A campaign stores one durable parent row in `zero_scan_campaigns` and one child request per selected program in `zero_scan_requests`. Child requests force `SkipSync=true`, so a campaign that spans hundreds of programs does not refresh HackerOne scope before every program. Use `--campaign-parallelism` to set how many programs from that campaign may run at the same time. The worker still caps total queued custom work with `ZERO_TARGET_PARALLELISM`.
+
+Campaign selection defaults to every active program, regardless of the normal interval. Add `--due-only` when the campaign should respect each program's `scan_interval_hours`, and `--campaign-limit` for staged rollouts. A campaign survives worker/container restarts: running child requests are requeued on startup, campaign counters are refreshed, and completed children remain completed.
+
 For each due program, Zero executes:
 
 ```text
@@ -65,13 +70,21 @@ The default full-pipeline schedule is `0 15 3 */3 * *` with seconds-enabled cron
 
 Each external tool call is bounded by `ZERO_TOOL_TIMEOUT` and defaults to 20 minutes. When a tool times out inside `zero run once`, `zero run due`, `zero run manual`, or `zero tools nuclei-update`, Zero stops that step, marks the current scan run as failed when applicable, and emits a Discord operational alert if `ZERO_DISCORD_ALERT_WEBHOOK_URL` or the legacy `ZERO_DISCORD_WEBHOOK_URL` fallback is configured. The alert includes the alert type, program, step command, configured timeout, and error text. The Docker entrypoint also bounds the optional startup Nuclei template update with the same timeout so the container can continue booting if template refresh stalls.
 
-`ZERO_HTTPX_TIMEOUT` controls the per-request timeout passed to httpx with `-timeout`; it defaults to 4 seconds. `ZERO_HTTPX_THREADS` controls httpx internal worker threads with `-threads`; it defaults to 20. These are separate from `ZERO_TOOL_TIMEOUT`, which bounds the whole httpx process for a program.
+`ZERO_HTTPX_TIMEOUT` controls the per-request timeout passed to httpx with `-timeout`; it defaults to 4 seconds. `ZERO_HTTPX_THREADS` controls httpx internal worker threads with `-threads`; it defaults to 20. These are separate from `ZERO_TOOL_TIMEOUT`, which bounds the whole scan step.
+
+`ZERO_HTTPX_BATCH_SIZE` controls how many hosts are sent to one httpx process. Default: `50`. `ZERO_HTTPX_BATCH_TIMEOUT` controls the wall-clock timeout for each httpx batch and defaults to `5m`; it is capped by `ZERO_TOOL_TIMEOUT` when the global timeout is lower. Broad roots with thousands of live hosts, such as tenant/UGC/customer platforms, are processed in multiple bounded chunks so one slow batch does not discard all progress for the program.
+
+`ZERO_HTTPX_PATTERN_MIN_GROUP` and `ZERO_HTTPX_PATTERN_CAP` control the pre-httpx host budget heuristic. Defaults: group threshold `200`, cap `120`. The heuristic applies only after scope/out-of-scope/bounty/DNS filtering and only to large roots that look tenant-like, UGC-like, hash-like, numeric, or extremely broad. It preserves exact scope assets and priority labels such as `api`, `admin`, `auth`, `login`, `payment`, `portal`, `staging`, `dev`, `vpn`, and similar operationally sensitive names. Set cap/min-group to `0` to disable only if the config value is also `0`.
+
+`ZERO_WEBANALYZE_BATCH_SIZE` controls how many alive services are sent to one Webanalyze process. Default: `500`. This matters for programs where many hosts collapse to the same SaaS/CDN/default page.
 
 `ZERO_HTTPX_TLS_PROBE` defaults to `false`. Keep it disabled for broad continuous scans: on real targets such as `valve`, httpx v1.9.0 can emit results quickly but keep the process alive until the global tool timeout when `-tls-probe` is enabled. Use `zero probe httpx --tls-probe` or `zero run manual --httpx-tls-probe` only for targeted certificate/TLS inspection.
 
 Nuclei templates are updated on container startup when `ZERO_NUCLEI_UPDATE_TEMPLATES_ON_STARTUP=true` and by the worker schedule `ZERO_SCHEDULE_NUCLEI_TEMPLATES` (default: `0 5 3 * * *`). They are not updated before every program scan because template updates are global, network-dependent, and can add avoidable latency/noise to target processing.
 
 Passive CVE matching defaults to `ZERO_CVE_MIN_YEAR=2018`. CVEs older than this threshold are ignored during NVD matching, excluded from CVE-derived Nuclei template selection, and blocked from passive/unconfirmed report generation even if older records already exist in the database.
+
+Passive findings are prioritization context, not proof. Zero lowers confidence and annotates evidence when an NVD summary appears configuration- or module-dependent, for example Apache module issues, Varnish VCL/proxy conditions, TLS termination conditions, or HTTP/2-specific cases. Those reports should be treated as conditional passive intel unless Nuclei or manual validation confirms the target condition.
 
 ## Data Lifecycle
 
@@ -107,9 +120,11 @@ zero report export-triage --limit 50 --output triage-bundles.jsonl
 zero notify discord --dry-run
 zero run due --dry-run --limit 4
 zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --cve-limit 5 --nuclei-from-cves --nuclei-cve-limit 10 --nuclei-limit 20
-zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --cve-limit 5 --nuclei-template ./templates/custom-cve.yaml --nuclei-severity high,critical --nuclei-rate-limit 40 --nuclei-concurrency 10 --nuclei-limit 20
+zero run manual --skip-sync --program-id <uuid> --httpx-batch-size 50 --httpx-batch-timeout 5m --httpx-pattern-min-group 200 --httpx-pattern-cap 80 --webanalyze-batch-size 250 --webanalyze-apps ./custom-technologies.json --cve-limit 5 --nuclei-template ./templates/custom-cve.yaml --nuclei-severity high,critical --nuclei-rate-limit 40 --nuclei-concurrency 10 --nuclei-limit 20
 zero run manual --skip-sync --program-id <uuid> --webanalyze-apps ./custom-technologies.json --nuclei-template-id CVE-2025-20362 --nuclei-timeout 10 --nuclei-retries 1 --nuclei-limit 20
 zero run schedule --run-after 30m --program-id <uuid> --skip-sync --nuclei-from-cves --nuclei-cve-limit 20
+zero run schedule --all-programs --campaign-parallelism 4 --campaign-limit 25 --skip-sync --httpx-batch-size 50 --httpx-batch-timeout 5m --httpx-pattern-cap 80 --webanalyze-apps ./custom-technologies.json --webanalyze-workers 6 --webanalyze-batch-size 250 --cve-limit 10 --nuclei-template ./templates/custom --nuclei-severity medium,high,critical --nuclei-rate-limit 40 --nuclei-concurrency 10 --nuclei-limit 100
+zero run schedule --all-programs --due-only --campaign-parallelism 2 --skip-sync --skip-enum --skip-dns --skip-probe --webanalyze-apps ./custom-technologies.json --skip-nuclei
 zero api
 ```
 
@@ -117,7 +132,9 @@ This validates the pipeline without turning a local setup check into a broad sca
 
 Use `zero run once` only when you want the full configured global pipeline without per-step smoke-test limits. Use `zero run due` for the normal continuous per-program execution model.
 
-Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Flags such as `--httpx-timeout`, `--httpx-threads`, `--httpx-tls-probe`, `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--skip-cves`, `--cve-limit`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
+Use `zero run manual` for targeted one-off scans. Use `zero run schedule` for the same parameter set when the worker should execute it later. Add `--all-programs` when the same custom scan should become a persistent campaign across the active program inventory. Flags such as `--httpx-timeout`, `--httpx-threads`, `--httpx-batch-size`, `--httpx-batch-timeout`, `--httpx-pattern-min-group`, `--httpx-pattern-cap`, `--httpx-tls-probe`, `--webanalyze-apps`, `--webanalyze-workers`, `--webanalyze-crawl`, `--webanalyze-batch-size`, `--skip-cves`, `--cve-limit`, `--nuclei-from-cves`, `--nuclei-cve-limit`, `--nuclei-template-id`, `--nuclei-template`, `--nuclei-tags`, `--nuclei-severity`, `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, and `--nuclei-limit` affect only that execution and do not change `.env`, worker schedules, or global defaults.
+
+Some valid bounty scopes are intentionally massive tenant platforms. Examples observed in the first run were `fanbox.cc`, `hubspotpagebuilder.*`, `hubspotemail.net`, `varonis.io`, `glance.net`, and hash-like `wurl.com` hosts. These are not automatically out-of-scope, but they can produce thousands of near-identical CloudFront/Cloudflare/S3/default-page results. For those targets, prefer smaller `--httpx-batch-size`, smaller `--httpx-batch-timeout`, smaller `--webanalyze-batch-size`, or a targeted custom campaign before broad active validation.
 
 ## Discord Notifications
 
@@ -138,7 +155,7 @@ zero report export-triage --program-id <uuid> --status reported --limit 50
 
 ## Docker Services
 
-`docker compose up -d zero api dashboard` starts the continuous worker, read API, and local dashboard. The API service overrides `ZERO_API_ADDR` to `0.0.0.0:8080` inside the container and publishes it on `127.0.0.1:8080` on the host. The dashboard service listens on `127.0.0.1:8090` by default and proxies API reads from the container network using `ZERO_API_TOKEN`, so the browser does not receive the API token.
+`docker compose up -d zero api dashboard` starts the continuous worker, read API, and local dashboard. The API service overrides `ZERO_API_ADDR` to `0.0.0.0:8080` inside the container and publishes it on `127.0.0.1:8080` on the host. The worker/API image uses `tini` as PID 1 so interrupted external tools are reaped cleanly. The dashboard service listens on `127.0.0.1:8090` by default and proxies API reads from the container network using `ZERO_API_TOKEN`, so the browser does not receive the API token.
 
 Open the dashboard at:
 

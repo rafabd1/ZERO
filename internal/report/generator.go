@@ -186,6 +186,9 @@ func writeEvidence(b *strings.Builder, raw json.RawMessage) {
 		} else {
 			b.WriteString("; no confirming Nuclei result is linked yet.\n")
 		}
+		if condition, _ := evidence["passive_condition"].(string); condition != "" && condition != "version_match_only" {
+			b.WriteString("- Passive condition: version match appears configuration/module-dependent; manual validation is required before treating this as exploitable.\n")
+		}
 	}
 	if templateID, ok := evidence["template_id"].(string); ok && templateID != "" {
 		fmt.Fprintf(b, "- Nuclei template: `%s`\n", templateID)

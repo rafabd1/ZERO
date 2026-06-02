@@ -79,6 +79,38 @@ func (r *Repository) ListDuePrograms(ctx context.Context, limit int) ([]Program,
 	return programs, rows.Err()
 }
 
+func (r *Repository) ListProgramsForCampaign(ctx context.Context, dueOnly bool, limit int) ([]Program, error) {
+	if limit <= 0 {
+		limit = 100000
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text, platform, handle, program_url, scan_interval_hours
+		FROM zero_programs
+		WHERE active = true
+		  AND (
+			$1 = false
+			OR last_scan_finished_at IS NULL
+			OR last_scan_finished_at <= now() - make_interval(hours => scan_interval_hours)
+		  )
+		ORDER BY last_scan_finished_at NULLS FIRST, last_seen_at DESC, platform, handle
+		LIMIT $2
+	`, dueOnly, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	programs := []Program{}
+	for rows.Next() {
+		var program Program
+		if err := rows.Scan(&program.ID, &program.Platform, &program.Handle, &program.ProgramURL, &program.ScanIntervalHours); err != nil {
+			return nil, err
+		}
+		programs = append(programs, program)
+	}
+	return programs, rows.Err()
+}
+
 func (r *Repository) MarkProgramScanStarted(ctx context.Context, programID string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE zero_programs
@@ -225,6 +257,7 @@ func (r *Repository) ListDomainRoots(ctx context.Context, programID string) ([]D
 		FROM zero_scope_assets
 		WHERE active = true
 		  AND in_scope = true
+		  AND eligible_for_bounty = true
 		  AND asset_type IN ('domain', 'url', 'wildcard')
 		  AND ($1 = '' OR program_id::text = $1)
 		ORDER BY program_id, target_normalized
@@ -430,6 +463,7 @@ func (r *Repository) ListInScopeSubdomainAssets(ctx context.Context, programID s
 		FROM zero_scope_assets
 		WHERE active = true
 		  AND in_scope = true
+		  AND eligible_for_bounty = true
 		  AND asset_type IN ('domain', 'url')
 		  AND ($1 = '' OR program_id::text = $1)
 		ORDER BY program_id, target_normalized
@@ -631,6 +665,7 @@ func (r *Repository) ListProbeTargets(ctx context.Context, programID string) ([]
 		WHERE s.active = true
 		  AND a.active = true
 		  AND a.in_scope = true
+		  AND a.eligible_for_bounty = true
 		  AND a.asset_type = 'wildcard'
 		  AND COALESCE(s.resolves, true) = true
 		  AND ($1 = '' OR s.program_id::text = $1)
@@ -678,6 +713,7 @@ func (r *Repository) ListProbeTargets(ctx context.Context, programID string) ([]
 		FROM zero_scope_assets
 		WHERE active = true
 		  AND in_scope = true
+		  AND eligible_for_bounty = true
 		  AND asset_type IN ('domain', 'url')
 		  AND ($1 = '' OR program_id::text = $1)
 		ORDER BY target_normalized

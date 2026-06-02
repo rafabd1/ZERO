@@ -27,10 +27,20 @@ type Program struct {
 }
 
 type ScanRequest struct {
-	ID        string
-	ProgramID string
-	Name      string
-	Params    json.RawMessage
+	ID         string
+	ProgramID  string
+	CampaignID string
+	Name       string
+	Params     json.RawMessage
+}
+
+type ScanCampaignCreateResult struct {
+	ID       string
+	Total    int
+	Queued   int
+	DueOnly  bool
+	Limit    int
+	Parallel int
 }
 
 type DomainRoot struct {

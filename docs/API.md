@@ -26,6 +26,7 @@ GET /v1/findings
 GET /v1/stats
 GET /v1/scans/latest
 GET /v1/scan-requests
+GET /v1/scan-campaigns
 POST /v1/scan-requests
 GET /v1/changes?since=...
 GET /v1/notifications/discord
@@ -53,7 +54,7 @@ Hot list endpoints accept pagination/filter query parameters:
 - `q`: host/URL search on services.
 
 Current implementation includes `GET /healthz`, `GET /v1/programs`, `GET /v1/assets`, `GET /v1/services`, `GET /v1/technologies`, `GET /v1/technology-vulnerabilities`, `GET /v1/nuclei-results`, and `GET /v1/findings`.
-Current implementation also includes `GET /v1/stats`, `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/scan-requests`, `POST /v1/scan-requests`, `GET /v1/changes?since=...`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, `GET /v1/programs/{program_id}/stats`, `GET /v1/programs/{program_id}/changes?since=...`, `GET /v1/programs/{program_id}/assets`, `GET /v1/programs/{program_id}/services`, `GET /v1/programs/{program_id}/technologies`, `GET /v1/programs/{program_id}/technology-vulnerabilities`, `GET /v1/programs/{program_id}/nuclei-results`, and `GET /v1/programs/{program_id}/findings?status=new`.
+Current implementation also includes `GET /v1/stats`, `GET /v1/reports`, `GET /v1/reports/latest`, `GET /v1/scans/latest`, `GET /v1/scan-requests`, `GET /v1/scan-campaigns`, `POST /v1/scan-requests`, `GET /v1/changes?since=...`, `GET /v1/notifications/discord`, `GET /v1/programs/{program_id}/latest-scan`, `GET /v1/programs/{program_id}/stats`, `GET /v1/programs/{program_id}/changes?since=...`, `GET /v1/programs/{program_id}/assets`, `GET /v1/programs/{program_id}/services`, `GET /v1/programs/{program_id}/technologies`, `GET /v1/programs/{program_id}/technology-vulnerabilities`, `GET /v1/programs/{program_id}/nuclei-results`, and `GET /v1/programs/{program_id}/findings?status=new`.
 
 The `since` query parameter accepts a Postgres-compatible timestamp and returns events with `occurred_at` greater than that value.
 
@@ -89,6 +90,40 @@ Content-Type: application/json
   }
 }
 ```
+
+Create a persistent custom scan campaign across all active programs:
+
+```http
+POST /v1/scan-requests
+Authorization: Bearer <ZERO_API_TOKEN>
+Content-Type: application/json
+
+{
+  "all_programs": true,
+  "name": "custom-tech-fingerprint-campaign",
+  "run_after": "now",
+  "parallelism": 4,
+  "limit": 50,
+  "due_only": false,
+  "params": {
+    "SkipSync": true,
+    "HTTPXBatchSize": 50,
+    "HTTPXBatchTimeout": "5m",
+    "HTTPXPatternCap": 80,
+    "WebanalyzeApps": "/work/custom-technologies.json",
+    "WebanalyzeWorkers": 6,
+    "WebanalyzeBatch": 250,
+    "CVELimit": 10,
+    "NucleiTemplate": "/work/templates/custom,/work/templates/cves",
+    "NucleiSeverity": "medium,high,critical",
+    "NucleiRateLimit": 40,
+    "NucleiConcurrency": 10,
+    "NucleiLimit": 100
+  }
+}
+```
+
+The API returns a `scan_campaign` id. Inspect progress with `GET /v1/scan-campaigns`; individual child requests remain visible in `GET /v1/scan-requests` with their `campaign_id`.
 
 ## Notification Flow
 

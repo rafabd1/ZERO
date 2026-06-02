@@ -13,6 +13,7 @@ func newEnrichCommand() *cobra.Command {
 	var apps string
 	var workers int
 	var crawl int
+	var batchSize int
 
 	cmd := &cobra.Command{
 		Use:   "enrich",
@@ -53,10 +54,23 @@ func newEnrichCommand() *cobra.Command {
 				WithWorkers(workerCount).
 				WithCrawl(crawlDepth).
 				WithLimit(limit).
+				WithBatchSize(firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize)).
 				WithTimeout(cfg.Tools.ToolTimeout).
 				Run(ctx)
 			if err != nil {
-				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+				return finishScanRun(ctx, repo, scanID, err, result.Targets, result.Inserted, map[string]any{
+					"targets":        result.Targets,
+					"matches":        result.Matches,
+					"inserted":       result.Inserted,
+					"versioned":      result.Versioned,
+					"skipped_output": result.SkippedOutput,
+					"program_id":     programID,
+					"tool":           "webanalyze",
+					"apps":           appsPath,
+					"workers":        workerCount,
+					"crawl":          crawlDepth,
+					"batch_size":     firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize),
+				})
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Targets, result.Inserted, map[string]any{
 				"targets":        result.Targets,
@@ -69,6 +83,7 @@ func newEnrichCommand() *cobra.Command {
 				"apps":           appsPath,
 				"workers":        workerCount,
 				"crawl":          crawlDepth,
+				"batch_size":     firstPositive(batchSize, cfg.Tools.WebanalyzeBatchSize),
 			}); err != nil {
 				return err
 			}
@@ -81,6 +96,7 @@ func newEnrichCommand() *cobra.Command {
 	webanalyze.Flags().StringVar(&apps, "apps", "", "custom Webanalyze/Wappalyzer technologies file for this run only")
 	webanalyze.Flags().IntVar(&workers, "workers", 0, "Webanalyze workers for this run only")
 	webanalyze.Flags().IntVar(&crawl, "crawl", -1, "Webanalyze crawl depth for this run only")
+	webanalyze.Flags().IntVar(&batchSize, "batch-size", 0, "override number of services per Webanalyze process")
 	cmd.AddCommand(webanalyze)
 	return cmd
 }

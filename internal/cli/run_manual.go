@@ -25,12 +25,17 @@ type manualRunOptions struct {
 	HTTPXLimit        int
 	HTTPXTimeout      int
 	HTTPXThreads      int
+	HTTPXBatchSize    int
+	HTTPXBatchTimeout string
+	HTTPXPatternMin   int
+	HTTPXPatternCap   int
 	HTTPXTLSProbe     bool
 	WebanalyzeLimit   int
 	CVELimit          int
 	WebanalyzeApps    string
 	WebanalyzeWorkers int
 	WebanalyzeCrawl   int
+	WebanalyzeBatch   int
 	NucleiLimit       int
 	NucleiTemplateID  string
 	NucleiTemplate    string
@@ -63,6 +68,10 @@ func addScheduledRunCommand(parent *cobra.Command) {
 	var opts manualRunOptions
 	var name string
 	var runAfter string
+	var allPrograms bool
+	var dueOnly bool
+	var campaignLimit int
+	var campaignParallelism int
 	cmd := &cobra.Command{
 		Use:   "schedule",
 		Short: "Queue a one-off custom scan request for the worker.",
@@ -79,6 +88,22 @@ func addScheduledRunCommand(parent *cobra.Command) {
 			if err != nil {
 				return err
 			}
+			if allPrograms {
+				result, err := repo.CreateScanCampaign(ctx, name, "cli", when, opts, dueOnly, campaignLimit, campaignParallelism)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(
+					cmd.OutOrStdout(),
+					"queued scan campaign %s for %s: %d program(s), parallelism=%d, due_only=%t\n",
+					result.ID,
+					when.UTC().Format(time.RFC3339),
+					result.Total,
+					result.Parallel,
+					result.DueOnly,
+				)
+				return nil
+			}
 			id, err := repo.CreateScanRequest(ctx, opts.ProgramID, name, "cli", when, opts)
 			if err != nil {
 				return err
@@ -90,6 +115,10 @@ func addScheduledRunCommand(parent *cobra.Command) {
 	bindManualRunFlags(cmd, &opts)
 	cmd.Flags().StringVar(&name, "name", "", "optional scan request name")
 	cmd.Flags().StringVar(&runAfter, "run-after", "", "when to run: empty/now, duration like 30m, or RFC3339 timestamp")
+	cmd.Flags().BoolVar(&allPrograms, "all-programs", false, "queue this custom scan for every active program")
+	cmd.Flags().BoolVar(&dueOnly, "due-only", false, "with --all-programs, include only programs due for their configured interval")
+	cmd.Flags().IntVar(&campaignLimit, "campaign-limit", 0, "with --all-programs, cap the number of programs queued")
+	cmd.Flags().IntVar(&campaignParallelism, "campaign-parallelism", 1, "with --all-programs, maximum program scans from this campaign running at once")
 	parent.AddCommand(cmd)
 }
 
@@ -109,12 +138,17 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.HTTPXLimit, "httpx-limit", 0, "manual httpx target limit")
 	cmd.Flags().IntVar(&opts.HTTPXTimeout, "httpx-timeout", 0, "manual httpx per-request timeout seconds")
 	cmd.Flags().IntVar(&opts.HTTPXThreads, "httpx-threads", 0, "manual httpx worker threads")
+	cmd.Flags().IntVar(&opts.HTTPXBatchSize, "httpx-batch-size", 0, "manual httpx hosts per process")
+	cmd.Flags().StringVar(&opts.HTTPXBatchTimeout, "httpx-batch-timeout", "", "manual max wall-clock time per httpx batch, for example 5m")
+	cmd.Flags().IntVar(&opts.HTTPXPatternMin, "httpx-pattern-min-group", 0, "manual minimum root group size before httpx host pattern budgeting")
+	cmd.Flags().IntVar(&opts.HTTPXPatternCap, "httpx-pattern-cap", 0, "manual tenant-like hosts kept per budgeted root")
 	cmd.Flags().BoolVar(&opts.HTTPXTLSProbe, "httpx-tls-probe", false, "enable httpx TLS probe for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeLimit, "webanalyze-limit", 0, "manual Webanalyze service limit")
 	cmd.Flags().IntVar(&opts.CVELimit, "cve-limit", 0, "manual passive CVE technology limit")
 	cmd.Flags().StringVar(&opts.WebanalyzeApps, "webanalyze-apps", "", "custom Webanalyze apps file for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeWorkers, "webanalyze-workers", 0, "custom Webanalyze workers for this run only")
 	cmd.Flags().IntVar(&opts.WebanalyzeCrawl, "webanalyze-crawl", -1, "custom Webanalyze crawl depth for this run only")
+	cmd.Flags().IntVar(&opts.WebanalyzeBatch, "webanalyze-batch-size", 0, "custom Webanalyze services per process")
 	cmd.Flags().IntVar(&opts.NucleiLimit, "nuclei-limit", 0, "manual Nuclei URL limit")
 	cmd.Flags().StringVar(&opts.NucleiTemplateID, "nuclei-template-id", "", "custom Nuclei template id(s) for this run only")
 	cmd.Flags().StringVar(&opts.NucleiTemplate, "nuclei-template", "", "custom Nuclei template file/directory path(s) for this run only")
@@ -161,6 +195,10 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		step = appendIntFlag(step, "--limit", opts.HTTPXLimit)
 		step = appendIntFlag(step, "--timeout", opts.HTTPXTimeout)
 		step = appendIntFlag(step, "--threads", opts.HTTPXThreads)
+		step = appendIntFlag(step, "--batch-size", opts.HTTPXBatchSize)
+		step = appendStringFlag(step, "--batch-timeout", opts.HTTPXBatchTimeout)
+		step = appendIntFlag(step, "--pattern-min-group", opts.HTTPXPatternMin)
+		step = appendIntFlag(step, "--pattern-cap", opts.HTTPXPatternCap)
 		if opts.HTTPXTLSProbe {
 			step = append(step, "--tls-probe")
 		}
@@ -177,6 +215,7 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		if opts.WebanalyzeCrawl >= 0 {
 			step = append(step, "--crawl", fmt.Sprint(opts.WebanalyzeCrawl))
 		}
+		step = appendIntFlag(step, "--batch-size", opts.WebanalyzeBatch)
 		steps = append(steps, step)
 	}
 	if !opts.SkipCVEs {
@@ -248,6 +287,14 @@ func appendProgramFlag(step []string, programID string) []string {
 func appendIntFlag(step []string, name string, value int) []string {
 	if value > 0 {
 		step = append(step, name, fmt.Sprint(value))
+	}
+	return step
+}
+
+func appendStringFlag(step []string, name string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		step = append(step, name, value)
 	}
 	return step
 }

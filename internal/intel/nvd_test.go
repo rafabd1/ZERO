@@ -1,10 +1,31 @@
 package intel
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/rafabd1/ZERO/internal/db"
 )
+
+func TestRetryableNVDError(t *testing.T) {
+	tests := []struct {
+		err  error
+		want bool
+	}{
+		{err: nvdStatusError{status: 429, keyword: "apache"}, want: true},
+		{err: nvdStatusError{status: 503, keyword: "apache"}, want: true},
+		{err: nvdStatusError{status: 400, keyword: "apache"}, want: false},
+		{err: errors.New("lookup services.nvd.nist.gov: no such host"), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.err), func(t *testing.T) {
+			if got := retryableNVDError(tt.err); got != tt.want {
+				t.Fatalf("retryableNVDError(%v) = %v; want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestMatchConfidenceUsesCPERanges(t *testing.T) {
 	tech := db.VersionedTechnology{

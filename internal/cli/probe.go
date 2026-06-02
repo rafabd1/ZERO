@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/probe"
 	"github.com/spf13/cobra"
@@ -11,6 +12,10 @@ func newProbeCommand() *cobra.Command {
 	var httpxLimit int
 	var httpxTimeout int
 	var httpxThreads int
+	var httpxBatchSize int
+	var httpxBatchTimeout time.Duration
+	var httpxPatternMinGroup int
+	var httpxPatternCap int
 	var httpxTLSProbe bool
 	var dnsxLimit int
 	var dnsxProgramID string
@@ -80,24 +85,49 @@ func newProbeCommand() *cobra.Command {
 				WithProgramID(programID).
 				WithLimit(httpxLimit).
 				WithRequestPolicy(firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout), firstPositive(httpxThreads, cfg.Tools.HTTPXThreads)).
+				WithBatchSize(firstPositive(httpxBatchSize, cfg.Tools.HTTPXBatchSize)).
+				WithBatchTimeout(firstDuration(httpxBatchTimeout, cfg.Tools.HTTPXBatchTimeout)).
+				WithPatternBudget(firstPositive(httpxPatternMinGroup, cfg.Tools.HTTPXPatternMinGroup), firstPositive(httpxPatternCap, cfg.Tools.HTTPXPatternCap)).
 				WithTLSProbe(httpxTLSProbe || cfg.Tools.HTTPXTLSProbe).
 				WithTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			if err != nil {
-				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+				return finishScanRun(ctx, repo, scanID, err, result.Hosts, result.Services, map[string]any{
+					"hosts":              result.Hosts,
+					"services":           result.Services,
+					"tool":               "httpx",
+					"timeout":            firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout),
+					"threads":            firstPositive(httpxThreads, cfg.Tools.HTTPXThreads),
+					"batch_size":         firstPositive(httpxBatchSize, cfg.Tools.HTTPXBatchSize),
+					"batch_timeout":      firstDuration(httpxBatchTimeout, cfg.Tools.HTTPXBatchTimeout).String(),
+					"pattern_min_group":  firstPositive(httpxPatternMinGroup, cfg.Tools.HTTPXPatternMinGroup),
+					"pattern_cap":        firstPositive(httpxPatternCap, cfg.Tools.HTTPXPatternCap),
+					"skipped_by_pattern": result.SkippedByPattern,
+					"priority_kept":      result.PriorityKept,
+					"budgeted_roots":     result.BudgetedRoots,
+					"tls_probe":          httpxTLSProbe || cfg.Tools.HTTPXTLSProbe,
+					"program_id":         programID,
+				})
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Hosts, result.Services, map[string]any{
-				"hosts":      result.Hosts,
-				"services":   result.Services,
-				"tool":       "httpx",
-				"timeout":    firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout),
-				"threads":    firstPositive(httpxThreads, cfg.Tools.HTTPXThreads),
-				"tls_probe":  httpxTLSProbe || cfg.Tools.HTTPXTLSProbe,
-				"program_id": programID,
+				"hosts":              result.Hosts,
+				"services":           result.Services,
+				"tool":               "httpx",
+				"timeout":            firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout),
+				"threads":            firstPositive(httpxThreads, cfg.Tools.HTTPXThreads),
+				"batch_size":         firstPositive(httpxBatchSize, cfg.Tools.HTTPXBatchSize),
+				"batch_timeout":      firstDuration(httpxBatchTimeout, cfg.Tools.HTTPXBatchTimeout).String(),
+				"pattern_min_group":  firstPositive(httpxPatternMinGroup, cfg.Tools.HTTPXPatternMinGroup),
+				"pattern_cap":        firstPositive(httpxPatternCap, cfg.Tools.HTTPXPatternCap),
+				"skipped_by_pattern": result.SkippedByPattern,
+				"priority_kept":      result.PriorityKept,
+				"budgeted_roots":     result.BudgetedRoots,
+				"tls_probe":          httpxTLSProbe || cfg.Tools.HTTPXTLSProbe,
+				"program_id":         programID,
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "probed %d hosts and upserted %d HTTP services\n", result.Hosts, result.Services)
+			fmt.Fprintf(cmd.OutOrStdout(), "probed %d hosts and upserted %d HTTP services (%d hosts skipped by pattern budget)\n", result.Hosts, result.Services, result.SkippedByPattern)
 			return nil
 		},
 	}
@@ -106,6 +136,10 @@ func newProbeCommand() *cobra.Command {
 	httpx.Flags().IntVar(&httpxLimit, "limit", 0, "limit number of hosts to probe")
 	httpx.Flags().IntVar(&httpxTimeout, "timeout", 0, "override httpx per-request timeout seconds")
 	httpx.Flags().IntVar(&httpxThreads, "threads", 0, "override httpx worker threads")
+	httpx.Flags().IntVar(&httpxBatchSize, "batch-size", 0, "override number of hosts per httpx process")
+	httpx.Flags().DurationVar(&httpxBatchTimeout, "batch-timeout", 0, "override max wall-clock time per httpx batch, for example 5m")
+	httpx.Flags().IntVar(&httpxPatternMinGroup, "pattern-min-group", 0, "override minimum root group size before host pattern budgeting")
+	httpx.Flags().IntVar(&httpxPatternCap, "pattern-cap", 0, "override tenant-like hosts kept per budgeted root; 0 disables when config is also 0")
 	httpx.Flags().BoolVar(&httpxTLSProbe, "tls-probe", false, "enable httpx TLS probe for this run")
 	httpx.Flags().StringVar(&programID, "program-id", "", "limit probing to one program id")
 	cmd.AddCommand(dnsx, httpx)
