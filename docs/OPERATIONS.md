@@ -130,7 +130,7 @@ docker compose run --rm zero enum subfinder --limit 2
 docker compose run --rm zero probe dnsx --limit 50
 docker compose run --rm zero probe httpx --limit 50
 docker compose run --rm zero enrich webanalyze --limit 50
-docker compose run --rm zero analyze nuclei --limit 10 --template-id CVE-2025-20362
+docker compose run --rm zero analyze nuclei --limit 10 --template-id CVE-YYYY-NNNN
 docker compose run --rm zero notify discord --dry-run
 ```
 

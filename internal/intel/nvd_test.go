@@ -155,7 +155,7 @@ func TestCPEPresenceBlocksUnmatchedKeywordFallback(t *testing.T) {
 func TestCVEYear(t *testing.T) {
 	tests := map[string]int{
 		"CVE-2018-17199": 2018,
-		"cve-2025-20362": 2025,
+		"cve-2025-12345": 2025,
 		"CVE-FAKE-1":     0,
 		"":               0,
 	}

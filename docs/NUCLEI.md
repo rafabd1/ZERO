@@ -26,7 +26,7 @@ Nuclei is strongest when a relevant template exists and produces vulnerability-s
 ```bash
 docker compose run --rm zero analyze nuclei \
   --limit 25 \
-  --template-id CVE-2025-20362 \
+  --template-id CVE-YYYY-NNNN \
   --rate-limit 40 \
   --concurrency 10 \
   --timeout 10

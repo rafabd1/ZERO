@@ -133,27 +133,7 @@ func (s *Server) routes() {
 		LIMIT 50
 	`))
 	s.mux.HandleFunc("GET /v1/scans/latest", s.latestScans)
-	s.mux.HandleFunc("GET /v1/scan-requests", s.query(`
-		SELECT jsonb_build_object(
-			'id', r.id,
-			'program_id', r.program_id,
-			'campaign_id', r.campaign_id,
-			'name', r.name,
-			'status', r.status,
-			'requested_by', r.requested_by,
-			'run_after', r.run_after,
-			'attempt_count', r.attempt_count,
-			'started_at', r.started_at,
-			'finished_at', r.finished_at,
-			'error', r.error,
-			'params', r.params,
-			'created_at', r.created_at,
-			'updated_at', r.updated_at
-		)
-		FROM zero_scan_requests r
-		ORDER BY r.created_at DESC
-		LIMIT 100
-	`))
+	s.mux.HandleFunc("GET /v1/scan-requests", s.scanRequests)
 	s.mux.HandleFunc("GET /v1/scan-campaigns", s.query(`
 		SELECT jsonb_build_object(
 			'id', c.id,
@@ -472,6 +452,43 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRawJSON(w, rows[0])
+}
+
+func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
+	p := listParamsFromRequest(r, 100)
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	campaignID := strings.TrimSpace(r.URL.Query().Get("campaign_id"))
+	programID := strings.TrimSpace(r.URL.Query().Get("program_id"))
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'id', r.id,
+			'program_id', r.program_id,
+			'campaign_id', r.campaign_id,
+			'name', r.name,
+			'status', r.status,
+			'requested_by', r.requested_by,
+			'run_after', r.run_after,
+			'attempt_count', r.attempt_count,
+			'started_at', r.started_at,
+			'finished_at', r.finished_at,
+			'error', r.error,
+			'params', r.params,
+			'created_at', r.created_at,
+			'updated_at', r.updated_at
+		)
+		FROM zero_scan_requests r
+		WHERE ($1 = '' OR r.status = $1)
+		  AND ($2 = '' OR r.campaign_id::text = $2)
+		  AND ($3 = '' OR r.program_id::text = $3)
+		  AND ($4 = '' OR r.created_at > $4::timestamptz)
+		ORDER BY r.created_at DESC
+		LIMIT $5 OFFSET $6
+	`, status, campaignID, programID, p.Since, p.Limit, p.Offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeRawJSONArray(w, rows)
 }
 
 func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {

@@ -33,8 +33,10 @@ Edit `.env` and set at least:
 ZERO_DATABASE_URL="postgres://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require"
 ZERO_H1_USERNAME=""
 ZERO_H1_TOKEN=""
-ZERO_API_TOKEN="change-me"
+ZERO_API_TOKEN=""
 ```
+
+Set `ZERO_API_TOKEN` to a strong random bearer token before exposing the API.
 
 Then start the stack:
 
@@ -76,15 +78,15 @@ Example: queue a focused campaign across all active programs with a custom Weban
 docker compose run --rm zero run schedule \
   --all-programs \
   --campaign-parallelism 8 \
-  --name "focused-webvpn-cve-sweep" \
+  --name "focused-technology-cve-sweep" \
   --skip-sync \
   --httpx-timeout 4 \
   --httpx-threads 20 \
   --httpx-batch-size 50 \
   --httpx-batch-timeout 5m \
-  --webanalyze-apps /usr/local/share/webanalyze/custom/cisco-asa-ftd-webvpn.json \
+  --webanalyze-apps /work/custom/webanalyze/technology.json \
   --webanalyze-workers 4 \
-  --nuclei-template /home/zero/nuclei-templates/http/cves/2025/CVE-2025-20362.yaml \
+  --nuclei-template /work/custom/nuclei/CVE-YYYY-NNNN.yaml \
   --nuclei-rate-limit 40 \
   --nuclei-concurrency 10 \
   --nuclei-bulk-size 5 \

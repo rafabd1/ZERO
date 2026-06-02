@@ -25,3 +25,5 @@ reports/generated/
 .secrets/
 .tools/
 configs/subfinder/provider-config.yaml
+configs/webanalyze/*.json
+!configs/webanalyze/*.example.json
