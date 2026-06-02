@@ -61,6 +61,25 @@ Optional campaign knobs:
 - `ZERO_NUCLEI_SCAN_STRATEGY` / `--nuclei-scan-strategy`
 - `ZERO_NUCLEI_MAX_HOST_ERROR` / `--nuclei-max-host-error`
 
+## WAF Diagnostics
+
+Zero can run a small pre/post probe around Nuclei to classify active validation as potentially blocked. This does not change Nuclei rate, concurrency, templates, or target coverage.
+
+```env
+ZERO_NUCLEI_WAF_DETECT=true
+ZERO_NUCLEI_WAF_SAMPLE_SIZE=8
+ZERO_NUCLEI_WAF_PROBE_TIMEOUT=5
+```
+
+The diagnostic is stored in `scan_runs.stats.waf_diagnostic` when Nuclei returns no results or fails. High-confidence cases also emit an operational alert.
+
+Common reasons:
+
+- `post_scan_blocking_increased`: the sampled URLs became more blocked after Nuclei.
+- `post_scan_waf_indicators_increased`: WAF-like headers/body indicators increased after Nuclei.
+- `nuclei_timeout_with_blocked_probe`: Nuclei timed out and the probe observed blocked responses.
+- `baseline_waf_like_responses`: the target already looked WAF-protected before validation, so lack of Nuclei confirmation should be treated as inconclusive.
+
 ## Stored Evidence
 
 Each result stores:

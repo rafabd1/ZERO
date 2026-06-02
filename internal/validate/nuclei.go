@@ -29,6 +29,9 @@ type NucleiRunner struct {
 	proxy       string
 	strategy    string
 	maxHostErr  int
+	wafDetect   bool
+	wafSample   int
+	wafTimeout  int
 	rate        int
 	concurrency int
 	bulkSize    int
@@ -46,6 +49,7 @@ type NucleiResult struct {
 	Inserted         int
 	FindingsInserted int
 	Skipped          string
+	WAF              WAFDiagnostic
 }
 
 func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
@@ -62,6 +66,9 @@ func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
 		bulkSize:    5,
 		retries:     1,
 		timeout:     8,
+		wafDetect:   true,
+		wafSample:   8,
+		wafTimeout:  5,
 	}
 }
 
@@ -93,6 +100,17 @@ func (r *NucleiRunner) WithRequestProfile(headers []string, proxy, strategy stri
 	r.strategy = strings.TrimSpace(strategy)
 	if maxHostErr > 0 {
 		r.maxHostErr = maxHostErr
+	}
+	return r
+}
+
+func (r *NucleiRunner) WithWAFDetection(enabled bool, sampleSize, timeoutSeconds int) *NucleiRunner {
+	r.wafDetect = enabled
+	if sampleSize > 0 {
+		r.wafSample = sampleSize
+	}
+	if timeoutSeconds > 0 {
+		r.wafTimeout = timeoutSeconds
 	}
 	return r
 }
@@ -156,6 +174,10 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		result.Skipped = "no active HTTP services"
 		return result, nil
 	}
+	var wafBase wafBaseline
+	if r.wafDetect {
+		wafBase = startWAFDiagnostic(ctx, targets, r.headers, r.wafSample, r.wafTimeout)
+	}
 
 	var input bytes.Buffer
 	for _, target := range targets {
@@ -208,6 +230,9 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	if err != nil && isNoTemplatesError(err) {
 		result.Skipped = "no matching local Nuclei templates"
 		return result, nil
+	}
+	if r.wafDetect && (err != nil || result.Results == 0) {
+		result.WAF = finishWAFDiagnostic(ctx, wafBase, err, result.Results)
 	}
 	return result, err
 }

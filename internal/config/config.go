@@ -94,6 +94,9 @@ type ToolConfig struct {
 	NucleiProxy             string
 	NucleiScanStrategy      string
 	NucleiMaxHostError      int
+	NucleiWAFDetect         bool
+	NucleiWAFSampleSize     int
+	NucleiWAFProbeTimeout   int
 	NucleiCVELimit          int
 	NucleiRate              int
 	NucleiC                 int
@@ -184,6 +187,9 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_proxy", "")
 	v.SetDefault("tools.nuclei_scan_strategy", "")
 	v.SetDefault("tools.nuclei_max_host_error", 0)
+	v.SetDefault("tools.nuclei_waf_detect", true)
+	v.SetDefault("tools.nuclei_waf_sample_size", 8)
+	v.SetDefault("tools.nuclei_waf_probe_timeout", 5)
 	v.SetDefault("tools.nuclei_cve_limit", 100)
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
@@ -263,6 +269,9 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.nuclei_proxy", "ZERO_NUCLEI_PROXY")
 	_ = v.BindEnv("tools.nuclei_scan_strategy", "ZERO_NUCLEI_SCAN_STRATEGY")
 	_ = v.BindEnv("tools.nuclei_max_host_error", "ZERO_NUCLEI_MAX_HOST_ERROR")
+	_ = v.BindEnv("tools.nuclei_waf_detect", "ZERO_NUCLEI_WAF_DETECT")
+	_ = v.BindEnv("tools.nuclei_waf_sample_size", "ZERO_NUCLEI_WAF_SAMPLE_SIZE")
+	_ = v.BindEnv("tools.nuclei_waf_probe_timeout", "ZERO_NUCLEI_WAF_PROBE_TIMEOUT")
 	_ = v.BindEnv("tools.nuclei_cve_limit", "ZERO_NUCLEI_CVE_LIMIT")
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
@@ -357,6 +366,9 @@ func Load() (Config, error) {
 			NucleiProxy:             v.GetString("tools.nuclei_proxy"),
 			NucleiScanStrategy:      v.GetString("tools.nuclei_scan_strategy"),
 			NucleiMaxHostError:      clampInt(v.GetInt("tools.nuclei_max_host_error"), 0, 100000),
+			NucleiWAFDetect:         v.GetBool("tools.nuclei_waf_detect"),
+			NucleiWAFSampleSize:     clampInt(v.GetInt("tools.nuclei_waf_sample_size"), 0, 50),
+			NucleiWAFProbeTimeout:   clampInt(v.GetInt("tools.nuclei_waf_probe_timeout"), 1, 30),
 			NucleiCVELimit:          v.GetInt("tools.nuclei_cve_limit"),
 			NucleiRate:              v.GetInt("tools.nuclei_rate"),
 			NucleiC:                 v.GetInt("tools.nuclei_c"),

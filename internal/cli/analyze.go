@@ -157,12 +157,10 @@ func newAnalyzeCommand() *cobra.Command {
 				WithScanRunID(scanID).
 				WithProgramID(nucleiProgramID).
 				WithLimit(nucleiLimit).
+				WithWAFDetection(cfg.Tools.NucleiWAFDetect, cfg.Tools.NucleiWAFSampleSize, cfg.Tools.NucleiWAFProbeTimeout).
 				WithToolTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
-			if err != nil {
-				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
-			}
-			if err := finishScanRun(ctx, repo, scanID, nil, result.Targets, result.FindingsInserted, map[string]any{
+			stats := map[string]any{
 				"targets":           result.Targets,
 				"results":           result.Results,
 				"inserted_results":  result.Inserted,
@@ -185,7 +183,16 @@ func newAnalyzeCommand() *cobra.Command {
 				"retries":           retries,
 				"timeout":           timeout,
 				"skipped":           result.Skipped,
-			}); err != nil {
+			}
+			if result.WAF.Enabled {
+				stats["waf_diagnostic"] = result.WAF
+			}
+			if err != nil {
+				alertOnWAF(ctx, cmd, cfg, nucleiProgramID, "", []string{"analyze", "nuclei"}, result.WAF)
+				return finishScanRun(ctx, repo, scanID, err, result.Targets, result.FindingsInserted, stats)
+			}
+			alertOnWAF(ctx, cmd, cfg, nucleiProgramID, "", []string{"analyze", "nuclei"}, result.WAF)
+			if err := finishScanRun(ctx, repo, scanID, nil, result.Targets, result.FindingsInserted, stats); err != nil {
 				return err
 			}
 			if result.Skipped != "" {

@@ -1,9 +1,14 @@
 package validate
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/rafabd1/ZERO/internal/db"
 )
 
 func TestIsNoTemplatesError(t *testing.T) {
@@ -103,5 +108,50 @@ func TestBuildArgsIncludesRequestProfile(t *testing.T) {
 		if !strings.Contains(args, want) {
 			t.Fatalf("args missing %q in:\n%s", want, args)
 		}
+	}
+}
+
+func TestClassifyWAFResponseDetectsBlockedCloudflarePage(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("cf-ray", "example")
+	blocked, wafLike, indicators := classifyWAFResponse(403, headers, "Attention Required - checking your browser")
+	if !blocked || !wafLike {
+		t.Fatalf("blocked=%t wafLike=%t; want both true", blocked, wafLike)
+	}
+	joined := strings.Join(indicators, ",")
+	for _, want := range []string{"status_403", "cloudflare_header", "attention_required_body"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("indicators = %#v; missing %s", indicators, want)
+		}
+	}
+}
+
+func TestWAFDiagnosticDetectsPostScanBlockingIncrease(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("<title>ok</title>"))
+			return
+		}
+		w.Header().Set("cf-ray", "example")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("Attention Required"))
+	}))
+	defer server.Close()
+
+	targets := []db.NucleiTarget{{URL: server.URL}}
+	baseline := startWAFDiagnostic(context.Background(), targets, []string{"User-Agent: zero"}, 1, 2)
+	diag := finishWAFDiagnostic(context.Background(), baseline, nil, 0)
+
+	if !diag.Suspected {
+		t.Fatalf("diag = %#v; want suspected", diag)
+	}
+	if diag.Confidence < 80 {
+		t.Fatalf("confidence = %d; want >= 80", diag.Confidence)
+	}
+	if diag.Reason != "post_scan_blocking_increased" {
+		t.Fatalf("reason = %q", diag.Reason)
 	}
 }
