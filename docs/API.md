@@ -82,6 +82,7 @@ Content-Type: application/json
     "WebanalyzeApps": "/work/custom-technologies.json",
     "WebanalyzeWorkers": 4,
     "NucleiTemplate": "/work/templates/custom",
+    "NucleiForce": true,
     "NucleiSeverity": "medium,high,critical",
     "NucleiRateLimit": 40,
     "NucleiConcurrency": 10

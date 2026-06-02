@@ -23,6 +23,7 @@ func newAnalyzeCommand() *cobra.Command {
 	var nucleiTimeout int
 	var nucleiFromCVEs bool
 	var nucleiAllCVETemplates bool
+	var nucleiForce bool
 	var nucleiCVELimit int
 	var cvesProgramID string
 	var cvesLimit int
@@ -111,7 +112,7 @@ func newAnalyzeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fromCVEs := (cfg.Tools.NucleiFromCVEs || nucleiFromCVEs) && !nucleiAllCVETemplates && templateIDs == "" && nucleiTemplatePath == ""
+			fromCVEs := (cfg.Tools.NucleiFromCVEs || nucleiFromCVEs) && !nucleiAllCVETemplates && !nucleiForce && templateIDs == "" && nucleiTemplatePath == ""
 			if fromCVEs {
 				cveLimit := nucleiCVELimit
 				if cveLimit <= 0 {
@@ -193,6 +194,7 @@ func newAnalyzeCommand() *cobra.Command {
 	nuclei.Flags().IntVar(&nucleiTimeout, "timeout", 0, "override Nuclei timeout seconds for this run")
 	nuclei.Flags().BoolVar(&nucleiFromCVEs, "from-cves", false, "run only Nuclei template ids linked from passive CVE matching")
 	nuclei.Flags().BoolVar(&nucleiAllCVETemplates, "all-cve-templates", false, "ignore passive CVE matches and run configured tag/template policy")
+	nuclei.Flags().BoolVar(&nucleiForce, "force", false, "force Nuclei to run the configured template/tag policy instead of deriving templates from passive CVEs")
 	nuclei.Flags().IntVar(&nucleiCVELimit, "cve-limit", 0, "maximum passive CVE template ids to pass to Nuclei")
 	nuclei.Flags().StringVar(&nucleiProgramID, "program-id", "", "limit Nuclei validation to one program id")
 	cmd.AddCommand(cves, nuclei)

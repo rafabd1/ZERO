@@ -87,6 +87,7 @@ docker compose run --rm zero run schedule \
   --webanalyze-apps /work/custom/webanalyze/technology.json \
   --webanalyze-workers 4 \
   --nuclei-template /work/custom/nuclei/CVE-YYYY-NNNN.yaml \
+  --nuclei-force \
   --nuclei-rate-limit 40 \
   --nuclei-concurrency 10 \
   --nuclei-bulk-size 5 \

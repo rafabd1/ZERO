@@ -48,6 +48,7 @@ type manualRunOptions struct {
 	NucleiTimeout     int
 	NucleiFromCVEs    bool
 	NucleiAllCVEs     bool
+	NucleiForce       bool
 	NucleiCVELimit    int
 }
 
@@ -161,6 +162,7 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.NucleiTimeout, "nuclei-timeout", 0, "custom Nuclei timeout seconds for this run only")
 	cmd.Flags().BoolVar(&opts.NucleiFromCVEs, "nuclei-from-cves", false, "derive Nuclei template ids from passive CVE matches for this run only")
 	cmd.Flags().BoolVar(&opts.NucleiAllCVEs, "nuclei-all-cve-templates", false, "run configured Nuclei tag/template policy instead of passive CVE matches")
+	cmd.Flags().BoolVar(&opts.NucleiForce, "nuclei-force", false, "force Nuclei to run the configured template/tag policy instead of deriving templates from passive CVEs")
 	cmd.Flags().IntVar(&opts.NucleiCVELimit, "nuclei-cve-limit", 0, "maximum passive CVE template ids for this run only")
 }
 
@@ -252,6 +254,9 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		}
 		if opts.NucleiAllCVEs {
 			step = append(step, "--all-cve-templates")
+		}
+		if opts.NucleiForce {
+			step = append(step, "--force")
 		}
 		step = appendIntFlag(step, "--cve-limit", opts.NucleiCVELimit)
 		steps = append(steps, step)
