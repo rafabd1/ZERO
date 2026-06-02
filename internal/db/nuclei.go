@@ -46,7 +46,12 @@ func (r *Repository) listNucleiTargetsByTechnology(ctx context.Context, programI
 			OR lower(s.webserver) LIKE ANY($2::text[])
 			OR EXISTS (
 				SELECT 1
-				FROM jsonb_array_elements_text(s.technologies) AS tech(name)
+				FROM jsonb_array_elements_text(
+					CASE
+						WHEN jsonb_typeof(s.technologies) = 'array' THEN s.technologies
+						ELSE '[]'::jsonb
+					END
+				) AS tech(name)
 				WHERE lower(tech.name) LIKE ANY($2::text[])
 			)
 			OR EXISTS (
