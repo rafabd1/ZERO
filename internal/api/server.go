@@ -493,7 +493,7 @@ func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 		WHERE ($1 = '' OR r.status = $1)
 		  AND ($2 = '' OR r.campaign_id::text = $2)
 		  AND ($3 = '' OR r.program_id::text = $3)
-		  AND ($4 = '' OR r.created_at > $4::timestamptz)
+		  AND (NULLIF($4, '') IS NULL OR r.created_at > NULLIF($4, '')::timestamptz)
 		ORDER BY r.created_at DESC
 		LIMIT $5 OFFSET $6
 	`, status, campaignID, programID, p.Since, p.Limit, p.Offset)
@@ -780,7 +780,7 @@ func (s *Server) services(programID string) http.HandlerFunc {
 			WHERE s.active = true
 			  AND ($1 = '' OR s.program_id::text = $1)
 			  AND ($2 = '' OR s.host ILIKE '%' || $2 || '%' OR s.url ILIKE '%' || $2 || '%')
-			  AND ($3 = '' OR s.last_seen_at > $3::timestamptz)
+			  AND (NULLIF($3, '') IS NULL OR s.last_seen_at > NULLIF($3, '')::timestamptz)
 			ORDER BY s.last_seen_at DESC
 			LIMIT $4 OFFSET $5
 		`, programID, strings.TrimSpace(r.URL.Query().Get("q")), p.Since, p.Limit, p.Offset)
@@ -813,7 +813,7 @@ func (s *Server) nucleiResults(programID string) http.HandlerFunc {
 			WHERE ($1 = '' OR n.program_id::text = $1)
 			  AND ($2 = '' OR n.severity = $2)
 			  AND ($3 = '' OR n.template_id = $3)
-			  AND ($4 = '' OR n.first_seen_at > $4::timestamptz)
+			  AND (NULLIF($4, '') IS NULL OR n.first_seen_at > NULLIF($4, '')::timestamptz)
 			ORDER BY n.first_seen_at DESC
 			LIMIT $5 OFFSET $6
 		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), strings.TrimSpace(r.URL.Query().Get("template_id")), p.Since, p.Limit, p.Offset)
@@ -853,7 +853,7 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 			  AND ($2 = '' OR f.status = $2)
 			  AND ($3 = '' OR f.severity = $3)
 			  AND ($4 = 0 OR f.confidence >= $4)
-			  AND ($5 = '' OR f.first_seen_at > $5::timestamptz)
+			  AND (NULLIF($5, '') IS NULL OR f.first_seen_at > NULLIF($5, '')::timestamptz)
 			ORDER BY f.first_seen_at DESC
 			LIMIT $6 OFFSET $7
 		`, programID, strings.TrimSpace(r.URL.Query().Get("status")), strings.TrimSpace(r.URL.Query().Get("severity")), queryInt(r, "min_confidence", 0), p.Since, p.Limit, p.Offset)
@@ -884,7 +884,7 @@ func (s *Server) reports(programID string) http.HandlerFunc {
 			FROM zero_reports r
 			WHERE ($1 = '' OR r.program_id::text = $1)
 			  AND ($2 = '' OR r.severity = $2)
-			  AND ($3 = '' OR r.created_at > $3::timestamptz)
+			  AND (NULLIF($3, '') IS NULL OR r.created_at > NULLIF($3, '')::timestamptz)
 			ORDER BY r.created_at DESC
 			LIMIT $4 OFFSET $5
 		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), p.Since, p.Limit, p.Offset)
@@ -1125,7 +1125,7 @@ func (s *Server) changes(programID string) http.HandlerFunc {
 			)
 			FROM zero_change_events c
 			WHERE ($1 = '' OR c.program_id::text = $1)
-			  AND ($2 = '' OR c.occurred_at > $2::timestamptz)
+			  AND (NULLIF($2, '') IS NULL OR c.occurred_at > NULLIF($2, '')::timestamptz)
 			ORDER BY c.occurred_at DESC
 			LIMIT 500
 		`, programID, since)
