@@ -1,6 +1,9 @@
 package db
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestScanCampaignChildParamsForcesProgramAndSkipSync(t *testing.T) {
 	raw := []byte(`{"ProgramID":"old","SkipSync":false,"NucleiTemplate":"/tmp/custom.yaml"}`)
@@ -19,6 +22,26 @@ func TestScanCampaignChildParamsForcesProgramAndSkipSync(t *testing.T) {
 	}
 	if want := `"NucleiTemplate":"/tmp/custom.yaml"`; !containsJSONFragment(string(got), want) {
 		t.Fatalf("child params = %s; missing %s", got, want)
+	}
+}
+
+func TestRetryableScanRequestErrorDetectsTransientFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "supabase session pool exhausted", err: errors.New("FATAL: (EMAXCONNSESSION) max clients reached in session mode"), want: true},
+		{name: "nvd rate limit", err: errors.New(`nvd search "Perl 5.30.0" failed with status 429`), want: true},
+		{name: "tool timeout", err: errors.New("httpx batch timeout: deadline exceeded"), want: true},
+		{name: "bad custom template", err: errors.New("nuclei template parse failed: invalid yaml"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := retryableScanRequestError(tt.err); got != tt.want {
+				t.Fatalf("retryableScanRequestError(%v) = %v; want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 

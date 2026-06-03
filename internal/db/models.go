@@ -1,6 +1,9 @@
 package db
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ScopeAsset struct {
 	ID                string
@@ -32,6 +35,11 @@ type ScanRequest struct {
 	CampaignID string
 	Name       string
 	Params     json.RawMessage
+}
+
+type ScanRequestRetryPolicy struct {
+	MaxAttempts int
+	BaseDelay   time.Duration
 }
 
 type ScanCampaignCreateResult struct {

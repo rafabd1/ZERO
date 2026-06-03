@@ -316,6 +316,51 @@ func (r *Repository) RecoverRunningScanRequests(ctx context.Context) (int, error
 	return int(tag.RowsAffected()), nil
 }
 
+func (r *Repository) RecoverRetryableFailedScanRequests(ctx context.Context, retryPolicy ScanRequestRetryPolicy) (int, error) {
+	if retryPolicy.MaxAttempts <= 0 {
+		retryPolicy.MaxAttempts = 4
+	}
+	if retryPolicy.BaseDelay <= 0 {
+		retryPolicy.BaseDelay = 2 * time.Minute
+	}
+	delaySeconds := int64(retryPolicy.BaseDelay.Seconds())
+	if delaySeconds < 1 {
+		delaySeconds = 60
+	}
+	tag, err := r.pool.Exec(ctx, `
+		WITH retryable AS (
+			SELECT r.id
+			FROM zero_scan_requests r
+			JOIN zero_scan_campaigns c ON c.id = r.campaign_id
+			WHERE r.status = 'failed'
+			  AND c.status IN ('queued', 'running')
+			  AND r.attempt_count < $1
+			  AND EXISTS (
+				SELECT 1
+				FROM unnest($3::text[]) AS needle
+				WHERE lower(r.error) LIKE '%' || needle || '%'
+			  )
+		)
+		UPDATE zero_scan_requests r
+		SET status = 'queued',
+			run_after = now() + make_interval(secs => LEAST($2::double precision * power(2, GREATEST(r.attempt_count - 1, 0)), 3600)),
+			finished_at = NULL,
+			locked_at = NULL,
+			error = s.retry_error,
+			updated_at = now()
+		FROM (
+			SELECT id, 'transient failure recovered; retry scheduled: ' || error AS retry_error
+			FROM zero_scan_requests
+			WHERE id IN (SELECT id FROM retryable)
+		) s
+		WHERE r.id = s.id
+	`, retryPolicy.MaxAttempts, delaySeconds, retryableScanRequestNeedles())
+	if err != nil {
+		return 0, fmt.Errorf("recover retryable failed scan requests: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (r *Repository) CancelScanRequest(ctx context.Context, requestID string) (CancelScanResult, error) {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
@@ -490,12 +535,51 @@ func (r *Repository) RecoverRunningScanCampaigns(ctx context.Context) (int, erro
 	return count, nil
 }
 
-func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr error) error {
+func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr error, retryPolicy ScanRequestRetryPolicy) error {
 	status := "succeeded"
 	errorText := ""
 	if runErr != nil {
 		status = "failed"
 		errorText = runErr.Error()
+	}
+	if runErr != nil && retryableScanRequestError(runErr) {
+		if retryPolicy.MaxAttempts <= 0 {
+			retryPolicy.MaxAttempts = 4
+		}
+		if retryPolicy.BaseDelay <= 0 {
+			retryPolicy.BaseDelay = 2 * time.Minute
+		}
+		delaySeconds := int64(retryPolicy.BaseDelay.Seconds())
+		if delaySeconds < 1 {
+			delaySeconds = 60
+		}
+		var requeued bool
+		err := r.pool.QueryRow(ctx, `
+			WITH current AS (
+				SELECT attempt_count
+				FROM zero_scan_requests
+				WHERE id = $1::uuid
+				  AND status <> 'canceled'
+			), updated AS (
+				UPDATE zero_scan_requests r
+				SET status = 'queued',
+					run_after = now() + make_interval(secs => LEAST($3::double precision * power(2, GREATEST(current.attempt_count - 1, 0)), 3600)),
+					locked_at = NULL,
+					error = $4,
+					updated_at = now()
+				FROM current
+				WHERE r.id = $1::uuid
+				  AND current.attempt_count < $2
+				RETURNING r.id
+			)
+			SELECT EXISTS (SELECT 1 FROM updated)
+		`, id, retryPolicy.MaxAttempts, delaySeconds, retryErrorText(errorText)).Scan(&requeued)
+		if err != nil {
+			return fmt.Errorf("retry scan request: %w", err)
+		}
+		if requeued {
+			return r.RefreshScanCampaignForRequest(ctx, id)
+		}
 	}
 	_, err := r.pool.Exec(ctx, `
 		UPDATE zero_scan_requests
@@ -511,6 +595,48 @@ func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr er
 		return fmt.Errorf("finish scan request: %w", err)
 	}
 	return r.RefreshScanCampaignForRequest(ctx, id)
+}
+
+func retryErrorText(err string) string {
+	err = strings.TrimSpace(err)
+	if err == "" {
+		return "transient failure; retry scheduled"
+	}
+	return "transient failure; retry scheduled: " + err
+}
+
+func retryableScanRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range retryableScanRequestNeedles() {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func retryableScanRequestNeedles() []string {
+	return []string{
+		"emaxconnsession",
+		"max clients reached",
+		"failed to connect",
+		"connection refused",
+		"connection reset",
+		"connection timed out",
+		"server closed",
+		"temporary failure",
+		"timeout",
+		"deadline exceeded",
+		"status 429",
+		"too many requests",
+		"status 500",
+		"status 502",
+		"status 503",
+		"status 504",
+	}
 }
 
 func (r *Repository) RefreshScanCampaignForRequest(ctx context.Context, requestID string) error {

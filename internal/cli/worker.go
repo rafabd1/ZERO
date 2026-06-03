@@ -151,6 +151,13 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 		return err
 	}
 	defer repo.Close()
+	retryPolicy := scanRequestRetryPolicy(cfg)
+	recovered, err := repo.RecoverRetryableFailedScanRequests(ctx, retryPolicy)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "scan request retry recovery failed: %v\n", err)
+	} else if recovered > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d transiently failed scan request(s)\n", recovered)
+	}
 
 	type scanRequestResult struct {
 		id  string
@@ -167,7 +174,7 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 		go func() {
 			done <- scanRequestResult{
 				id:  request.ID,
-				err: runQueuedScanRequest(cmd, repo, request),
+				err: runQueuedScanRequest(cmd, repo, request, cfg),
 			}
 		}()
 	}
@@ -184,6 +191,7 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "scan request capacity lookup failed with %d active worker(s): %v\n", active, err)
 			limit = active
 		}
+		limit = scanRequestEffectiveLimit(limit, cfg.Worker.ScanRequestMaxActive)
 		for active < limit {
 			requests, err := repo.ClaimDueScanRequests(ctx, limit-active)
 			if err != nil {
@@ -225,7 +233,7 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 	}
 }
 
-func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.ScanRequest) error {
+func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.ScanRequest, cfg config.Config) error {
 	ctx := commandContext()
 	opts, err := manualRunOptionsFromJSON(request.Params)
 	if err == nil && opts.ProgramID == "" {
@@ -235,8 +243,12 @@ func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.Sc
 		fmt.Fprintf(cmd.OutOrStdout(), "zero scan request starting: %s %s\n", request.ID, request.Name)
 		err = runManualPipeline(cmd, opts)
 	}
-	if finishErr := repo.FinishScanRequest(ctx, request.ID, err); finishErr != nil && err == nil {
-		err = finishErr
+	if finishErr := repo.FinishScanRequest(ctx, request.ID, err, scanRequestRetryPolicy(cfg)); finishErr != nil {
+		if err != nil {
+			err = fmt.Errorf("%w; finish scan request: %v", err, finishErr)
+		} else {
+			err = finishErr
+		}
 	}
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "zero scan request failed %s: %v\n", request.ID, err)
@@ -244,6 +256,23 @@ func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.Sc
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "zero scan request finished: %s\n", request.ID)
 	return nil
+}
+
+func scanRequestRetryPolicy(cfg config.Config) db.ScanRequestRetryPolicy {
+	return db.ScanRequestRetryPolicy{
+		MaxAttempts: cfg.Worker.ScanRequestRetryAttempts,
+		BaseDelay:   cfg.Worker.ScanRequestRetryBaseDelay,
+	}
+}
+
+func scanRequestEffectiveLimit(capacity, maxActive int) int {
+	if capacity < 1 {
+		capacity = 1
+	}
+	if maxActive > 0 && capacity > maxActive {
+		return maxActive
+	}
+	return capacity
 }
 
 func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Config) error {
@@ -262,6 +291,11 @@ func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Conf
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: retryable failed scan requests")
+	retried, err := repo.RecoverRetryableFailedScanRequests(ctx, scanRequestRetryPolicy(cfg))
+	if err != nil {
+		return err
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: scan campaigns")
 	recoveredCampaigns, err := repo.RecoverRunningScanCampaigns(ctx)
 	if err != nil {
@@ -272,6 +306,9 @@ func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Conf
 	}
 	if requeued > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d interrupted scan request(s)\n", requeued)
+	}
+	if retried > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d transiently failed scan request(s)\n", retried)
 	}
 	if recoveredCampaigns > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "refreshed %d interrupted scan campaign(s)\n", recoveredCampaigns)

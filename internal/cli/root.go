@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -87,7 +88,8 @@ func openRepositoryE(ctx context.Context, cfg config.Config) (*db.Repository, er
 		if attempt == attempts {
 			break
 		}
-		timer := time.NewTimer(wait)
+		sleep := repositoryRetryDelay(wait, attempt, err)
+		timer := time.NewTimer(sleep)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -96,6 +98,57 @@ func openRepositoryE(ctx context.Context, cfg config.Config) (*db.Repository, er
 		}
 	}
 	return nil, fmt.Errorf("open repository after %d attempt(s): %w", attempts, lastErr)
+}
+
+func repositoryRetryDelay(base time.Duration, attempt int, err error) time.Duration {
+	if base <= 0 {
+		base = 3 * time.Second
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := base * time.Duration(attempt)
+	if retryableRepositoryOpenError(err) {
+		delay = base * time.Duration(1<<minInt(attempt-1, 4))
+		if delay < 10*time.Second {
+			delay = 10 * time.Second
+		}
+	}
+	if delay > time.Minute {
+		delay = time.Minute
+	}
+	return delay
+}
+
+func retryableRepositoryOpenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"emaxconnsession",
+		"max clients reached",
+		"failed to connect",
+		"connection refused",
+		"connection reset",
+		"connection timed out",
+		"server closed",
+		"temporary failure",
+		"timeout",
+		"deadline exceeded",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func openRepositoryOnce(ctx context.Context, cfg config.Config) (*db.Repository, error) {

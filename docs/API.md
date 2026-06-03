@@ -124,6 +124,8 @@ Campaigns are durable. If the worker restarts, running child requests are requeu
 
 Custom campaign parallelism is independent from `ZERO_TARGET_PARALLELISM`. The worker adds capacity from active campaigns, so two campaigns with `parallelism: 8` can use up to 16 custom scan workers if the host has capacity.
 
+`ZERO_SCAN_REQUEST_MAX_ACTIVE` is a safety ceiling above campaign parallelism. Keep it below the effective database pooler session limit, leaving room for the worker, API, dashboard, and operational commands.
+
 When a request or campaign runs `httpx` and/or Webanalyze before Nuclei, Zero automatically keeps `NucleiTechFilter` tied to fresh fingerprints from that run. Use `NucleiTechMaxAge` only for requests that skip fingerprinting and intentionally gate Nuclei from existing database observations.
 
 Set `ReuseActiveServices: true` to skip fresh `dnsx/httpx` probing and load active HTTP services already present in the database. This is meant for back-to-back focused campaigns where the alive inventory was recently refreshed. In this mode, `DNSX*` and `HTTPX*` params are intentionally ignored.

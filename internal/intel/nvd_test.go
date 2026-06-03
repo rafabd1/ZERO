@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 )
@@ -24,6 +25,27 @@ func TestRetryableNVDError(t *testing.T) {
 				t.Fatalf("retryableNVDError(%v) = %v; want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNVDRetryDelayHonorsRetryAfter(t *testing.T) {
+	got := nvdRetryDelay(nvdStatusError{status: 429, retryAfter: 45 * time.Second}, 10*time.Second, 1)
+	if got != 50*time.Second {
+		t.Fatalf("nvdRetryDelay with Retry-After = %v; want 50s", got)
+	}
+}
+
+func TestNVDRetryDelayBacksOff429(t *testing.T) {
+	got := nvdRetryDelay(nvdStatusError{status: 429}, 10*time.Second, 1)
+	if got < 30*time.Second {
+		t.Fatalf("429 retry delay = %v; want at least 30s", got)
+	}
+}
+
+func TestParseRetryAfterSeconds(t *testing.T) {
+	got := parseRetryAfter("25")
+	if got != 25*time.Second {
+		t.Fatalf("parseRetryAfter seconds = %v; want 25s", got)
 	}
 }
 

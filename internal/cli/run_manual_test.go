@@ -14,6 +14,18 @@ func TestNormalizeManualRunOptionsReuseActiveServicesSkipsActiveProbes(t *testin
 	}
 }
 
+func TestScanRequestEffectiveLimitCapsCampaignCapacity(t *testing.T) {
+	if got := scanRequestEffectiveLimit(14, 10); got != 10 {
+		t.Fatalf("scanRequestEffectiveLimit(14, 10) = %d; want 10", got)
+	}
+	if got := scanRequestEffectiveLimit(4, 10); got != 4 {
+		t.Fatalf("scanRequestEffectiveLimit(4, 10) = %d; want 4", got)
+	}
+	if got := scanRequestEffectiveLimit(0, 10); got != 1 {
+		t.Fatalf("scanRequestEffectiveLimit(0, 10) = %d; want 1", got)
+	}
+}
+
 func TestShouldIncludePassiveFingerprintReports(t *testing.T) {
 	if !shouldIncludePassiveFingerprintReports(manualRunOptions{WebanalyzeApps: "/tmp/custom.json"}) {
 		t.Fatal("custom Webanalyze apps should enable passive fingerprint reports")

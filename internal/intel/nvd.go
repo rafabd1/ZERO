@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
@@ -26,6 +28,13 @@ type NVDRunner struct {
 	retries   int
 	retryWait time.Duration
 	client    *http.Client
+}
+
+var nvdGate = &spacedRequestGate{}
+
+type spacedRequestGate struct {
+	mu   sync.Mutex
+	last time.Time
 }
 
 type NVDResult struct {
@@ -169,7 +178,7 @@ func (r *NVDRunner) search(ctx context.Context, tech db.VersionedTechnology, key
 		if attempt == r.retries || !retryableNVDError(lastErr) {
 			return nil, lastErr
 		}
-		wait := time.Duration(attempt) * r.retryWait
+		wait := nvdRetryDelay(lastErr, r.retryWait, attempt)
 		select {
 		case <-time.After(wait):
 		case <-ctx.Done():
@@ -207,6 +216,13 @@ func (r *NVDRunner) search(ctx context.Context, tech db.VersionedTechnology, key
 }
 
 func (r *NVDRunner) fetch(ctx context.Context, rawURL, keyword string) (nvdResponse, error) {
+	spacing := 700 * time.Millisecond
+	if r.apiKey == "" {
+		spacing = 7 * time.Second
+	}
+	if err := nvdGate.Wait(ctx, spacing); err != nil {
+		return nvdResponse{}, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nvdResponse{}, err
@@ -220,7 +236,7 @@ func (r *NVDRunner) fetch(ctx context.Context, rawURL, keyword string) (nvdRespo
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nvdResponse{}, nvdStatusError{keyword: keyword, status: res.StatusCode}
+		return nvdResponse{}, nvdStatusError{keyword: keyword, status: res.StatusCode, retryAfter: parseRetryAfter(res.Header.Get("Retry-After"))}
 	}
 	var parsed nvdResponse
 	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
@@ -230,8 +246,9 @@ func (r *NVDRunner) fetch(ctx context.Context, rawURL, keyword string) (nvdRespo
 }
 
 type nvdStatusError struct {
-	keyword string
-	status  int
+	keyword    string
+	status     int
+	retryAfter time.Duration
 }
 
 func (e nvdStatusError) Error() string {
@@ -243,6 +260,71 @@ func retryableNVDError(err error) bool {
 		return statusErr.status == http.StatusTooManyRequests || statusErr.status >= 500
 	}
 	return true
+}
+
+func nvdRetryDelay(err error, base time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		base = 10 * time.Second
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	if statusErr, ok := err.(nvdStatusError); ok && statusErr.retryAfter > 0 {
+		return clampDuration(statusErr.retryAfter+5*time.Second, base, 5*time.Minute)
+	}
+	exp := math.Pow(2, float64(attempt-1))
+	delay := time.Duration(float64(base) * exp)
+	if statusErr, ok := err.(nvdStatusError); ok && statusErr.status == http.StatusTooManyRequests && delay < 30*time.Second {
+		delay = 30 * time.Second
+	}
+	delay += time.Duration(attempt) * 750 * time.Millisecond
+	return clampDuration(delay, base, 5*time.Minute)
+}
+
+func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		if delay := time.Until(when); delay > 0 {
+			return delay
+		}
+	}
+	return 0
+}
+
+func clampDuration(value, minValue, maxValue time.Duration) time.Duration {
+	if value < minValue {
+		return minValue
+	}
+	if maxValue > 0 && value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func (g *spacedRequestGate) Wait(ctx context.Context, spacing time.Duration) error {
+	if spacing <= 0 {
+		return nil
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	wait := time.Until(g.last.Add(spacing))
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	g.last = time.Now()
+	return nil
 }
 
 func cveYear(id string) int {

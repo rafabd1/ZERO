@@ -120,8 +120,11 @@ type NotifyConfig struct {
 }
 
 type WorkerConfig struct {
-	RunOnStartup        bool
-	RecoverRunningScans bool
+	RunOnStartup              bool
+	RecoverRunningScans       bool
+	ScanRequestMaxActive      int
+	ScanRequestRetryAttempts  int
+	ScanRequestRetryBaseDelay time.Duration
 }
 
 type IntelConfig struct {
@@ -216,16 +219,19 @@ func Load() (Config, error) {
 	v.SetDefault("api.addr", "127.0.0.1:8080")
 	v.SetDefault("worker.run_on_startup", true)
 	v.SetDefault("worker.recover_running_scans", true)
+	v.SetDefault("worker.scan_request_max_active", 10)
+	v.SetDefault("worker.scan_request_retry_attempts", 4)
+	v.SetDefault("worker.scan_request_retry_base_delay", "2m")
 	v.SetDefault("database.auto_migrate", true)
 	v.SetDefault("database.max_conns", 1)
-	v.SetDefault("database.retries", 4)
-	v.SetDefault("database.retry_wait", "3s")
+	v.SetDefault("database.retries", 6)
+	v.SetDefault("database.retry_wait", "5s")
 	v.SetDefault("data.stale_after_hours", 168)
 	v.SetDefault("data.inactive_retention_hours", 72)
 	v.SetDefault("data.inactive_retention_scans", 2)
 	v.SetDefault("intel.cve_min_year", 2018)
-	v.SetDefault("intel.nvd_retries", 3)
-	v.SetDefault("intel.nvd_retry_wait", "3s")
+	v.SetDefault("intel.nvd_retries", 5)
+	v.SetDefault("intel.nvd_retry_wait", "10s")
 
 	_ = v.BindEnv("database_url", "ZERO_DATABASE_URL")
 	_ = v.BindEnv("database_svc_key", "ZERO_DATABASE_SVC_KEY")
@@ -309,6 +315,9 @@ func Load() (Config, error) {
 	_ = v.BindEnv("notify.discord_alert_webhook_url", "ZERO_DISCORD_ALERT_WEBHOOK_URL")
 	_ = v.BindEnv("worker.run_on_startup", "ZERO_RUN_ON_STARTUP")
 	_ = v.BindEnv("worker.recover_running_scans", "ZERO_RECOVER_RUNNING_SCANS")
+	_ = v.BindEnv("worker.scan_request_max_active", "ZERO_SCAN_REQUEST_MAX_ACTIVE")
+	_ = v.BindEnv("worker.scan_request_retry_attempts", "ZERO_SCAN_REQUEST_RETRY_ATTEMPTS")
+	_ = v.BindEnv("worker.scan_request_retry_base_delay", "ZERO_SCAN_REQUEST_RETRY_BASE_DELAY")
 	_ = v.BindEnv("intel.nvd_api_key", "ZERO_NVD_API_KEY")
 	_ = v.BindEnv("intel.tech_aliases_file", "ZERO_TECH_ALIASES_FILE")
 	_ = v.BindEnv("intel.cve_min_year", "ZERO_CVE_MIN_YEAR")
@@ -417,8 +426,11 @@ func Load() (Config, error) {
 			DiscordAlertWebhookURL:     firstNonEmpty(v.GetString("notify.discord_alert_webhook_url"), v.GetString("notify.discord_webhook_url")),
 		},
 		Worker: WorkerConfig{
-			RunOnStartup:        v.GetBool("worker.run_on_startup"),
-			RecoverRunningScans: v.GetBool("worker.recover_running_scans"),
+			RunOnStartup:              v.GetBool("worker.run_on_startup"),
+			RecoverRunningScans:       v.GetBool("worker.recover_running_scans"),
+			ScanRequestMaxActive:      clampInt(v.GetInt("worker.scan_request_max_active"), 1, 64),
+			ScanRequestRetryAttempts:  clampInt(v.GetInt("worker.scan_request_retry_attempts"), 1, 20),
+			ScanRequestRetryBaseDelay: v.GetDuration("worker.scan_request_retry_base_delay"),
 		},
 		Intel: IntelConfig{
 			NVDAPIKey:       v.GetString("intel.nvd_api_key"),

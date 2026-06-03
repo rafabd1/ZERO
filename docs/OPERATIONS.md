@@ -49,6 +49,8 @@ The worker is the normal execution mode.
 - `ZERO_SCOPE_SYNC_MAX_AGE=24h` prevents scope sync from running on every restart.
 - `ZERO_DEFAULT_SCAN_INTERVAL_HOURS=72` is the default per-program scan interval.
 - `ZERO_TARGET_PARALLELISM=12` controls default/due pipeline program parallelism.
+- `ZERO_SCAN_REQUEST_MAX_ACTIVE=10` caps concurrent custom scan requests so database poolers are not exhausted.
+- `ZERO_SCAN_REQUEST_RETRY_ATTEMPTS=4` and `ZERO_SCAN_REQUEST_RETRY_BASE_DELAY=2m` requeue transient DB/NVD failures instead of discarding the scan.
 - `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder, Nuclei, and template updates.
 - `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
 
@@ -172,6 +174,13 @@ For Nuclei:
 - avoid using Nuclei as a broad generic scanner unless that is the explicit campaign goal.
 
 `ZERO_NUCLEI_HEADERS` uses `|` as the separator, so values such as the `Accept` header can safely contain commas.
+
+For NVD passive CVE enrichment:
+
+- `ZERO_NVD_RETRIES=5`
+- `ZERO_NVD_RETRY_WAIT=10s`
+
+Zero serializes NVD requests across concurrent scan workers and respects `Retry-After` on 429 responses.
 
 ## Scope Safety
 
