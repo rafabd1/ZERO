@@ -145,6 +145,8 @@ Use Nuclei for active validation, not broad discovery, unless that is the explic
 
 `--nuclei-template` is repeatable. When paired with `--nuclei-tech-filter`, Zero first selects only services whose latest fingerprint/title/server/banner/technology observations match the filter, then runs the configured Nuclei templates on that reduced target set.
 
+When `--nuclei-template` or `--nuclei-template-id` is provided, Zero treats that as an explicit template allowlist and does not apply the default `cve` tag or `medium,high,critical` severity filters. Add `--nuclei-tags` or `--nuclei-severity` only when you intentionally want to further restrict the supplied templates.
+
 Nuclei templates do not need to be CVE templates. Exposure, misconfiguration, takeover, DNS, SSL, and product-specific safe validation templates are supported. Choose the matching target source:
 
 - `http-services`: alive HTTP URLs from `zero_http_services`; supports technology filtering.

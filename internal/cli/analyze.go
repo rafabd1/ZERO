@@ -106,8 +106,9 @@ func newAnalyzeCommand() *cobra.Command {
 			if nucleiTemplateID != "" {
 				templateIDs = nucleiTemplateID
 			}
-			tags := firstNonEmpty(nucleiTags, cfg.Tools.NucleiTags)
-			severities := firstNonEmpty(nucleiSeverities, cfg.Tools.NucleiSeverities)
+			explicitTemplates := len(nucleiTemplatePaths) > 0 || strings.TrimSpace(templateIDs) != ""
+			tags := effectiveNucleiFilter(nucleiTags, cfg.Tools.NucleiTags, explicitTemplates, cmd.Flags().Changed("tags"))
+			severities := effectiveNucleiFilter(nucleiSeverities, cfg.Tools.NucleiSeverities, explicitTemplates, cmd.Flags().Changed("severity"))
 			targetSource := firstNonEmpty(nucleiTargetSource, cfg.Tools.NucleiTargetSource)
 			protocol := firstNonEmpty(nucleiProtocol, cfg.Tools.NucleiProtocol)
 			rate := firstPositive(nucleiRate, cfg.Tools.NucleiRate)
@@ -270,4 +271,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func effectiveNucleiFilter(flagValue, configuredValue string, explicitTemplates, flagChanged bool) string {
+	if explicitTemplates && !flagChanged {
+		return ""
+	}
+	return firstNonEmpty(flagValue, configuredValue)
 }

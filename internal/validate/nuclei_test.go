@@ -120,6 +120,14 @@ func TestBuildArgsCanOmitProtocolForAutoTemplates(t *testing.T) {
 	}
 }
 
+func TestBuildArgsOmitsSeverityWhenPolicyClearsIt(t *testing.T) {
+	runner := NewNucleiRunner(nil, "nuclei").WithPolicy("", "", "", 0, 0, 0)
+	args := strings.Join(runner.buildArgs(), "\n")
+	if strings.Contains(args, "-severity\n") {
+		t.Fatalf("cleared severity should omit -severity in:\n%s", args)
+	}
+}
+
 func TestTargetIndexMatchesRawSubdomainInput(t *testing.T) {
 	targets := []db.NucleiTarget{{
 		ProgramID:    "program-1",

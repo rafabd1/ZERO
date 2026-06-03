@@ -91,12 +91,8 @@ func (r *NucleiRunner) WithTargeting(targetSource, protocol string) *NucleiRunne
 }
 
 func (r *NucleiRunner) WithPolicy(tags, severities, templateIDs string, rate, concurrency, bulkSize int) *NucleiRunner {
-	if tags != "" {
-		r.tags = tags
-	}
-	if severities != "" {
-		r.severities = severities
-	}
+	r.tags = strings.TrimSpace(tags)
+	r.severities = strings.TrimSpace(severities)
 	if templateIDs != "" {
 		r.templateIDs = templateIDs
 	}
@@ -220,7 +216,7 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	}
 	if r.templateIDs != "" {
 		args = append(args, "-id", r.templateIDs)
-	} else {
+	} else if r.tags != "" {
 		args = append(args, "-tags", r.tags)
 	}
 
@@ -292,7 +288,6 @@ func (r *NucleiRunner) buildArgs() []string {
 		"-j",
 		"-duc",
 		"-ni",
-		"-severity", r.severities,
 		"-rate-limit", strconv.Itoa(r.rate),
 		"-c", strconv.Itoa(r.concurrency),
 		"-bs", strconv.Itoa(r.bulkSize),
@@ -300,6 +295,9 @@ func (r *NucleiRunner) buildArgs() []string {
 		"-timeout", strconv.Itoa(r.timeout),
 		"-or",
 		"-ot",
+	}
+	if r.severities != "" {
+		args = append(args, "-severity", r.severities)
 	}
 	if r.protocol != "" && r.protocol != "auto" {
 		args = append(args, "-pt", r.protocol)
