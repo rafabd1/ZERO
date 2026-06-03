@@ -64,6 +64,10 @@ Use `--nuclei-tech-filter` to run Nuclei only on services where `httpx`, Webanal
 
 Use `--nuclei-force` when you provide an explicit template/tag policy and do not want Nuclei selection derived from passive CVE matches.
 
+Use `--nuclei-target-source` when the template should not run against alive HTTP URLs. The default is `http-services`. Use `subdomains` for DNS, takeover, or hostname-oriented templates.
+
+Use `--nuclei-protocol` to control Nuclei protocol selection. The default is `http`. Use `dns` for DNS templates, or `auto` to omit `-pt` and let Nuclei infer protocols from the selected templates.
+
 Use `--disable-passive-fingerprint-reports` when the campaign should emit only Nuclei-confirmed findings.
 
 ## Webanalyze Templates
@@ -141,6 +145,11 @@ Use Nuclei for active validation, not broad discovery, unless that is the explic
 
 `--nuclei-template` is repeatable. When paired with `--nuclei-tech-filter`, Zero first selects only services whose latest fingerprint/title/server/banner/technology observations match the filter, then runs the configured Nuclei templates on that reduced target set.
 
+Nuclei templates do not need to be CVE templates. Exposure, misconfiguration, takeover, DNS, SSL, and product-specific safe validation templates are supported. Choose the matching target source:
+
+- `http-services`: alive HTTP URLs from `zero_http_services`; supports technology filtering.
+- `subdomains`: scoped active FQDNs from `zero_subdomains`; intended for DNS/hostname templates and does not support technology filtering.
+
 Minimal HTTP template shape:
 
 ```yaml
@@ -184,6 +193,27 @@ Keep templates safe and bounded:
 - avoid state-changing requests unless the campaign explicitly requires them;
 - make matchers specific enough to avoid generic 200 responses;
 - set `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, and `--nuclei-retries` explicitly for broad campaigns.
+
+Minimal DNS template shape:
+
+```yaml
+id: example-dangling-cname
+
+info:
+  name: Example Dangling DNS Check
+  author: zero
+  severity: medium
+  tags: dns,takeover,exposure
+
+dns:
+  - name: "{{FQDN}}"
+    type: CNAME
+
+    matchers:
+      - type: word
+        words:
+          - "example-decommissioned-provider.net"
+```
 
 ## Scenario Examples
 
@@ -256,6 +286,37 @@ docker compose run --rm zero run schedule \
   --webanalyze-probe-path /admin/ \
   --skip-cves \
   --skip-nuclei
+```
+
+### DNS or Dangling-Record Campaign
+
+Use this for templates that should run against scoped hostnames instead of alive HTTP URLs:
+
+```bash
+docker compose run --rm zero run schedule \
+  --all-programs \
+  --campaign-parallelism 8 \
+  --campaign-limit 100 \
+  --name "dangling-dns-stage" \
+  --skip-sync \
+  --skip-enum \
+  --skip-probe \
+  --skip-enrich \
+  --skip-cves \
+  --nuclei-force \
+  --nuclei-target-source subdomains \
+  --nuclei-protocol dns \
+  --nuclei-template /home/zero/custom-assets/dangling-dns.yaml \
+  --nuclei-rate-limit 50 \
+  --nuclei-concurrency 10 \
+  --nuclei-timeout 8 \
+  --nuclei-retries 1
+```
+
+If a template mixes protocols or should select protocol internally, use:
+
+```bash
+--nuclei-protocol auto
 ```
 
 Because this uses custom fingerprinting, Zero can emit potential/unconfirmed fingerprint reports. Add `--disable-passive-fingerprint-reports` if you only want database observations.

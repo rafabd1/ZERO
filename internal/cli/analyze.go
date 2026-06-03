@@ -16,6 +16,8 @@ func newAnalyzeCommand() *cobra.Command {
 	var nucleiTemplatePaths []string
 	var nucleiTechFilter string
 	var nucleiTechMaxAge time.Duration
+	var nucleiTargetSource string
+	var nucleiProtocol string
 	var nucleiTags string
 	var nucleiSeverities string
 	var nucleiHeaders []string
@@ -90,7 +92,7 @@ func newAnalyzeCommand() *cobra.Command {
 	}
 	nuclei := &cobra.Command{
 		Use:   "nuclei",
-		Short: "Run optimized Nuclei validation against alive HTTP services.",
+		Short: "Run optimized Nuclei validation against configurable target sources.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext()
 			cfg := loadConfig()
@@ -106,6 +108,8 @@ func newAnalyzeCommand() *cobra.Command {
 			}
 			tags := firstNonEmpty(nucleiTags, cfg.Tools.NucleiTags)
 			severities := firstNonEmpty(nucleiSeverities, cfg.Tools.NucleiSeverities)
+			targetSource := firstNonEmpty(nucleiTargetSource, cfg.Tools.NucleiTargetSource)
+			protocol := firstNonEmpty(nucleiProtocol, cfg.Tools.NucleiProtocol)
 			rate := firstPositive(nucleiRate, cfg.Tools.NucleiRate)
 			concurrency := firstPositive(nucleiConcurrency, cfg.Tools.NucleiC)
 			bulkSize := firstPositive(nucleiBulkSize, cfg.Tools.NucleiBulkSize)
@@ -151,6 +155,7 @@ func newAnalyzeCommand() *cobra.Command {
 				templateIDs = strings.Join(ids, ",")
 			}
 			runner := validate.NewNucleiRunner(repo, cfg.Tools.NucleiBin).
+				WithTargeting(targetSource, protocol).
 				WithPolicy(tags, severities, templateIDs, rate, concurrency, bulkSize).
 				WithRequestProfile(headers, proxy, scanStrategy, maxHostError).
 				WithTechFilter(nucleiTechFilter, nucleiTechMaxAge).
@@ -175,6 +180,8 @@ func newAnalyzeCommand() *cobra.Command {
 				"template_paths":    nucleiTemplatePaths,
 				"tech_filter":       nucleiTechFilter,
 				"tech_max_age":      nucleiTechMaxAge.String(),
+				"target_source":     targetSource,
+				"protocol":          protocol,
 				"cve_min_year":      cfg.Intel.CVEMinYear,
 				"tags":              tags,
 				"severities":        severities,
@@ -215,6 +222,8 @@ func newAnalyzeCommand() *cobra.Command {
 	nuclei.Flags().StringArrayVar(&nucleiTemplatePaths, "template-path", nil, "run Nuclei template file/directory path; repeatable")
 	nuclei.Flags().StringVar(&nucleiTechFilter, "tech-filter", "", "limit Nuclei targets to services with matching fingerprint technology/title/server text")
 	nuclei.Flags().DurationVar(&nucleiTechMaxAge, "tech-max-age", 0, "with --tech-filter, only accept fingerprints reobserved within this duration, for example 2h")
+	nuclei.Flags().StringVar(&nucleiTargetSource, "target-source", "", "Nuclei target source: http-services or subdomains")
+	nuclei.Flags().StringVar(&nucleiProtocol, "protocol", "", "Nuclei protocol type, for example http, dns, ssl, tcp, or auto")
 	nuclei.Flags().StringVar(&nucleiTags, "tags", "", "override Nuclei tags for this run")
 	nuclei.Flags().StringVar(&nucleiSeverities, "severity", "", "override Nuclei severities for this run")
 	nuclei.Flags().StringArrayVar(&nucleiHeaders, "header", nil, "override Nuclei request header for this run, header:value; repeatable")

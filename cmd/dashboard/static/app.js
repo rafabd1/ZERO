@@ -423,7 +423,7 @@ function renderCampaignFindings(findings) {
           <div class="mini-row">
             <div>
               <strong>${escapeHTML(finding.program_handle || shortID(finding.program_id) || "unknown")}</strong>
-              <small>${escapeHTML(firstNonEmpty(finding.service_url, evidence.url, evidence.technology_name, finding.vulnerability_id, shortID(finding.id)))}</small>
+                <small>${escapeHTML(findingTargetLabel(finding))}</small>
             </div>
             <div>${severityPill(finding.severity)}<small>${escapeHTML(validation)}</small></div>
           </div>
@@ -514,7 +514,7 @@ function renderFindingDetail(finding) {
   const validation = finding.nuclei_result_id
     ? "confirmed by Nuclei"
     : evidence.nuclei_validation_reason || evidence.nuclei_validation || "passive/unconfirmed";
-  const targetURL = firstNonEmpty(finding.service_url, evidence.url, evidence.matched_at, evidence.target, "-");
+  const targetURL = findingTargetLabel(finding);
   const targetMeta = [
     finding.service_host,
     finding.service_status_code ? `HTTP ${finding.service_status_code}` : "",
@@ -554,6 +554,23 @@ function renderFindingDetail(finding) {
       <pre class="json-box">${escapeHTML(JSON.stringify(evidence, null, 2))}</pre>
     </div>
   `;
+}
+
+function findingTargetLabel(finding) {
+  const evidence = finding.evidence || {};
+  const target = evidence.target && typeof evidence.target === "object" ? evidence.target : {};
+  return firstNonEmpty(
+    finding.service_url,
+    evidence.url,
+    evidence.matched_at,
+    evidence.target_input,
+    target.input,
+    target.source && target.id ? `${target.source}:${shortID(target.id)}` : "",
+    evidence.technology_name,
+    finding.vulnerability_id,
+    shortID(finding.id),
+    "-"
+  );
 }
 
 function clearFindingDetail() {

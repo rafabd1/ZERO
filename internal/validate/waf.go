@@ -58,7 +58,7 @@ func startWAFDiagnostic(ctx context.Context, targets []db.NucleiTarget, headers 
 		if len(diag.SampledURLPreview) >= 3 {
 			break
 		}
-		diag.SampledURLPreview = append(diag.SampledURLPreview, target.URL)
+		diag.SampledURLPreview = append(diag.SampledURLPreview, target.Input)
 	}
 	if len(sample) == 0 {
 		diag.Reason = "no_sample_targets"
@@ -116,7 +116,7 @@ func sampleWAFProbeTargets(targets []db.NucleiTarget, sampleSize int) []db.Nucle
 	out := []db.NucleiTarget{}
 	seenHosts := map[string]struct{}{}
 	for _, target := range targets {
-		host := hostKey(target.URL)
+		host := hostKey(target.Input)
 		if host == "" {
 			continue
 		}
@@ -156,7 +156,7 @@ func wafHTTPClient(timeout time.Duration) *http.Client {
 func probeWAFSample(ctx context.Context, client *http.Client, sample []db.NucleiTarget, headers []string) wafProbeResult {
 	result := wafProbeResult{indicators: map[string]struct{}{}}
 	for _, target := range sample {
-		blocked, wafLike, indicators, err := probeWAFURL(ctx, client, target.URL, headers)
+		blocked, wafLike, indicators, err := probeWAFURL(ctx, client, target.Input, headers)
 		if err != nil {
 			result.errors++
 			continue

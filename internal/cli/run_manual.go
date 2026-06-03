@@ -51,6 +51,8 @@ type manualRunOptions struct {
 	NucleiTemplates                  []string
 	NucleiTechFilter                 string
 	NucleiTechMaxAge                 string
+	NucleiTargetSource               string
+	NucleiProtocol                   string
 	NucleiTags                       string
 	NucleiSeverity                   string
 	NucleiHeaders                    []string
@@ -177,6 +179,8 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().StringArrayVar(&opts.NucleiTemplates, "nuclei-template", nil, "custom Nuclei template file/directory path for this run only; repeatable")
 	cmd.Flags().StringVar(&opts.NucleiTechFilter, "nuclei-tech-filter", "", "limit Nuclei targets to services with matching fingerprint technology/title/server text")
 	cmd.Flags().StringVar(&opts.NucleiTechMaxAge, "nuclei-tech-max-age", "", "with --nuclei-tech-filter, only accept fingerprints reobserved within this duration, for example 2h")
+	cmd.Flags().StringVar(&opts.NucleiTargetSource, "nuclei-target-source", "", "Nuclei target source for this run: http-services or subdomains")
+	cmd.Flags().StringVar(&opts.NucleiProtocol, "nuclei-protocol", "", "Nuclei protocol type for this run, for example http, dns, ssl, tcp, or auto")
 	cmd.Flags().StringVar(&opts.NucleiTags, "nuclei-tags", "", "custom Nuclei tags for this run only")
 	cmd.Flags().StringVar(&opts.NucleiSeverity, "nuclei-severity", "", "custom Nuclei severities for this run only")
 	cmd.Flags().StringArrayVar(&opts.NucleiHeaders, "nuclei-header", nil, "custom Nuclei request header for this run only, header:value; repeatable")
@@ -286,6 +290,8 @@ func runManualPipelineWithProgress(parent *cobra.Command, opts manualRunOptions,
 		if techMaxAge != "" {
 			step = append(step, "--tech-max-age", techMaxAge)
 		}
+		step = appendStringFlag(step, "--target-source", opts.NucleiTargetSource)
+		step = appendStringFlag(step, "--protocol", opts.NucleiProtocol)
 		if opts.NucleiTags != "" {
 			step = append(step, "--tags", opts.NucleiTags)
 		}

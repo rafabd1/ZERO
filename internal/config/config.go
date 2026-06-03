@@ -93,6 +93,8 @@ type ToolConfig struct {
 	NucleiTags              string
 	NucleiSeverities        string
 	NucleiTemplateIDs       string
+	NucleiTargetSource      string
+	NucleiProtocol          string
 	NucleiHeaders           string
 	NucleiProxy             string
 	NucleiScanStrategy      string
@@ -197,6 +199,8 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_tags", "cve")
 	v.SetDefault("tools.nuclei_severities", "medium,high,critical")
 	v.SetDefault("tools.nuclei_template_ids", "")
+	v.SetDefault("tools.nuclei_target_source", "http-services")
+	v.SetDefault("tools.nuclei_protocol", "http")
 	v.SetDefault("tools.nuclei_headers", defaultNucleiHeaders())
 	v.SetDefault("tools.nuclei_proxy", "")
 	v.SetDefault("tools.nuclei_scan_strategy", "")
@@ -290,6 +294,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.nuclei_tags", "ZERO_NUCLEI_TAGS")
 	_ = v.BindEnv("tools.nuclei_severities", "ZERO_NUCLEI_SEVERITIES")
 	_ = v.BindEnv("tools.nuclei_template_ids", "ZERO_NUCLEI_TEMPLATE_IDS")
+	_ = v.BindEnv("tools.nuclei_target_source", "ZERO_NUCLEI_TARGET_SOURCE")
+	_ = v.BindEnv("tools.nuclei_protocol", "ZERO_NUCLEI_PROTOCOL")
 	_ = v.BindEnv("tools.nuclei_headers", "ZERO_NUCLEI_HEADERS")
 	_ = v.BindEnv("tools.nuclei_proxy", "ZERO_NUCLEI_PROXY")
 	_ = v.BindEnv("tools.nuclei_scan_strategy", "ZERO_NUCLEI_SCAN_STRATEGY")
@@ -398,6 +404,8 @@ func Load() (Config, error) {
 			NucleiTags:              v.GetString("tools.nuclei_tags"),
 			NucleiSeverities:        v.GetString("tools.nuclei_severities"),
 			NucleiTemplateIDs:       v.GetString("tools.nuclei_template_ids"),
+			NucleiTargetSource:      v.GetString("tools.nuclei_target_source"),
+			NucleiProtocol:          v.GetString("tools.nuclei_protocol"),
 			NucleiHeaders:           v.GetString("tools.nuclei_headers"),
 			NucleiProxy:             v.GetString("tools.nuclei_proxy"),
 			NucleiScanStrategy:      v.GetString("tools.nuclei_scan_strategy"),

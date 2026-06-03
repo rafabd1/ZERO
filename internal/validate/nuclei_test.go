@@ -104,10 +104,35 @@ func TestBuildArgsIncludesRequestProfile(t *testing.T) {
 		"-p\nhttp://127.0.0.1:8080",
 		"-ss\nhost-spray",
 		"-mhe\n42",
+		"-pt\nhttp",
 	} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("args missing %q in:\n%s", want, args)
 		}
+	}
+}
+
+func TestBuildArgsCanOmitProtocolForAutoTemplates(t *testing.T) {
+	runner := NewNucleiRunner(nil, "nuclei").WithTargeting("subdomains", "auto")
+	args := strings.Join(runner.buildArgs(), "\n")
+	if strings.Contains(args, "-pt\n") {
+		t.Fatalf("auto protocol should omit -pt in:\n%s", args)
+	}
+}
+
+func TestTargetIndexMatchesRawSubdomainInput(t *testing.T) {
+	targets := []db.NucleiTarget{{
+		ProgramID:    "program-1",
+		TargetID:     "00000000-0000-0000-0000-000000000001",
+		TargetSource: "subdomains",
+		Input:        "dangling.example.com",
+	}}
+	target, ok := newTargetIndex(targets).match("dangling.example.com")
+	if !ok {
+		t.Fatal("raw hostname did not match target")
+	}
+	if target.TargetSource != "subdomains" {
+		t.Fatalf("TargetSource = %q", target.TargetSource)
 	}
 }
 
@@ -154,7 +179,7 @@ func TestWAFDiagnosticDetectsPostScanBlockingIncrease(t *testing.T) {
 	}))
 	defer server.Close()
 
-	targets := []db.NucleiTarget{{URL: server.URL}}
+	targets := []db.NucleiTarget{{Input: server.URL}}
 	baseline := startWAFDiagnostic(context.Background(), targets, []string{"User-Agent: zero"}, 1, 2)
 	diag := finishWAFDiagnostic(context.Background(), baseline, nil, 0)
 

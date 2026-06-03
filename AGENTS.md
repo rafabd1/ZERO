@@ -9,7 +9,7 @@ Zero is a Go-based monitoring pipeline for authorized bug bounty and attack-surf
 Keep changes aligned with that purpose:
 
 - Scope safety is non-negotiable. Enumeration and validation must stay tied to in-scope, bounty-eligible assets.
-- Custom campaigns are first-class. Prefer options that let operators run targeted fingerprinting, CVE validation, and Nuclei templates without changing global defaults.
+- Custom campaigns are first-class. Prefer options that let operators run targeted fingerprinting, CVE validation, exposure checks, DNS/takeover checks, and other Nuclei templates without changing global defaults.
 - Postgres/Supabase is the source of truth for programs, scope assets, subdomains, HTTP services, technologies, findings, reports, scan requests, and campaigns.
 - Nuclei is an active validator. Passive CVE matches are prioritization/intelligence unless active evidence confirms them.
 
@@ -39,6 +39,8 @@ Custom campaigns can skip parts of that path:
 - `--webanalyze-probe-path` fingerprints additional relative paths such as `/admin/`, `/console/`, or `/api/version` on each alive service.
 - `--nuclei-tech-filter` should gate focused active validation to assets whose fingerprint/title/server/banner matches the intended technology.
 - `--nuclei-tech-max-age` is mainly for scans that skip fingerprinting and intentionally use existing database observations.
+- `--nuclei-target-source` selects what Nuclei receives. Use `http-services` for alive HTTP URLs and `subdomains` for scoped hostnames/DNS templates.
+- `--nuclei-protocol` controls Nuclei `-pt`; use `http`, `dns`, or `auto` depending on the template family.
 - `--disable-passive-fingerprint-reports` should be used when a custom campaign must report only Nuclei-confirmed findings.
 
 Default/due scans use `ZERO_TARGET_PARALLELISM`. Custom campaigns use their own campaign parallelism and can run independently.
@@ -48,7 +50,7 @@ Before scheduling a broad custom campaign:
 - Check whether recent alive inventory exists; prefer `--reuse-active-services` when it does.
 - Stage expensive campaigns with `--campaign-limit` before running across all programs.
 - Remember that each service expands to `base URL + every --webanalyze-probe-path`; `--webanalyze-batch-size` counts expanded URLs, not base services.
-- Keep repeatable custom Nuclei templates gated with `--nuclei-tech-filter` unless the templates are safe and specific enough to run on every active service.
+- Keep repeatable custom HTTP Nuclei templates gated with `--nuclei-tech-filter` unless the templates are safe and specific enough to run on every active service. DNS/subdomain templates should instead use the right `--nuclei-target-source` and staged `--campaign-limit`.
 - Ensure custom files referenced by queued campaigns are available in the worker container under `/home/zero/custom-assets`.
 
 For detailed recipes and template examples, read `docs/CUSTOM_CAMPAIGNS.md`.

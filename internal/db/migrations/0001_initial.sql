@@ -288,6 +288,12 @@ CREATE INDEX IF NOT EXISTS idx_zero_nuclei_results_cves
 	ON zero_nuclei_results USING gin(cves);
 CREATE INDEX IF NOT EXISTS idx_zero_nuclei_results_tags
 	ON zero_nuclei_results USING gin(tags);
+ALTER TABLE zero_nuclei_results
+	ADD COLUMN IF NOT EXISTS target_source text NOT NULL DEFAULT 'http-services';
+ALTER TABLE zero_nuclei_results
+	ADD COLUMN IF NOT EXISTS target_id uuid;
+CREATE INDEX IF NOT EXISTS idx_zero_nuclei_results_target
+	ON zero_nuclei_results(program_id, target_source, target_id);
 
 CREATE TABLE IF NOT EXISTS zero_candidate_findings (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -7,7 +7,33 @@ import (
 	"strings"
 )
 
-func (r *Repository) ListNucleiTargets(ctx context.Context, programID string, techFilter string, techMaxAgeSeconds int64) ([]NucleiTarget, error) {
+const (
+	NucleiTargetSourceHTTPServices = "http-services"
+	NucleiTargetSourceSubdomains   = "subdomains"
+)
+
+func NormalizeNucleiTargetSource(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "http", "http-service", "http-services", "services", "urls":
+		return NucleiTargetSourceHTTPServices
+	case "subdomain", "subdomains", "dns", "hosts", "hostnames":
+		return NucleiTargetSourceSubdomains
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func (r *Repository) ListNucleiTargets(ctx context.Context, programID string, techFilter string, techMaxAgeSeconds int64, targetSource string) ([]NucleiTarget, error) {
+	targetSource = NormalizeNucleiTargetSource(targetSource)
+	if targetSource == NucleiTargetSourceSubdomains {
+		if len(nucleiTechFilters(techFilter)) > 0 {
+			return nil, fmt.Errorf("nuclei tech filter is only supported with target source %q", NucleiTargetSourceHTTPServices)
+		}
+		return r.listNucleiSubdomainTargets(ctx, programID)
+	}
+	if targetSource != NucleiTargetSourceHTTPServices {
+		return nil, fmt.Errorf("unsupported nuclei target source %q", targetSource)
+	}
 	filters := nucleiTechFilters(techFilter)
 	if len(filters) > 0 {
 		return r.listNucleiTargetsByTechnology(ctx, programID, filters, techMaxAgeSeconds)
@@ -27,9 +53,11 @@ func (r *Repository) ListNucleiTargets(ctx context.Context, programID string, te
 	var targets []NucleiTarget
 	for rows.Next() {
 		var target NucleiTarget
-		if err := rows.Scan(&target.HTTPServiceID, &target.ProgramID, &target.URL); err != nil {
+		if err := rows.Scan(&target.HTTPServiceID, &target.ProgramID, &target.Input); err != nil {
 			return nil, err
 		}
+		target.TargetID = target.HTTPServiceID
+		target.TargetSource = NucleiTargetSourceHTTPServices
 		targets = append(targets, target)
 	}
 	return targets, rows.Err()
@@ -78,9 +106,36 @@ func (r *Repository) listNucleiTargetsByTechnology(ctx context.Context, programI
 	var targets []NucleiTarget
 	for rows.Next() {
 		var target NucleiTarget
-		if err := rows.Scan(&target.HTTPServiceID, &target.ProgramID, &target.URL); err != nil {
+		if err := rows.Scan(&target.HTTPServiceID, &target.ProgramID, &target.Input); err != nil {
 			return nil, err
 		}
+		target.TargetID = target.HTTPServiceID
+		target.TargetSource = NucleiTargetSourceHTTPServices
+		targets = append(targets, target)
+	}
+	return targets, rows.Err()
+}
+
+func (r *Repository) listNucleiSubdomainTargets(ctx context.Context, programID string) ([]NucleiTarget, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, program_id, fqdn
+		FROM zero_subdomains
+		WHERE active = true
+		  AND ($1 = '' OR program_id::text = $1)
+		ORDER BY program_id, fqdn
+	`, programID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var targets []NucleiTarget
+	for rows.Next() {
+		var target NucleiTarget
+		if err := rows.Scan(&target.TargetID, &target.ProgramID, &target.Input); err != nil {
+			return nil, err
+		}
+		target.TargetSource = NucleiTargetSourceSubdomains
 		targets = append(targets, target)
 	}
 	return targets, rows.Err()
@@ -122,13 +177,15 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 	var inserted bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO zero_nuclei_results(
-			program_id, http_service_id, scan_run_id, template_id, template_path, matched_at,
+			program_id, http_service_id, scan_run_id, target_source, target_id, template_id, template_path, matched_at,
 			severity, cves, tags, type, extractor_name, evidence_hash, raw
 		)
-		VALUES ($1,$2,NULLIF($3, '')::uuid,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+		VALUES ($1,$2,NULLIF($3, '')::uuid,$4,NULLIF($5, '')::uuid,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
 		ON CONFLICT(program_id, template_id, matched_at, evidence_hash) DO UPDATE SET
 			http_service_id = COALESCE(excluded.http_service_id, zero_nuclei_results.http_service_id),
 			scan_run_id = COALESCE(excluded.scan_run_id, zero_nuclei_results.scan_run_id),
+			target_source = excluded.target_source,
+			target_id = excluded.target_id,
 			severity = excluded.severity,
 			cves = excluded.cves,
 			tags = excluded.tags,
@@ -137,7 +194,7 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 			raw = excluded.raw,
 			last_seen_at = now()
 		RETURNING id, (xmax = 0) AS inserted
-	`, result.ProgramID, nullString(result.HTTPServiceID), result.ScanRunID, result.TemplateID, result.TemplatePath, result.MatchedAt,
+	`, result.ProgramID, nullString(result.HTTPServiceID), result.ScanRunID, normalizeNucleiResultTargetSource(result.TargetSource), result.TargetID, result.TemplateID, result.TemplatePath, result.MatchedAt,
 		result.Severity, result.CVEs, result.Tags, result.Type, result.ExtractorName, result.EvidenceHash, string(result.Raw)).Scan(&id, &inserted)
 	if err != nil {
 		return "", false, fmt.Errorf("upsert nuclei result: %w", err)
@@ -156,6 +213,7 @@ func (r *Repository) UpsertNucleiResult(ctx context.Context, result NucleiResult
 				"severity":    result.Severity,
 				"cves":        result.CVEs,
 				"tags":        result.Tags,
+				"target":      normalizeNucleiResultTargetSource(result.TargetSource),
 			},
 		}); err != nil {
 			return "", false, err
@@ -173,6 +231,12 @@ func (r *Repository) UpsertCandidateFindingFromNuclei(ctx context.Context, nucle
 		"cves":        result.CVEs,
 		"tags":        result.Tags,
 		"nuclei_hash": result.EvidenceHash,
+		"target": map[string]any{
+			"source": normalizeNucleiResultTargetSource(result.TargetSource),
+			"id":     result.TargetID,
+		},
+		"target_source": normalizeNucleiResultTargetSource(result.TargetSource),
+		"target_id":     result.TargetID,
 	})
 	confidence := nucleiConfidence(result.Severity)
 	evidenceHash := "nuclei:" + result.EvidenceHash
@@ -210,12 +274,21 @@ func (r *Repository) UpsertCandidateFindingFromNuclei(ctx context.Context, nucle
 				"severity":         result.Severity,
 				"confidence":       confidence,
 				"cves":             result.CVEs,
+				"target":           normalizeNucleiResultTargetSource(result.TargetSource),
 			},
 		}); err != nil {
 			return "", false, err
 		}
 	}
 	return id, inserted, nil
+}
+
+func normalizeNucleiResultTargetSource(value string) string {
+	value = NormalizeNucleiTargetSource(value)
+	if value == "" {
+		return NucleiTargetSourceHTTPServices
+	}
+	return value
 }
 
 func nucleiConfidence(severity string) int {

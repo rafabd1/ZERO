@@ -186,13 +186,17 @@ type TechnologyVulnerabilityMatch struct {
 type NucleiTarget struct {
 	ProgramID     string
 	HTTPServiceID string
-	URL           string
+	TargetID      string
+	TargetSource  string
+	Input         string
 }
 
 type NucleiResult struct {
 	ProgramID     string
 	HTTPServiceID string
 	ScanRunID     string
+	TargetSource  string
+	TargetID      string
 	TemplateID    string
 	TemplatePath  string
 	MatchedAt     string

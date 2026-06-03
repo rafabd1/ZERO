@@ -18,31 +18,33 @@ import (
 )
 
 type NucleiRunner struct {
-	repo        *db.Repository
-	bin         string
-	tags        string
-	severities  string
-	templateIDs string
-	templates   []string
-	templateDir string
-	techFilter  string
-	techMaxAge  time.Duration
-	headers     []string
-	proxy       string
-	strategy    string
-	maxHostErr  int
-	wafDetect   bool
-	wafSample   int
-	wafTimeout  int
-	rate        int
-	concurrency int
-	bulkSize    int
-	retries     int
-	timeout     int
-	scanRunID   string
-	programID   string
-	limit       int
-	toolTimeout time.Duration
+	repo         *db.Repository
+	bin          string
+	tags         string
+	severities   string
+	templateIDs  string
+	templates    []string
+	templateDir  string
+	techFilter   string
+	techMaxAge   time.Duration
+	targetSource string
+	protocol     string
+	headers      []string
+	proxy        string
+	strategy     string
+	maxHostErr   int
+	wafDetect    bool
+	wafSample    int
+	wafTimeout   int
+	rate         int
+	concurrency  int
+	bulkSize     int
+	retries      int
+	timeout      int
+	scanRunID    string
+	programID    string
+	limit        int
+	toolTimeout  time.Duration
 }
 
 type NucleiResult struct {
@@ -59,19 +61,33 @@ func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
 		bin = "nuclei"
 	}
 	return &NucleiRunner{
-		repo:        repo,
-		bin:         bin,
-		tags:        "cve",
-		severities:  "medium,high,critical",
-		rate:        80,
-		concurrency: 20,
-		bulkSize:    5,
-		retries:     1,
-		timeout:     8,
-		wafDetect:   false,
-		wafSample:   8,
-		wafTimeout:  5,
+		repo:         repo,
+		bin:          bin,
+		tags:         "cve",
+		severities:   "medium,high,critical",
+		targetSource: db.NucleiTargetSourceHTTPServices,
+		protocol:     "http",
+		rate:         80,
+		concurrency:  20,
+		bulkSize:     5,
+		retries:      1,
+		timeout:      8,
+		wafDetect:    false,
+		wafSample:    8,
+		wafTimeout:   5,
 	}
+}
+
+func (r *NucleiRunner) WithTargeting(targetSource, protocol string) *NucleiRunner {
+	targetSource = db.NormalizeNucleiTargetSource(targetSource)
+	if targetSource != "" {
+		r.targetSource = targetSource
+	}
+	protocol = normalizeNucleiProtocol(protocol)
+	if protocol != "" {
+		r.protocol = protocol
+	}
+	return r
 }
 
 func (r *NucleiRunner) WithPolicy(tags, severities, templateIDs string, rate, concurrency, bulkSize int) *NucleiRunner {
@@ -170,7 +186,7 @@ func (r *NucleiRunner) WithScanRunID(scanRunID string) *NucleiRunner {
 }
 
 func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
-	targets, err := r.repo.ListNucleiTargets(ctx, r.programID, r.techFilter, int64(r.techMaxAge.Seconds()))
+	targets, err := r.repo.ListNucleiTargets(ctx, r.programID, r.techFilter, int64(r.techMaxAge.Seconds()), r.targetSource)
 	if err != nil {
 		return NucleiResult{}, err
 	}
@@ -183,13 +199,13 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		return result, nil
 	}
 	var wafBase wafBaseline
-	if r.wafDetect {
+	if r.wafDetect && r.targetSource == db.NucleiTargetSourceHTTPServices {
 		wafBase = startWAFDiagnostic(ctx, targets, r.headers, r.wafSample, r.wafTimeout)
 	}
 
 	var input bytes.Buffer
 	for _, target := range targets {
-		input.WriteString(target.URL)
+		input.WriteString(target.Input)
 		input.WriteByte('\n')
 	}
 
@@ -219,6 +235,8 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		}
 		parsed.ProgramID = target.ProgramID
 		parsed.HTTPServiceID = target.HTTPServiceID
+		parsed.TargetSource = target.TargetSource
+		parsed.TargetID = target.TargetID
 		parsed.ScanRunID = r.scanRunID
 		nucleiID, inserted, err := r.repo.UpsertNucleiResult(ctx, parsed)
 		if err != nil {
@@ -241,7 +259,7 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		result.Skipped = "no matching local Nuclei templates"
 		return result, nil
 	}
-	if r.wafDetect && (err != nil || result.Results == 0) {
+	if r.wafDetect && r.targetSource == db.NucleiTargetSourceHTTPServices && (err != nil || result.Results == 0) {
 		result.WAF = finishWAFDiagnostic(ctx, wafBase, err, result.Results)
 	}
 	return result, err
@@ -274,7 +292,6 @@ func (r *NucleiRunner) buildArgs() []string {
 		"-j",
 		"-duc",
 		"-ni",
-		"-pt", "http",
 		"-severity", r.severities,
 		"-rate-limit", strconv.Itoa(r.rate),
 		"-c", strconv.Itoa(r.concurrency),
@@ -283,6 +300,9 @@ func (r *NucleiRunner) buildArgs() []string {
 		"-timeout", strconv.Itoa(r.timeout),
 		"-or",
 		"-ot",
+	}
+	if r.protocol != "" && r.protocol != "auto" {
+		args = append(args, "-pt", r.protocol)
 	}
 	for _, header := range r.headers {
 		args = append(args, "-H", header)
@@ -297,6 +317,18 @@ func (r *NucleiRunner) buildArgs() []string {
 		args = append(args, "-mhe", strconv.Itoa(r.maxHostErr))
 	}
 	return args
+}
+
+func normalizeNucleiProtocol(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "", "default":
+		return ""
+	case "none", "any", "all":
+		return "auto"
+	default:
+		return value
+	}
 }
 
 func isNoTemplatesError(err error) bool {
@@ -476,15 +508,24 @@ func hashParts(parts ...string) string {
 type targetIndex struct {
 	targets []db.NucleiTarget
 	byHost  map[string][]db.NucleiTarget
+	byInput map[string][]db.NucleiTarget
 }
 
 func newTargetIndex(targets []db.NucleiTarget) targetIndex {
 	idx := targetIndex{
 		targets: targets,
 		byHost:  make(map[string][]db.NucleiTarget),
+		byInput: make(map[string][]db.NucleiTarget),
 	}
 	for _, target := range targets {
-		host := hostOf(target.URL)
+		input := strings.ToLower(strings.TrimSpace(target.Input))
+		if input != "" {
+			idx.byInput[input] = append(idx.byInput[input], target)
+		}
+		host := hostOf(target.Input)
+		if host == "" && !strings.Contains(target.Input, "://") {
+			host = strings.ToLower(strings.TrimSpace(target.Input))
+		}
 		if host != "" {
 			idx.byHost[host] = append(idx.byHost[host], target)
 		}
@@ -493,12 +534,19 @@ func newTargetIndex(targets []db.NucleiTarget) targetIndex {
 }
 
 func (idx targetIndex) match(matchedAt string) (db.NucleiTarget, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(matchedAt))
+	if matches := idx.byInput[normalized]; len(matches) == 1 {
+		return matches[0], true
+	}
 	for _, target := range idx.targets {
-		if matchedAt == target.URL || strings.HasPrefix(matchedAt, strings.TrimRight(target.URL, "/")+"/") {
+		if matchedAt == target.Input || strings.HasPrefix(matchedAt, strings.TrimRight(target.Input, "/")+"/") {
 			return target, true
 		}
 	}
 	host := hostOf(matchedAt)
+	if host == "" && !strings.Contains(matchedAt, "://") {
+		host = strings.ToLower(strings.TrimSpace(matchedAt))
+	}
 	if host == "" {
 		return db.NucleiTarget{}, false
 	}
