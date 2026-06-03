@@ -42,6 +42,14 @@ type ScanRequestRetryPolicy struct {
 	BaseDelay   time.Duration
 }
 
+type ScanRequestProgress struct {
+	Stage   string
+	Current int
+	Total   int
+	Message string
+	Meta    map[string]any
+}
+
 type ScanCampaignCreateResult struct {
 	ID       string
 	Total    int

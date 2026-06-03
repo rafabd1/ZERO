@@ -289,6 +289,7 @@ function renderCampaignDetail(detail) {
   const counts = detail.request_counts || {};
   const findings = Array.isArray(detail.findings) ? detail.findings : [];
   const requests = Array.isArray(detail.recent_requests) ? detail.recent_requests : [];
+  const runningRequests = Array.isArray(detail.running_requests) ? detail.running_requests : [];
   const nuclei = Array.isArray(detail.nuclei_results) ? detail.nuclei_results : [];
   const canCancel = campaign.status === "queued" || campaign.status === "running";
 
@@ -301,12 +302,17 @@ function renderCampaignDetail(detail) {
     <div class="drawer-grid">
       ${detailCard("Status", scanStatusPill(campaign.status), campaign.error || "")}
       ${detailCard("Requests", `${fmt(campaign.succeeded_requests)} succeeded`, `${fmt(campaign.running_requests)} running, ${fmt(campaign.queued_requests)} queued, ${fmt(campaign.failed_requests)} failed`)}
+      ${detailCard("Parallelism", fmt(campaign.parallelism), "campaign configured")}
       ${detailCard("Findings", fmt(findings.length), "new since campaign start")}
       ${detailCard("Nuclei", fmt(nuclei.length), "recent validation results")}
     </div>
     <div class="drawer-section">
       <h4>Request Counts</h4>
       <div class="inline-pills">${renderCountPills(counts)}</div>
+    </div>
+    <div class="drawer-section">
+      <h4>Running Work</h4>
+      ${renderRunningCampaignRequests(runningRequests)}
     </div>
     <div class="drawer-section">
       <h4>Recent Requests</h4>
@@ -337,13 +343,71 @@ function renderCampaignRequests(requests) {
         <div class="mini-row">
           <div>
             <strong>${escapeHTML(request.program_handle || shortID(request.program_id) || "unknown")}</strong>
-            <small>${escapeHTML(request.error || `${request.attempt_count || 0} attempt(s)`)}</small>
+            <small>${escapeHTML(requestProgressSummary(request) || request.error || `${request.attempt_count || 0} attempt(s)`)}</small>
           </div>
-          <div>${scanStatusPill(request.status)}<small>${timeAgo(request.updated_at || request.started_at)}</small></div>
+          <div>${scanStatusPill(request.status)}<small>${timeAgo(request.progress_updated_at || request.locked_at || request.updated_at || request.started_at)}</small></div>
         </div>
       `).join("")}
     </div>
   `;
+}
+
+function renderRunningCampaignRequests(requests) {
+  if (requests.length === 0) {
+    return `<p class="muted">No running child requests.</p>`;
+  }
+  return `
+    <div class="work-list">
+      ${requests.map((request) => {
+        const progress = requestProgressPercent(request);
+        return `
+          <div class="work-row">
+            <div class="work-head">
+              <div>
+                <strong>${escapeHTML(request.program_handle || shortID(request.program_id) || "unknown")}</strong>
+                <small>${escapeHTML(requestProgressSummary(request))}</small>
+              </div>
+              <div>
+                ${scanStatusPill(request.status)}
+                <small>${timeAgo(request.progress_updated_at || request.locked_at || request.updated_at || request.started_at)}</small>
+              </div>
+            </div>
+            <div class="thin-progress"><span style="width: ${progress}%"></span></div>
+            <div class="work-meta">
+              <span>${fmt(request.active_http_services)} services</span>
+              <span>${fmt(request.estimated_webanalyze_urls)} expanded URLs</span>
+              <span>${fmt(request.estimated_webanalyze_batches)} est. batches</span>
+              <span>started ${timeAgo(request.started_at)}</span>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function requestProgressSummary(request) {
+  const stage = firstNonEmpty(request.progress_stage, request.progress_message, "queued work");
+  const current = Number(request.progress_current || 0);
+  const total = Number(request.progress_total || 0);
+  const meta = request.progress_meta || {};
+  if (total > 0) {
+    return `${stage}: ${fmt(current)}/${fmt(total)}`;
+  }
+  if (Number(request.estimated_webanalyze_urls || 0) > 0) {
+    return `${stage}: ${fmt(request.estimated_webanalyze_urls)} estimated Webanalyze URLs`;
+  }
+  if (meta.total_batches) {
+    return `${stage}: batch ${fmt(meta.batch)}/${fmt(meta.total_batches)}`;
+  }
+  return stage;
+}
+
+function requestProgressPercent(request) {
+  const current = Number(request.progress_current || 0);
+  const total = Number(request.progress_total || 0);
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 }
 
 function renderCampaignFindings(findings) {

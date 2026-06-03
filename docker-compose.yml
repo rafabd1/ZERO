@@ -1,8 +1,29 @@
 services:
+  dbpool:
+    build:
+      context: .
+      dockerfile: Dockerfile.dbpool
+    env_file:
+      - .env
+    environment:
+      ZERO_DBPOOL_LISTEN_ADDR: "0.0.0.0"
+      ZERO_DBPOOL_LISTEN_PORT: "6432"
+      ZERO_DBPOOL_DEFAULT_POOL_SIZE: "${ZERO_DBPOOL_DEFAULT_POOL_SIZE:-8}"
+      ZERO_DBPOOL_RESERVE_POOL_SIZE: "${ZERO_DBPOOL_RESERVE_POOL_SIZE:-2}"
+      ZERO_DBPOOL_MAX_CLIENT_CONN: "${ZERO_DBPOOL_MAX_CLIENT_CONN:-500}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432", "-U", "zero", "-d", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   zero:
     build: .
     env_file:
       - .env
+    environment:
+      ZERO_DATABASE_URL: "${ZERO_DATABASE_POOL_URL:-postgres://zero@dbpool:6432/postgres?sslmode=disable&default_query_exec_mode=simple_protocol}"
     dns:
       - 1.1.1.1
       - 8.8.8.8
@@ -10,6 +31,9 @@ services:
       - nuclei-templates:/home/zero/nuclei-templates
       - ./custom-assets:/home/zero/custom-assets:ro
     command: ["worker"]
+    depends_on:
+      dbpool:
+        condition: service_healthy
     restart: unless-stopped
 
   api:
@@ -21,12 +45,16 @@ services:
       - 8.8.8.8
     environment:
       ZERO_API_ADDR: "0.0.0.0:8080"
+      ZERO_DATABASE_URL: "${ZERO_DATABASE_POOL_URL:-postgres://zero@dbpool:6432/postgres?sslmode=disable&default_query_exec_mode=simple_protocol}"
     command: ["api"]
     volumes:
       - nuclei-templates:/home/zero/nuclei-templates
       - ./custom-assets:/home/zero/custom-assets:ro
     ports:
       - "127.0.0.1:8080:8080"
+    depends_on:
+      dbpool:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
@@ -59,10 +87,15 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      ZERO_DATABASE_URL: "${ZERO_DATABASE_POOL_URL:-postgres://zero@dbpool:6432/postgres?sslmode=disable&default_query_exec_mode=simple_protocol}"
     dns:
       - 1.1.1.1
       - 8.8.8.8
     command: ["migrate", "up"]
+    depends_on:
+      dbpool:
+        condition: service_healthy
     profiles:
       - tools
 

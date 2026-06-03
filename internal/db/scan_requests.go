@@ -177,7 +177,13 @@ func (r *Repository) ClaimDueScanRequests(ctx context.Context, limit int) ([]Sca
 				started_at = now(),
 				locked_at = now(),
 				updated_at = now(),
-				error = ''
+				error = '',
+				progress_stage = '',
+				progress_current = 0,
+				progress_total = 0,
+				progress_message = '',
+				progress_meta = '{}'::jsonb,
+				progress_updated_at = NULL
 			FROM due
 			WHERE r.id = due.id
 			RETURNING r.id, r.program_id, r.campaign_id, r.name, r.params
@@ -314,6 +320,100 @@ func (r *Repository) RecoverRunningScanRequests(ctx context.Context) (int, error
 		return 0, fmt.Errorf("recover running scan requests: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+func (r *Repository) RecoverStaleScanRequests(ctx context.Context, staleAfter time.Duration) (int, error) {
+	if staleAfter <= 0 {
+		staleAfter = 30 * time.Minute
+	}
+	staleSeconds := int64(staleAfter.Seconds())
+	if staleSeconds < 60 {
+		staleSeconds = 60
+	}
+	tag, err := r.pool.Exec(ctx, `
+		WITH stale AS (
+			SELECT id
+			FROM zero_scan_requests
+			WHERE status = 'running'
+			  AND started_at < now() - make_interval(secs => $1)
+			  AND (
+				locked_at IS NULL
+				OR locked_at < now() - make_interval(secs => $1)
+			  )
+		)
+		UPDATE zero_scan_requests r
+		SET status = 'queued',
+			run_after = now(),
+			locked_at = NULL,
+			error = CASE
+				WHEN r.error = '' THEN 'requeued after stale scan request heartbeat'
+				ELSE r.error
+			END,
+			updated_at = now()
+		WHERE r.id IN (SELECT id FROM stale)
+	`, staleSeconds)
+	if err != nil {
+		return 0, fmt.Errorf("recover stale scan requests: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func (r *Repository) TouchScanRequest(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE zero_scan_requests
+		SET locked_at = now(),
+			updated_at = now()
+		WHERE id = $1::uuid
+		  AND status = 'running'
+	`, id)
+	if err != nil {
+		return fmt.Errorf("touch scan request: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) UpdateScanRequestProgress(ctx context.Context, id string, progress ScanRequestProgress) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	if progress.Current < 0 {
+		progress.Current = 0
+	}
+	if progress.Total < 0 {
+		progress.Total = 0
+	}
+	if progress.Total > 0 && progress.Current > progress.Total {
+		progress.Current = progress.Total
+	}
+	if progress.Meta == nil {
+		progress.Meta = map[string]any{}
+	}
+	rawMeta, err := json.Marshal(progress.Meta)
+	if err != nil {
+		return fmt.Errorf("marshal scan request progress metadata: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `
+		UPDATE zero_scan_requests
+		SET locked_at = now(),
+			updated_at = now(),
+			progress_stage = $2,
+			progress_current = $3,
+			progress_total = $4,
+			progress_message = $5,
+			progress_meta = $6::jsonb,
+			progress_updated_at = now()
+		WHERE id = $1::uuid
+		  AND status = 'running'
+	`, id, strings.TrimSpace(progress.Stage), progress.Current, progress.Total, strings.TrimSpace(progress.Message), string(rawMeta))
+	if err != nil {
+		return fmt.Errorf("update scan request progress: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) RecoverRetryableFailedScanRequests(ctx context.Context, retryPolicy ScanRequestRetryPolicy) (int, error) {
@@ -587,7 +687,11 @@ func (r *Repository) FinishScanRequest(ctx context.Context, id string, runErr er
 			finished_at = now(),
 			locked_at = NULL,
 			error = $3,
-			updated_at = now()
+			updated_at = now(),
+			progress_stage = CASE WHEN $2 = 'succeeded' THEN 'finished' ELSE progress_stage END,
+			progress_current = CASE WHEN $2 = 'succeeded' AND progress_total > 0 THEN progress_total ELSE progress_current END,
+			progress_message = CASE WHEN $2 = 'succeeded' THEN 'finished' ELSE progress_message END,
+			progress_updated_at = now()
 		WHERE id = $1::uuid
 		  AND status <> 'canceled'
 	`, id, status, errorText)

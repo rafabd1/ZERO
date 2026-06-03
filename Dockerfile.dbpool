@@ -1,0 +1,17 @@
+FROM golang:1.24-alpine AS build
+
+WORKDIR /src
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY cmd/dbpool ./cmd/dbpool
+RUN go build -trimpath -ldflags="-s -w" -o /out/zero-dbpool ./cmd/dbpool
+
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates pgbouncer postgresql-client tini && \
+    adduser -D -h /home/zero zero
+
+COPY --from=build /out/zero-dbpool /usr/local/bin/zero-dbpool
+
+USER zero
+ENTRYPOINT ["tini", "--", "zero-dbpool"]

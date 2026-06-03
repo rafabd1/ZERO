@@ -27,6 +27,7 @@ type WebanalyzeRunner struct {
 	timeout       time.Duration
 	batchSize     int
 	authoritative bool
+	onBatchDone   func(batch, totalBatches, processed, totalTargets, size int)
 }
 
 type WebanalyzeResult struct {
@@ -103,6 +104,11 @@ func (r *WebanalyzeRunner) WithAuthoritative(authoritative bool) *WebanalyzeRunn
 	return r
 }
 
+func (r *WebanalyzeRunner) WithBatchProgress(onBatchDone func(batch, totalBatches, processed, totalTargets, size int)) *WebanalyzeRunner {
+	r.onBatchDone = onBatchDone
+	return r
+}
+
 func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	targets, err := r.repo.ListWebTechTargets(ctx, r.programID, r.limit)
 	if err != nil {
@@ -118,18 +124,24 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	if batchSize <= 0 {
 		batchSize = len(targets)
 	}
+	totalBatches := (len(targets) + batchSize - 1) / batchSize
 	appsPath, cleanup, err := prepareWebanalyzeApps(r.apps)
 	if err != nil {
 		return result, err
 	}
 	defer cleanup()
+	batch := 0
 	for start := 0; start < len(targets); start += batchSize {
 		end := start + batchSize
 		if end > len(targets) {
 			end = len(targets)
 		}
+		batch++
 		if err := r.runBatch(ctx, targets[start:end], appsPath, &result); err != nil {
 			return result, err
+		}
+		if r.onBatchDone != nil {
+			r.onBatchDone(batch, totalBatches, end, len(targets), end-start)
 		}
 	}
 	if r.authoritative && strings.TrimSpace(r.scanRunID) != "" {

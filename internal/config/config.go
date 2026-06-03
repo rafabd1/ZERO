@@ -125,6 +125,8 @@ type WorkerConfig struct {
 	ScanRequestMaxActive      int
 	ScanRequestRetryAttempts  int
 	ScanRequestRetryBaseDelay time.Duration
+	ScanRequestHeartbeat      time.Duration
+	ScanRequestStaleAfter     time.Duration
 }
 
 type IntelConfig struct {
@@ -222,6 +224,8 @@ func Load() (Config, error) {
 	v.SetDefault("worker.scan_request_max_active", 10)
 	v.SetDefault("worker.scan_request_retry_attempts", 4)
 	v.SetDefault("worker.scan_request_retry_base_delay", "2m")
+	v.SetDefault("worker.scan_request_heartbeat", "30s")
+	v.SetDefault("worker.scan_request_stale_after", "30m")
 	v.SetDefault("database.auto_migrate", true)
 	v.SetDefault("database.max_conns", 1)
 	v.SetDefault("database.retries", 6)
@@ -318,6 +322,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("worker.scan_request_max_active", "ZERO_SCAN_REQUEST_MAX_ACTIVE")
 	_ = v.BindEnv("worker.scan_request_retry_attempts", "ZERO_SCAN_REQUEST_RETRY_ATTEMPTS")
 	_ = v.BindEnv("worker.scan_request_retry_base_delay", "ZERO_SCAN_REQUEST_RETRY_BASE_DELAY")
+	_ = v.BindEnv("worker.scan_request_heartbeat", "ZERO_SCAN_REQUEST_HEARTBEAT")
+	_ = v.BindEnv("worker.scan_request_stale_after", "ZERO_SCAN_REQUEST_STALE_AFTER")
 	_ = v.BindEnv("intel.nvd_api_key", "ZERO_NVD_API_KEY")
 	_ = v.BindEnv("intel.tech_aliases_file", "ZERO_TECH_ALIASES_FILE")
 	_ = v.BindEnv("intel.cve_min_year", "ZERO_CVE_MIN_YEAR")
@@ -431,6 +437,8 @@ func Load() (Config, error) {
 			ScanRequestMaxActive:      clampInt(v.GetInt("worker.scan_request_max_active"), 1, 64),
 			ScanRequestRetryAttempts:  clampInt(v.GetInt("worker.scan_request_retry_attempts"), 1, 20),
 			ScanRequestRetryBaseDelay: v.GetDuration("worker.scan_request_retry_base_delay"),
+			ScanRequestHeartbeat:      v.GetDuration("worker.scan_request_heartbeat"),
+			ScanRequestStaleAfter:     v.GetDuration("worker.scan_request_stale_after"),
 		},
 		Intel: IntelConfig{
 			NVDAPIKey:       v.GetString("intel.nvd_api_key"),

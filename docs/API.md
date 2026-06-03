@@ -124,7 +124,9 @@ Campaigns are durable. If the worker restarts, running child requests are requeu
 
 Custom campaign parallelism is independent from `ZERO_TARGET_PARALLELISM`. The worker adds capacity from active campaigns, so two campaigns with `parallelism: 8` can use up to 16 custom scan workers if the host has capacity.
 
-`ZERO_SCAN_REQUEST_MAX_ACTIVE` is a safety ceiling above campaign parallelism. Keep it below the effective database pooler session limit, leaving room for the worker, API, dashboard, and operational commands.
+`ZERO_SCAN_REQUEST_MAX_ACTIVE` is a safety ceiling above campaign parallelism. In Docker, the local `dbpool` PgBouncer sidecar mediates upstream Supabase sessions, so this value can be higher than the upstream pool size while `ZERO_DBPOOL_DEFAULT_POOL_SIZE` remains bounded. Without `dbpool`, keep it below the effective database pooler session limit, leaving room for the worker, API, dashboard, and operational commands.
+
+Campaign detail responses include `running_requests` and per-request progress fields such as `progress_stage`, `progress_current`, `progress_total`, `progress_meta`, `active_http_services`, and `estimated_webanalyze_urls`. These fields are useful for broad custom path-probe campaigns where one program can expand thousands of HTTP services into tens of thousands of Webanalyze URLs.
 
 When a request or campaign runs `httpx` and/or Webanalyze before Nuclei, Zero automatically keeps `NucleiTechFilter` tied to fresh fingerprints from that run. Use `NucleiTechMaxAge` only for requests that skip fingerprinting and intentionally gate Nuclei from existing database observations.
 

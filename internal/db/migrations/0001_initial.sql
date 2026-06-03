@@ -118,6 +118,14 @@ CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_program
 CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_campaign
 	ON zero_scan_requests(campaign_id, status, run_after, created_at);
 
+ALTER TABLE zero_scan_requests
+	ADD COLUMN IF NOT EXISTS progress_stage text NOT NULL DEFAULT '',
+	ADD COLUMN IF NOT EXISTS progress_current integer NOT NULL DEFAULT 0,
+	ADD COLUMN IF NOT EXISTS progress_total integer NOT NULL DEFAULT 0,
+	ADD COLUMN IF NOT EXISTS progress_message text NOT NULL DEFAULT '',
+	ADD COLUMN IF NOT EXISTS progress_meta jsonb NOT NULL DEFAULT '{}'::jsonb,
+	ADD COLUMN IF NOT EXISTS progress_updated_at timestamptz;
+
 CREATE TABLE IF NOT EXISTS zero_scope_assets (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	program_id uuid NOT NULL REFERENCES zero_programs(id) ON DELETE CASCADE,

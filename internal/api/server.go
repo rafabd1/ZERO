@@ -477,7 +477,14 @@ func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 			'attempt_count', r.attempt_count,
 			'started_at', r.started_at,
 			'finished_at', r.finished_at,
+			'locked_at', r.locked_at,
 			'error', r.error,
+			'progress_stage', r.progress_stage,
+			'progress_current', r.progress_current,
+			'progress_total', r.progress_total,
+			'progress_message', r.progress_message,
+			'progress_meta', r.progress_meta,
+			'progress_updated_at', r.progress_updated_at,
 			'params', r.params,
 			'created_at', r.created_at,
 			'updated_at', r.updated_at
@@ -515,6 +522,14 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 			  AND program_id IS NOT NULL
 		), campaign_window AS (
 			SELECT COALESCE(started_at, created_at) AS since
+			FROM campaign
+		), campaign_shape AS (
+			SELECT
+				CASE
+					WHEN jsonb_typeof(params->'WebanalyzeProbePaths') = 'array' THEN jsonb_array_length(params->'WebanalyzeProbePaths')
+					ELSE 0
+				END AS webanalyze_probe_paths,
+				COALESCE(NULLIF((params->>'WebanalyzeBatch')::int, 0), 50) AS webanalyze_batch_size
 			FROM campaign
 		)
 		SELECT jsonb_build_object(
@@ -563,16 +578,77 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 							'attempt_count', r.attempt_count,
 							'started_at', r.started_at,
 							'finished_at', r.finished_at,
+							'locked_at', r.locked_at,
 							'error', r.error,
+							'active_http_services', COALESCE(hs.active_http_services, 0),
+							'estimated_webanalyze_urls', COALESCE(hs.active_http_services, 0) * (1 + cs.webanalyze_probe_paths),
+							'estimated_webanalyze_batches', CEIL((COALESCE(hs.active_http_services, 0) * (1 + cs.webanalyze_probe_paths))::numeric / GREATEST(cs.webanalyze_batch_size, 1))::int,
+							'webanalyze_probe_paths', cs.webanalyze_probe_paths,
+							'webanalyze_batch_size', cs.webanalyze_batch_size,
+							'progress_stage', r.progress_stage,
+							'progress_current', r.progress_current,
+							'progress_total', r.progress_total,
+							'progress_message', r.progress_message,
+							'progress_meta', r.progress_meta,
+							'progress_updated_at', r.progress_updated_at,
 							'updated_at', r.updated_at
 						) AS row,
 						COALESCE(r.updated_at, r.created_at) AS sort_at
 					FROM zero_scan_requests r
 					LEFT JOIN zero_programs p ON p.id = r.program_id
+					CROSS JOIN campaign_shape cs
+					LEFT JOIN LATERAL (
+						SELECT count(*)::int AS active_http_services
+						FROM zero_http_services h
+						WHERE h.program_id = r.program_id
+						  AND h.active
+					) hs ON true
 					WHERE r.campaign_id = $1::uuid
 					ORDER BY COALESCE(r.updated_at, r.created_at) DESC
 					LIMIT 25
 				) recent
+			), '[]'::jsonb),
+			'running_requests', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at ASC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', r.id,
+							'program_id', r.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'program_platform', COALESCE(p.platform, ''),
+							'status', r.status,
+							'attempt_count', r.attempt_count,
+							'started_at', r.started_at,
+							'locked_at', r.locked_at,
+							'active_http_services', COALESCE(hs.active_http_services, 0),
+							'estimated_webanalyze_urls', COALESCE(hs.active_http_services, 0) * (1 + cs.webanalyze_probe_paths),
+							'estimated_webanalyze_batches', CEIL((COALESCE(hs.active_http_services, 0) * (1 + cs.webanalyze_probe_paths))::numeric / GREATEST(cs.webanalyze_batch_size, 1))::int,
+							'webanalyze_probe_paths', cs.webanalyze_probe_paths,
+							'webanalyze_batch_size', cs.webanalyze_batch_size,
+							'progress_stage', r.progress_stage,
+							'progress_current', r.progress_current,
+							'progress_total', r.progress_total,
+							'progress_message', r.progress_message,
+							'progress_meta', r.progress_meta,
+							'progress_updated_at', r.progress_updated_at,
+							'updated_at', r.updated_at
+						) AS row,
+						COALESCE(r.started_at, r.updated_at, r.created_at) AS sort_at
+					FROM zero_scan_requests r
+					LEFT JOIN zero_programs p ON p.id = r.program_id
+					CROSS JOIN campaign_shape cs
+					LEFT JOIN LATERAL (
+						SELECT count(*)::int AS active_http_services
+						FROM zero_http_services h
+						WHERE h.program_id = r.program_id
+						  AND h.active
+					) hs ON true
+					WHERE r.campaign_id = $1::uuid
+					  AND r.status = 'running'
+					ORDER BY COALESCE(r.started_at, r.updated_at, r.created_at)
+					LIMIT 50
+				) running
 			), '[]'::jsonb),
 			'findings', COALESCE((
 				SELECT jsonb_agg(row ORDER BY sort_at DESC)

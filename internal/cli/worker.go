@@ -151,6 +151,12 @@ func runQueuedScanRequests(cmd *cobra.Command, cfg config.Config) error {
 		return err
 	}
 	defer repo.Close()
+	stale, err := repo.RecoverStaleScanRequests(ctx, cfg.Worker.ScanRequestStaleAfter)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "scan request stale recovery failed: %v\n", err)
+	} else if stale > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d stale scan request(s)\n", stale)
+	}
 	retryPolicy := scanRequestRetryPolicy(cfg)
 	recovered, err := repo.RecoverRetryableFailedScanRequests(ctx, retryPolicy)
 	if err != nil {
@@ -240,8 +246,13 @@ func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.Sc
 		opts.ProgramID = request.ProgramID
 	}
 	if err == nil {
+		opts.ScanRequestID = request.ID
+	}
+	stopHeartbeat := startScanRequestHeartbeat(ctx, cmd, repo, request.ID, cfg.Worker.ScanRequestHeartbeat)
+	defer stopHeartbeat()
+	if err == nil {
 		fmt.Fprintf(cmd.OutOrStdout(), "zero scan request starting: %s %s\n", request.ID, request.Name)
-		err = runManualPipeline(cmd, opts)
+		err = runManualPipelineWithProgress(cmd, opts, repo)
 	}
 	if finishErr := repo.FinishScanRequest(ctx, request.ID, err, scanRequestRetryPolicy(cfg)); finishErr != nil {
 		if err != nil {
@@ -256,6 +267,36 @@ func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.Sc
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "zero scan request finished: %s\n", request.ID)
 	return nil
+}
+
+func startScanRequestHeartbeat(ctx context.Context, cmd *cobra.Command, repo *db.Repository, requestID string, interval time.Duration) func() {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	}
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				if err := repo.TouchScanRequest(heartbeatCtx, requestID); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "scan request heartbeat failed %s: %v\n", requestID, err)
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 func scanRequestRetryPolicy(cfg config.Config) db.ScanRequestRetryPolicy {
@@ -291,6 +332,11 @@ func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Conf
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: stale scan requests")
+	stale, err := repo.RecoverStaleScanRequests(ctx, cfg.Worker.ScanRequestStaleAfter)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: retryable failed scan requests")
 	retried, err := repo.RecoverRetryableFailedScanRequests(ctx, scanRequestRetryPolicy(cfg))
 	if err != nil {
@@ -306,6 +352,9 @@ func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Conf
 	}
 	if requeued > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d interrupted scan request(s)\n", requeued)
+	}
+	if stale > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d stale scan request(s)\n", stale)
 	}
 	if retried > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "requeued %d transiently failed scan request(s)\n", retried)

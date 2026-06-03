@@ -51,6 +51,8 @@ The worker is the normal execution mode.
 - `ZERO_TARGET_PARALLELISM=12` controls default/due pipeline program parallelism.
 - `ZERO_SCAN_REQUEST_MAX_ACTIVE=10` caps concurrent custom scan requests so database poolers are not exhausted.
 - `ZERO_SCAN_REQUEST_RETRY_ATTEMPTS=4` and `ZERO_SCAN_REQUEST_RETRY_BASE_DELAY=2m` requeue transient DB/NVD failures instead of discarding the scan.
+- `ZERO_SCAN_REQUEST_HEARTBEAT=30s` updates long-running request progress and DB liveness.
+- `ZERO_SCAN_REQUEST_STALE_AFTER=30m` requeues running requests whose heartbeat is stale.
 - `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder, Nuclei, and template updates.
 - `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
 
@@ -103,6 +105,15 @@ docker compose run --rm zero run schedule \
 Use `--due-only` if the campaign should respect each program's normal scan interval. Use `--campaign-limit` for staged rollouts.
 
 The worker pool keeps custom campaign slots filled from each campaign's own `--campaign-parallelism`. Multiple custom campaigns can run side by side; their capacity is additive and is not capped by `ZERO_TARGET_PARALLELISM`, which only controls default/due scans.
+
+Docker Compose includes a local `dbpool` sidecar powered by PgBouncer. The `zero`, `api`, and `migrate` containers connect to `dbpool:6432`; `dbpool` is the only service that opens upstream sessions to Supabase. This lets operators run more local worker processes while keeping Supabase session usage bounded. Tune:
+
+- `ZERO_DBPOOL_DEFAULT_POOL_SIZE=8`
+- `ZERO_DBPOOL_RESERVE_POOL_SIZE=2`
+- `ZERO_DBPOOL_MAX_CLIENT_CONN=500`
+- `ZERO_SCAN_REQUEST_MAX_ACTIVE=10`
+
+If the Supabase project has a small session pool, increase `ZERO_SCAN_REQUEST_MAX_ACTIVE` only after enabling the local `dbpool`. Broad path-probe campaigns can still be CPU/network heavy, so the dashboard exposes per-request progress, active service counts, expanded Webanalyze URL estimates, and batch progress.
 
 Normal `httpx` and full Webanalyze fingerprints update the active technology state for each processed service. If a previously active technology from that same source is not reobserved in the current scan, Zero marks it inactive. Custom Webanalyze app files are treated as partial fingerprints, so they add focused matches but do not clear the full inventory. Use `--webanalyze-probe-path` for products whose fingerprint appears on known paths such as `/admin/`, `/console/`, `/demo/`, or `/api/jolokia/version`; each path is derived from the already authorized alive service URL and tied back to the same HTTP service record. Path probes are partial fingerprints too, so they do not clear existing technology inventory. Webanalyze batch size counts expanded URLs after path expansion, so keep `--webanalyze-batch-size` conservative for broad path-probe campaigns. For targeted validation, pair `--nuclei-tech-filter` with fresh fingerprinting in the same campaign; Zero automatically applies a freshness window before Nuclei. Use `--nuclei-tech-max-age` only when skipping fingerprint stages and intentionally relying on observations already in the database.
 

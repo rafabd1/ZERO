@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/rafabd1/ZERO/internal/enrich"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,7 @@ func newEnrichCommand() *cobra.Command {
 	var crawl int
 	var batchSize int
 	var batchTimeout time.Duration
+	var scanRequestID string
 
 	cmd := &cobra.Command{
 		Use:   "enrich",
@@ -54,7 +56,7 @@ func newEnrichCommand() *cobra.Command {
 			}
 			effectiveBatchSize := webanalyzeEffectiveBatchSize(batchSize, cfg.Tools.WebanalyzeBatchSize)
 			effectiveBatchTimeout := webanalyzeEffectiveBatchTimeout(batchTimeout, cfg.Tools.WebanalyzeBatchTimeout)
-			result, err := enrich.NewWebanalyzeRunner(repo, cfg.Tools.WebanalyzeBin).
+			runner := enrich.NewWebanalyzeRunner(repo, cfg.Tools.WebanalyzeBin).
 				WithScanRunID(scanID).
 				WithProgramID(programID).
 				WithApps(appPaths).
@@ -64,8 +66,36 @@ func newEnrichCommand() *cobra.Command {
 				WithCrawl(crawlDepth).
 				WithLimit(limit).
 				WithBatchSize(effectiveBatchSize).
-				WithTimeout(effectiveBatchTimeout).
-				Run(ctx)
+				WithTimeout(effectiveBatchTimeout)
+			if strings.TrimSpace(scanRequestID) != "" {
+				runner = runner.WithBatchProgress(func(batch, totalBatches, processed, totalTargets, size int) {
+					if err := repo.UpdateScanRequestProgress(ctx, scanRequestID, db.ScanRequestProgress{
+						Stage:   "enrich webanalyze",
+						Current: processed,
+						Total:   totalTargets,
+						Message: fmt.Sprintf("webanalyze batch %d/%d", batch, totalBatches),
+						Meta: map[string]any{
+							"program_id":     programID,
+							"batch":          batch,
+							"total_batches":  totalBatches,
+							"batch_size":     effectiveBatchSize,
+							"batch_urls":     size,
+							"batch_timeout":  effectiveBatchTimeout.String(),
+							"workers":        workerCount,
+							"probe_paths":    probePaths,
+							"custom_apps":    appPaths,
+							"expanded_urls":  totalTargets,
+							"processed_urls": processed,
+						},
+					}); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "webanalyze progress update failed request=%s: %v\n", scanRequestID, err)
+					}
+					if shouldLogWebanalyzeBatch(batch, totalBatches) {
+						fmt.Fprintf(cmd.OutOrStdout(), "webanalyze batch progress program=%s request=%s batch=%d/%d processed=%d/%d size=%d batch_timeout=%s\n", programID, scanRequestID, batch, totalBatches, processed, totalTargets, size, effectiveBatchTimeout)
+					}
+				})
+			}
+			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, result.Targets, result.Inserted, map[string]any{
 					"targets":        result.Targets,
@@ -116,8 +146,13 @@ func newEnrichCommand() *cobra.Command {
 	webanalyze.Flags().IntVar(&crawl, "crawl", -1, "Webanalyze crawl depth for this run only")
 	webanalyze.Flags().IntVar(&batchSize, "batch-size", 0, "override number of expanded URLs per Webanalyze process")
 	webanalyze.Flags().DurationVar(&batchTimeout, "batch-timeout", 0, "override max wall-clock time per Webanalyze batch, for example 10m")
+	webanalyze.Flags().StringVar(&scanRequestID, "scan-request-id", "", "internal scan request id for persisted progress")
 	cmd.AddCommand(webanalyze)
 	return cmd
+}
+
+func shouldLogWebanalyzeBatch(batch, total int) bool {
+	return batch == 1 || batch == total || batch%10 == 0
 }
 
 func webanalyzeEffectiveBatchSize(requested, configured int) int {

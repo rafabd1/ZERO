@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/spf13/cobra"
 )
 
 type manualRunOptions struct {
+	ScanRequestID                    string
 	ProgramID                        string
 	SkipSync                         bool
 	SkipEnum                         bool
@@ -193,6 +195,10 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 }
 
 func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
+	return runManualPipelineWithProgress(parent, opts, nil)
+}
+
+func runManualPipelineWithProgress(parent *cobra.Command, opts manualRunOptions, progressRepo *db.Repository) error {
 	ctx := commandContext()
 	cfg := loadConfig()
 	opts = normalizeManualRunOptions(opts)
@@ -238,6 +244,7 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 	if !opts.SkipEnrich {
 		step := []string{"enrich", "webanalyze"}
 		step = appendProgramFlag(step, opts.ProgramID)
+		step = appendScanRequestFlag(step, opts.ScanRequestID)
 		step = appendIntFlag(step, "--limit", opts.WebanalyzeLimit)
 		for _, app := range manualWebanalyzeApps(opts) {
 			step = append(step, "--apps", app)
@@ -329,7 +336,22 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 		steps = append(steps, step)
 	}
 
-	for _, step := range steps {
+	for i, step := range steps {
+		if progressRepo != nil {
+			if err := progressRepo.UpdateScanRequestProgress(ctx, opts.ScanRequestID, db.ScanRequestProgress{
+				Stage:   stepProgressStage(step),
+				Current: i,
+				Total:   len(steps),
+				Message: strings.Join(step, " "),
+				Meta: map[string]any{
+					"program_id": opts.ProgramID,
+					"step_index": i + 1,
+					"step_total": len(steps),
+				},
+			}); err != nil {
+				fmt.Fprintf(parent.ErrOrStderr(), "scan request progress update failed %s: %v\n", opts.ScanRequestID, err)
+			}
+		}
 		fmt.Fprintf(parent.OutOrStdout(), "zero manual step: %v\n", step)
 		if err := runChildE(parent, step...); err != nil {
 			alertOnTimeout(ctx, parent, cfg, opts.ProgramID, "", step, err)
@@ -339,9 +361,26 @@ func runManualPipeline(parent *cobra.Command, opts manualRunOptions) error {
 	return nil
 }
 
+func stepProgressStage(step []string) string {
+	if len(step) >= 2 {
+		return step[0] + " " + step[1]
+	}
+	if len(step) == 1 {
+		return step[0]
+	}
+	return ""
+}
+
 func appendProgramFlag(step []string, programID string) []string {
 	if programID != "" {
 		step = append(step, "--program-id", programID)
+	}
+	return step
+}
+
+func appendScanRequestFlag(step []string, requestID string) []string {
+	if strings.TrimSpace(requestID) != "" {
+		step = append(step, "--scan-request-id", requestID)
 	}
 	return step
 }
