@@ -4,41 +4,62 @@
   <img src="assets/zero-banner.gif" alt="Animated ASCII ZERO wordmark" width="960">
 </p>
 
-Zero is a Docker-first pipeline for custom vulnerability analysis at bug bounty scale.
+Zero is a campaign engine for authorized recon, fingerprinting, and targeted validation across bug bounty programs and large external inventories.
 
-It keeps target scope, discovered assets, fingerprints, passive CVE context, active validation results, reports, and notifications in one persistent Postgres/Supabase state model. The goal is not to run a generic scanner against everything. Zero is built to launch focused analysis campaigns across many authorized targets, then report only new, deduplicated evidence.
+It collects scope from bug bounty platforms, expands authorized assets, identifies live services and technologies, stores everything in Postgres, and lets operators launch durable research campaigns against the resulting inventory. A campaign can be broad and passive, like mapping exposed technologies across every target, or highly focused, like fingerprinting a product on known paths and validating one custom Nuclei template only where that fingerprint appears.
 
-## What Zero Does
+The point is not to run every scanner against every URL. Zero is built to answer focused research questions at scale, deduplicate evidence, survive restarts, and keep the data reusable for dashboards, manual triage, Discord notifications, and other tools.
 
-- Syncs bug bounty scope from configured providers.
-- Expands only authorized wildcard roots with `subfinder`.
-- Filters discoveries through scope rules, out-of-scope rules, DNS resolution, and live probing.
-- Collects target intelligence with `httpx` and Webanalyze/Wappalyzer definitions.
-- Links versioned technology observations to CVE context.
-- Runs Nuclei as an active validator when a relevant template or custom template is selected.
-- Stores every stage in Postgres for deduplication, change tracking, dashboards, API reads, and Discord notifications.
-- Supports custom campaigns across one program or the whole active inventory without changing global worker defaults.
+## What Zero Is Good At
+
+- Importing and normalizing scope from HackerOne, Bugcrowd, and Intigriti through the bbscope-based poller.
+- Expanding only authorized wildcard roots with `subfinder`.
+- Filtering discoveries through in-scope and out-of-scope rules before probing.
+- Resolving and probing assets with `dnsx` and `httpx`.
+- Identifying technologies with `httpx` intelligence and Webanalyze/Wappalyzer definitions.
+- Running custom fingerprint campaigns with additional Webanalyze app files and path probes.
+- Running Nuclei against HTTP services, hostnames, DNS templates, CVE templates, exposure checks, or custom validation templates.
+- Combining tools or using them separately, depending on the campaign goal.
+- Storing scope, assets, services, technologies, CVE context, Nuclei output, findings, reports, scan state, and campaign progress in Postgres.
+- Reusing stored inventory for later scans so repeated campaigns do not have to redo expensive discovery every time.
+- Monitoring campaigns through a local dashboard and an authenticated API.
+
+## How It Works
+
+The default worker pipeline is:
+
+```text
+scope sync -> subfinder -> dnsx -> httpx -> Webanalyze -> passive CVE context -> Nuclei -> report -> notify
+```
+
+Custom campaigns can run the full pipeline or skip stages:
+
+- Recon only: sync scope, enumerate, resolve, probe, and store live assets.
+- Fingerprint only: run Webanalyze and custom path probes against active services.
+- Passive research: map technologies and CVE context without active validation.
+- Targeted validation: run Nuclei only where a technology, title, banner, or custom fingerprint matches.
+- Nuclei-only: run a safe template or template directory directly against selected HTTP services or scoped hostnames.
+- DNS/takeover style checks: run Nuclei against stored subdomains instead of HTTP URLs.
+
+Because every stage writes structured state to Postgres, Zero's output can be queried by the dashboard/API or reused by external tooling.
 
 ## Quick Start
-
-Zero is easiest to run with Docker Compose.
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set at least:
+Set at least:
 
 ```env
 ZERO_DATABASE_URL="postgres://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require"
+ZERO_API_TOKEN=""
+ZERO_SCOPE_PROVIDERS="h1"
 ZERO_H1_USERNAME=""
 ZERO_H1_TOKEN=""
-ZERO_API_TOKEN=""
 ```
 
-Set `ZERO_API_TOKEN` to a strong random bearer token before exposing the API.
-
-Then start the stack:
+Then start:
 
 ```bash
 docker compose --profile tools run --rm migrate
@@ -51,94 +72,127 @@ Open the dashboard:
 http://127.0.0.1:8090
 ```
 
-The `zero` container runs the continuous worker. The `api` service exposes read endpoints on `127.0.0.1:8080`, and the `dashboard` service proxies API reads without exposing backend secrets to the browser.
+The `zero` service runs the continuous worker, `api` exposes authenticated reads and orchestration endpoints, and `dashboard` provides a local visual interface for programs, campaigns, scans, findings, and progress.
 
 ## First Checks
 
-Run small checks before starting broad work:
+Use small limits before broad execution:
 
 ```bash
 docker compose run --rm zero sync all
 docker compose run --rm zero run due --dry-run --limit 5
-docker compose run --rm zero probe httpx --limit 25
+docker compose run --rm zero enum subfinder --limit 2
+docker compose run --rm zero probe dnsx --limit 50
+docker compose run --rm zero probe httpx --limit 50
+docker compose run --rm zero enrich webanalyze --limit 50
 docker compose run --rm zero notify discord --dry-run
 ```
 
-The worker is self-starting by default. It runs a daily scope-sync guard and scans due programs based on each program's configured interval.
+The worker is self-starting by default. On startup it runs migration, recovery, a daily scope-sync guard, and due-program planning.
 
-## Custom Scan Campaigns
+## Example Campaigns
 
-Custom campaigns are the main reason Zero exists.
-
-Use them when you want to test a specific technology, fingerprint, CVE, exposure class, or Nuclei template across many targets without turning the global worker configuration into a one-off experiment.
-
-Example: queue a focused campaign across all active programs with a custom Webanalyze technology file and a specific Nuclei template path.
+Run a broad fingerprint campaign against recently discovered active services:
 
 ```bash
 docker compose run --rm zero run schedule \
   --all-programs \
   --campaign-parallelism 8 \
-  --name "focused-technology-cve-sweep" \
+  --name "product-fingerprint-sweep" \
   --skip-sync \
   --reuse-active-services \
-  --webanalyze-apps /work/custom/webanalyze/technology.json \
+  --webanalyze-apps /home/zero/custom-assets/product.webanalyze.json \
   --webanalyze-probe-path /admin/ \
   --webanalyze-probe-path /api/version \
-  --webanalyze-workers 4 \
-  --webanalyze-batch-size 50 \
-  --webanalyze-batch-timeout 10m \
-  --nuclei-tech-filter "product-name" \
-  --nuclei-template /work/custom/nuclei/CVE-YYYY-NNNN.yaml \
-  --nuclei-force \
-  --nuclei-rate-limit 40 \
-  --nuclei-concurrency 10 \
-  --nuclei-bulk-size 5 \
-  --nuclei-timeout 10 \
-  --nuclei-retries 1
+  --skip-cves \
+  --skip-nuclei
 ```
 
-Campaigns are durable. They create one parent row and one child request per selected program. If the container restarts, running child requests are requeued and completed children stay completed. The worker pool keeps campaign slots filled until the campaign drains.
+Run focused fingerprinting and then validate only matching assets with Nuclei:
 
-Use `--reuse-active-services` for campaigns that should skip fresh `dnsx/httpx` probing and load active HTTP services already stored in Postgres. This is useful when several focused scans run close together and the alive inventory was just refreshed. In that mode, `httpx` flags are intentionally ignored.
+```bash
+docker compose run --rm zero run schedule \
+  --all-programs \
+  --campaign-parallelism 8 \
+  --name "product-validation-sweep" \
+  --skip-sync \
+  --reuse-active-services \
+  --webanalyze-apps /home/zero/custom-assets/product.webanalyze.json \
+  --webanalyze-probe-path /admin/ \
+  --webanalyze-batch-size 50 \
+  --webanalyze-batch-timeout 10m \
+  --nuclei-template /home/zero/custom-assets/product-check.yaml \
+  --nuclei-tech-filter "Example Product|ExampleProduct" \
+  --nuclei-force \
+  --nuclei-rate-limit 30 \
+  --nuclei-concurrency 8 \
+  --nuclei-target-batch-size 500 \
+  --nuclei-target-batch-timeout 20m
+```
 
-Normal fingerprints are authoritative for the technologies they own: fresh `httpx` and full Webanalyze runs reactivate newly observed technologies and mark missing old observations inactive. A custom `--webanalyze-apps` run is treated as partial intelligence, so it can add focused matches without clearing the full technology inventory. `--webanalyze-apps` and `--nuclei-template` are repeatable for multi-product campaigns. Add `--webanalyze-probe-path` when a product fingerprint lives on known paths such as `/admin/`, `/console/`, or `/api/jolokia/version`; these path probes are also treated as partial intelligence. When a campaign runs fingerprinting before Nuclei, Zero keeps `--nuclei-tech-filter` tied to fresh observations automatically. Use `--nuclei-tech-max-age` only when skipping fingerprinting and relying on existing database observations.
+Run a DNS-oriented Nuclei campaign against scoped hostnames:
 
-Custom fingerprint matches can produce potential/unconfirmed reports when Nuclei does not confirm the target. Add `--disable-passive-fingerprint-reports` when the campaign should only report Nuclei-confirmed findings.
+```bash
+docker compose run --rm zero run schedule \
+  --all-programs \
+  --campaign-parallelism 8 \
+  --campaign-limit 100 \
+  --name "dns-template-stage" \
+  --skip-sync \
+  --skip-enum \
+  --skip-probe \
+  --skip-enrich \
+  --skip-cves \
+  --nuclei-force \
+  --nuclei-target-source subdomains \
+  --nuclei-protocol dns \
+  --nuclei-template /home/zero/custom-assets/dns-check.yaml
+```
 
-For a single program, use `--program-id <uuid>` instead of `--all-programs`.
+Campaigns are durable. They create one parent campaign and one child request per selected program. If the worker restarts, interrupted requests are recovered and completed children stay completed.
+
+## CLI At A Glance
+
+```text
+zero sync all                 import provider scope
+zero enum subfinder           enumerate authorized wildcard roots
+zero probe dnsx               resolve discovered hostnames
+zero probe httpx              find alive HTTP services and collect httpx intel
+zero enrich webanalyze        detect technologies with Webanalyze definitions
+zero analyze cves             enrich versioned technologies with passive CVE context
+zero analyze nuclei           run Nuclei against selected target sources
+zero report generate          generate deduplicated reports
+zero notify discord           send new report notifications
+zero run schedule             queue durable custom campaigns
+zero run cancel               cancel queued or running work
+zero run cleanup              prune stale inactive inventory
+zero worker                   run the continuous scheduler/worker
+zero api                      run the authenticated API
+```
+
+See [CLI Reference](docs/CLI.md) for the full operator surface and recipes.
 
 ## Scope Safety
 
-Zero is designed for authorized bug bounty work.
+Zero is designed for authorized testing.
 
 - `subfinder` receives only authorized wildcard roots.
-- Exact `domain` and `url` assets are probed exactly; they are not expanded into child subdomains.
+- Exact domain and URL assets are probed exactly; they are not expanded into child subdomains.
 - Out-of-scope assets override broad in-scope wildcards.
-- Assets that are not bounty-eligible are stored as out-of-scope when provider data exposes that distinction.
-- Passive technology/CVE matches are stored as intelligence; Nuclei-backed results carry stronger validation confidence.
-
-## Useful Commands
-
-```bash
-docker compose run --rm zero sync all
-docker compose run --rm zero run due --dry-run --limit 5
-docker compose run --rm zero run schedule --all-programs --campaign-parallelism 4 --campaign-limit 25 --skip-sync --reuse-active-services --skip-cves --nuclei-template ./templates/custom.yaml
-docker compose run --rm zero report export-triage --status new --limit 100 --output triage.jsonl
-docker compose logs -f zero
-```
+- Non-bounty assets are treated as out-of-scope when provider data exposes that distinction.
+- Passive technology/CVE matches are labeled as potential intelligence unless active evidence confirms them.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md): how the pipeline and state model fit together.
-- [Operations](docs/OPERATIONS.md): configuration, schedules, custom campaigns, and runtime tuning.
-- [Custom Campaigns](docs/CUSTOM_CAMPAIGNS.md): efficient targeted scan recipes and custom template guidance.
-- [API](docs/API.md): read endpoints and custom scan request examples.
+- [CLI Reference](docs/CLI.md): command surface, stage-by-stage usage, and campaign patterns.
+- [Custom Campaigns](docs/CUSTOM_CAMPAIGNS.md): targeted scan recipes, custom Webanalyze files, path probes, and Nuclei templates.
+- [Architecture](docs/ARCHITECTURE.md): services, state model, recovery, and campaign execution.
+- [Operations](docs/OPERATIONS.md): setup, schedules, tuning, cleanup, and notifications.
+- [API](docs/API.md): read endpoints and scan orchestration examples.
 - [Database](docs/DATABASE.md): state tables and deduplication rules.
-- [Nuclei](docs/NUCLEI.md): validation policy and how template selection works.
-- [Tools](docs/TOOLS.md): why each external tool is used.
+- [Nuclei](docs/NUCLEI.md): validation policy and template selection.
+- [Tools](docs/TOOLS.md): external tool roles and configuration notes.
 
 ## Status
 
-Zero is an early operational project. It already supports Dockerized continuous scanning, custom campaigns, scope-safe enumeration, Webanalyze enrichment, passive CVE context, Nuclei validation, reports, Discord notifications, a read API, and a local dashboard.
-
-Use it only against assets you are authorized to test.
+Zero is an early operational project. Use it only against assets you are authorized to test.

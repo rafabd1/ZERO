@@ -1,15 +1,16 @@
 # Nuclei
 
-Zero uses Nuclei as an active validation layer, not as the only source of target intelligence.
+Zero uses Nuclei as an active validation layer, not as the only source of target intelligence. It can validate CVEs, exposures, misconfigurations, DNS conditions, dangling records, SSL/TCP checks, and product-specific custom templates.
 
 ## Policy
 
 For broad runs, start with:
 
 - alive URLs only;
-- CVE-tagged or explicit templates;
+- CVE-tagged, technology-gated, or explicit templates;
 - `medium,high,critical` severities;
 - configured request headers that look like normal browser traffic;
+- target batching for large programs;
 - JSONL output stored in `zero_nuclei_results`.
 
 Nuclei is strongest when a relevant template exists and produces vulnerability-specific evidence. If no template exists, Zero can still keep passive CVE context, but it should be reported as potential/unconfirmed.
@@ -37,7 +38,7 @@ Custom path:
 
 ```bash
 docker compose run --rm zero analyze nuclei \
-  --template-path ./templates/custom.yaml \
+  --template-path /home/zero/custom-assets/custom.yaml \
   --severity high,critical \
   --rate-limit 40 \
   --concurrency 10
@@ -45,13 +46,33 @@ docker compose run --rm zero analyze nuclei \
 
 Campaigns can pass the same Nuclei options through `zero run schedule`.
 
+Explicit template paths or template IDs do not inherit Zero's default `cve` tag or `medium,high,critical` severity filters. Add `--tags` or `--severity` only when you intentionally want to restrict the supplied templates.
+
+Target source and protocol:
+
+```bash
+docker compose run --rm zero analyze nuclei \
+  --target-source http-services \
+  --protocol http \
+  --template-path /home/zero/custom-assets/http-check.yaml
+```
+
+```bash
+docker compose run --rm zero analyze nuclei \
+  --target-source subdomains \
+  --protocol dns \
+  --template-path /home/zero/custom-assets/dns-check.yaml
+```
+
+Use `--protocol auto` when a template directory mixes protocols and Nuclei should infer them.
+
 Technology-gated validation:
 
 ```bash
 docker compose run --rm zero analyze nuclei \
   --tech-filter "product-name" \
   --tech-max-age 2h \
-  --template-path ./templates/custom.yaml \
+  --template-path /home/zero/custom-assets/custom.yaml \
   --severity high,critical
 ```
 
@@ -72,6 +93,27 @@ Optional campaign knobs:
 - `ZERO_NUCLEI_PROXY` / `--nuclei-proxy`
 - `ZERO_NUCLEI_SCAN_STRATEGY` / `--nuclei-scan-strategy`
 - `ZERO_NUCLEI_MAX_HOST_ERROR` / `--nuclei-max-host-error`
+
+## Runtime Batching
+
+Large programs can contain thousands of alive services. Zero runs Nuclei in target batches so one large program does not consume the whole step timeout in a single process.
+
+Defaults:
+
+```env
+ZERO_NUCLEI_TARGET_BATCH_SIZE=500
+ZERO_NUCLEI_TARGET_BATCH_TIMEOUT="20m"
+```
+
+Per-run override:
+
+```bash
+docker compose run --rm zero analyze nuclei \
+  --target-batch-size 500 \
+  --target-batch-timeout 20m
+```
+
+Batch stats are stored in `scan_runs.stats` as `batches`, `completed_batches`, `target_batch_size`, and `target_batch_timeout`.
 
 ## WAF Diagnostics
 

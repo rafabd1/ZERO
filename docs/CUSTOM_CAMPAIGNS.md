@@ -1,6 +1,8 @@
 # Custom Campaigns
 
-Custom campaigns are for targeted vulnerability analysis across many authorized programs. The usual pattern is:
+Custom campaigns are the main operator surface of Zero. They are for targeted research across many authorized programs, whether the goal is recon, technology identification, passive lead generation, active validation, or a mix of those stages.
+
+The usual validation pattern is:
 
 ```text
 select inventory -> focused fingerprint -> technology gate -> Nuclei validation -> report
@@ -12,6 +14,8 @@ Use a campaign when the question is specific, for example:
 - Which targets match a newly relevant CVE template?
 - Which targets have a known path, banner, HTML marker, cookie, or API response?
 - Which targets should be validated with one or more custom Nuclei templates?
+- Which targets should be inventoried for later triage without active validation?
+- Which scoped hostnames should be checked with DNS or takeover-style templates?
 
 ## File Loading
 

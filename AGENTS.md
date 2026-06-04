@@ -4,12 +4,12 @@ This file is the public agent instruction set for Zero. It is intended for Codex
 
 ## Project Intent
 
-Zero is a Go-based monitoring pipeline for authorized bug bounty and attack-surface research at scale. Its main value is not generic scanning; it is durable, focused vulnerability-analysis campaigns across many authorized programs with structured state, deduplication, and reporting.
+Zero is a Go-based campaign system for authorized bug bounty and attack-surface research at scale. Its main value is not generic scanning; it is durable recon, fingerprinting, passive intelligence, and targeted validation across many authorized programs with structured state, deduplication, and reporting.
 
 Keep changes aligned with that purpose:
 
 - Scope safety is non-negotiable. Enumeration and validation must stay tied to in-scope, bounty-eligible assets.
-- Custom campaigns are first-class. Prefer options that let operators run targeted fingerprinting, CVE validation, exposure checks, DNS/takeover checks, and other Nuclei templates without changing global defaults.
+- Custom campaigns are first-class. Prefer options that let operators run targeted recon, fingerprinting, CVE validation, exposure checks, DNS/takeover checks, and other Nuclei templates without changing global defaults.
 - Postgres/Supabase is the source of truth for programs, scope assets, subdomains, HTTP services, technologies, findings, reports, scan requests, and campaigns.
 - Nuclei is an active validator. Passive CVE matches are prioritization/intelligence unless active evidence confirms them.
 

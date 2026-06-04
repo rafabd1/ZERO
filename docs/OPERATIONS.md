@@ -1,6 +1,6 @@
 # Operations
 
-This guide covers the practical path from a fresh Docker setup to continuous scans and custom campaigns.
+This guide covers the practical path from a fresh setup to continuous scans, visual monitoring, and custom research campaigns.
 
 ## Configure
 
@@ -53,7 +53,7 @@ The worker is the normal execution mode.
 - `ZERO_SCAN_REQUEST_RETRY_ATTEMPTS=4` and `ZERO_SCAN_REQUEST_RETRY_BASE_DELAY=2m` requeue transient DB/NVD failures instead of discarding the scan.
 - `ZERO_SCAN_REQUEST_HEARTBEAT=30s` updates long-running request progress and DB liveness.
 - `ZERO_SCAN_REQUEST_STALE_AFTER=30m` requeues running requests whose heartbeat is stale.
-- `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder, Nuclei, and template updates.
+- `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder and template updates.
 - `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
 
 The main pipeline per due program is:
@@ -66,9 +66,9 @@ Each stage writes structured state to Postgres. A restart requeues interrupted c
 
 ## Custom Campaigns
 
-Custom campaigns let you run targeted analysis across one program or the full active inventory.
+Custom campaigns let you run targeted analysis across one program or the full active inventory. They can combine all pipeline stages or use only the tools needed for the question being asked.
 
-For detailed parameter recipes, custom Webanalyze templates, Nuclei template examples, and staged rollout guidance, see [Custom Campaigns](CUSTOM_CAMPAIGNS.md).
+For the full command surface, see [CLI Reference](CLI.md). For detailed parameter recipes, custom Webanalyze templates, Nuclei template examples, and staged rollout guidance, see [Custom Campaigns](CUSTOM_CAMPAIGNS.md).
 
 Single program:
 
@@ -77,7 +77,7 @@ docker compose run --rm zero run schedule \
   --program-id <uuid> \
   --name "targeted-template-check" \
   --skip-sync \
-  --nuclei-template ./templates/custom.yaml \
+  --nuclei-template /home/zero/custom-assets/custom.yaml \
   --nuclei-header "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36" \
   --nuclei-rate-limit 40 \
   --nuclei-concurrency 10
@@ -92,13 +92,13 @@ docker compose run --rm zero run schedule \
   --name "custom-technology-sweep" \
   --skip-sync \
   --reuse-active-services \
-  --webanalyze-apps ./custom-technologies.json \
+  --webanalyze-apps /home/zero/custom-assets/custom-technologies.json \
   --webanalyze-probe-path /admin/ \
   --webanalyze-probe-path /api/version \
   --webanalyze-batch-size 50 \
   --webanalyze-batch-timeout 10m \
   --nuclei-tech-filter "product-name" \
-  --nuclei-template ./templates/custom \
+  --nuclei-template /home/zero/custom-assets/templates \
   --nuclei-severity medium,high,critical
 ```
 
@@ -182,6 +182,7 @@ For Nuclei:
 - set `ZERO_NUCLEI_HEADERS` or `--nuclei-header` to use normal browser-like request headers without reducing scan coverage;
 - optionally set `ZERO_NUCLEI_PROXY`, `ZERO_NUCLEI_SCAN_STRATEGY`, or `ZERO_NUCLEI_MAX_HOST_ERROR` for controlled campaigns;
 - tune `ZERO_NUCLEI_RATE`, `ZERO_NUCLEI_CONCURRENCY`, and `ZERO_NUCLEI_BULK_SIZE` for the environment;
+- keep `ZERO_NUCLEI_TARGET_BATCH_SIZE=500` and `ZERO_NUCLEI_TARGET_BATCH_TIMEOUT=20m` as a starting point for large programs;
 - avoid using Nuclei as a broad generic scanner unless that is the explicit campaign goal.
 
 `ZERO_NUCLEI_HEADERS` uses `|` as the separator, so values such as the `Accept` header can safely contain commas.

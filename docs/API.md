@@ -1,6 +1,8 @@
 # API
 
-The API is a read and orchestration surface for dashboards and operator tools. It should be protected with a backend bearer token.
+The API is a read and orchestration surface for dashboards, operator tools, and external automation. It exposes the same durable state that Zero stores in Postgres: programs, scope, services, technologies, scans, campaigns, Nuclei results, findings, reports, and changes.
+
+It should be protected with a backend bearer token.
 
 ```http
 Authorization: Bearer <ZERO_API_TOKEN>
@@ -54,7 +56,7 @@ Content-Type: application/json
     "ProgramID": "00000000-0000-0000-0000-000000000000",
     "SkipSync": true,
     "ReuseActiveServices": true,
-    "NucleiTemplate": "/work/templates/custom.yaml",
+    "NucleiTemplate": "/home/zero/custom-assets/custom.yaml",
     "NucleiTechFilter": "product-name",
     "NucleiHeaders": [
       "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
@@ -85,9 +87,9 @@ Content-Type: application/json
   "params": {
     "SkipSync": true,
     "ReuseActiveServices": true,
-    "WebanalyzeApps": "/work/custom-technologies.json",
+    "WebanalyzeApps": "/home/zero/custom-assets/custom-technologies.json",
     "WebanalyzeAppFiles": [
-      "/work/another-custom-technologies.json"
+      "/home/zero/custom-assets/another-custom-technologies.json"
     ],
     "WebanalyzeProbePaths": [
       "/admin/",
@@ -97,9 +99,9 @@ Content-Type: application/json
     "WebanalyzeWorkers": 4,
     "WebanalyzeBatch": 50,
     "WebanalyzeBatchTimeout": "10m",
-    "NucleiTemplate": "/work/templates/custom",
+    "NucleiTemplate": "/home/zero/custom-assets/templates",
     "NucleiTemplates": [
-      "/work/templates/extra-check.yaml"
+      "/home/zero/custom-assets/extra-check.yaml"
     ],
     "NucleiForce": true,
     "NucleiTechFilter": "product-name",
@@ -127,6 +129,8 @@ Custom campaign parallelism is independent from `ZERO_TARGET_PARALLELISM`. The w
 `ZERO_SCAN_REQUEST_MAX_ACTIVE` is a safety ceiling above campaign parallelism. In Docker, the local `dbpool` PgBouncer sidecar mediates upstream Supabase sessions, so this value can be higher than the upstream pool size while `ZERO_DBPOOL_DEFAULT_POOL_SIZE` remains bounded. Without `dbpool`, keep it below the effective database pooler session limit, leaving room for the worker, API, dashboard, and operational commands.
 
 Campaign detail responses include `running_requests` and per-request progress fields such as `progress_stage`, `progress_current`, `progress_total`, `progress_meta`, `active_http_services`, and `estimated_webanalyze_urls`. These fields are useful for broad custom path-probe campaigns where one program can expand thousands of HTTP services into tens of thousands of Webanalyze URLs.
+
+The dashboard uses these endpoints to show campaign details, running program scans, recent findings, target assets, and finding detail views. External tools can use the same API or query Postgres directly when they need to reuse Zero's inventory.
 
 When a request or campaign runs `httpx` and/or Webanalyze before Nuclei, Zero automatically keeps `NucleiTechFilter` tied to fresh fingerprints from that run. Use `NucleiTechMaxAge` only for requests that skip fingerprinting and intentionally gate Nuclei from existing database observations.
 

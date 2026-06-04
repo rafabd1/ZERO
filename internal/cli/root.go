@@ -25,7 +25,7 @@ func Execute() {
 func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "zero",
-		Short: "Zero monitors bug bounty scopes and vulnerable exposed technologies.",
+		Short: "Zero runs durable recon, fingerprinting, and validation campaigns at scale.",
 	}
 
 	root.AddCommand(newMigrateCommand())
