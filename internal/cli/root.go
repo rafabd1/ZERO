@@ -27,6 +27,14 @@ func newRootCommand() *cobra.Command {
 		Use:   "zero",
 		Short: "Zero runs durable recon, fingerprinting, and validation campaigns at scale.",
 	}
+	root.PersistentFlags().String(internalDefaultScanCycleFlag, "", "internal default scan cycle id")
+	root.PersistentFlags().String(internalParentScanRunFlag, "", "internal parent scan run id")
+	root.PersistentFlags().String(internalScanRequestFlag, "", "internal scan request id")
+	root.PersistentFlags().String(internalScanCampaignFlag, "", "internal scan campaign id")
+	_ = root.PersistentFlags().MarkHidden(internalDefaultScanCycleFlag)
+	_ = root.PersistentFlags().MarkHidden(internalParentScanRunFlag)
+	_ = root.PersistentFlags().MarkHidden(internalScanRequestFlag)
+	_ = root.PersistentFlags().MarkHidden(internalScanCampaignFlag)
 
 	root.AddCommand(newMigrateCommand())
 	root.AddCommand(newSyncCommand())

@@ -37,7 +37,7 @@ func newEnrichCommand() *cobra.Command {
 			}
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "intel", programID)
+			scanID, err := startScanRun(ctx, cmd, repo, "intel", programID)
 			if err != nil {
 				return err
 			}

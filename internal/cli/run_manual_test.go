@@ -26,6 +26,30 @@ func TestScanRequestEffectiveLimitCapsCampaignCapacity(t *testing.T) {
 	}
 }
 
+func TestAppendInternalScanRunCorrelation(t *testing.T) {
+	args := appendInternalScanRunCorrelation([]string{"analyze", "nuclei"}, scanRunCorrelation{
+		DefaultScanCycleID: "cycle-1",
+		ParentScanRunID:    "parent-1",
+		ScanRequestID:      "request-1",
+		ScanCampaignID:     "campaign-1",
+	})
+	want := []string{
+		"analyze", "nuclei",
+		"--" + internalDefaultScanCycleFlag, "cycle-1",
+		"--" + internalParentScanRunFlag, "parent-1",
+		"--" + internalScanRequestFlag, "request-1",
+		"--" + internalScanCampaignFlag, "campaign-1",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("args length = %d; want %d: %#v", len(args), len(want), args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args[%d] = %q; want %q in %#v", i, args[i], want[i], args)
+		}
+	}
+}
+
 func TestShouldIncludePassiveFingerprintReports(t *testing.T) {
 	if !shouldIncludePassiveFingerprintReports(manualRunOptions{WebanalyzeApps: "/tmp/custom.json"}) {
 		t.Fatal("custom Webanalyze apps should enable passive fingerprint reports")

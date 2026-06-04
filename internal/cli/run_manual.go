@@ -12,6 +12,7 @@ import (
 
 type manualRunOptions struct {
 	ScanRequestID                    string
+	ScanCampaignID                   string
 	ProgramID                        string
 	SkipSync                         bool
 	SkipEnum                         bool
@@ -365,7 +366,11 @@ func runManualPipelineWithProgress(parent *cobra.Command, opts manualRunOptions,
 			}
 		}
 		fmt.Fprintf(parent.OutOrStdout(), "zero manual step: %v\n", step)
-		if err := runChildE(parent, step...); err != nil {
+		correlation := scanRunCorrelation{
+			ScanRequestID:  opts.ScanRequestID,
+			ScanCampaignID: opts.ScanCampaignID,
+		}
+		if err := runChildEWithCorrelation(parent, correlation, step...); err != nil {
 			alertOnTimeout(ctx, parent, cfg, opts.ProgramID, "", step, err)
 			return err
 		}

@@ -19,9 +19,33 @@ CREATE TABLE IF NOT EXISTS zero_programs (
 CREATE INDEX IF NOT EXISTS idx_zero_programs_due
 	ON zero_programs(active, last_scan_finished_at, scan_interval_hours);
 
+CREATE TABLE IF NOT EXISTS zero_default_scan_cycles (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	status text NOT NULL DEFAULT 'running' CHECK (status IN ('running','succeeded','partial','failed','canceled')),
+	parallelism integer NOT NULL DEFAULT 1 CHECK (parallelism >= 1 AND parallelism <= 64),
+	total_programs integer NOT NULL DEFAULT 0,
+	running_programs integer NOT NULL DEFAULT 0,
+	succeeded_programs integer NOT NULL DEFAULT 0,
+	failed_programs integer NOT NULL DEFAULT 0,
+	canceled_programs integer NOT NULL DEFAULT 0,
+	started_at timestamptz NOT NULL DEFAULT now(),
+	finished_at timestamptz,
+	error text NOT NULL DEFAULT '',
+	metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zero_default_scan_cycles_status
+	ON zero_default_scan_cycles(status, started_at DESC);
+
 CREATE TABLE IF NOT EXISTS zero_scan_runs (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	program_id uuid REFERENCES zero_programs(id) ON DELETE CASCADE,
+	default_scan_cycle_id uuid REFERENCES zero_default_scan_cycles(id) ON DELETE SET NULL,
+	parent_scan_run_id uuid REFERENCES zero_scan_runs(id) ON DELETE SET NULL,
+	scan_request_id uuid,
+	scan_campaign_id uuid,
 	run_type text NOT NULL CHECK (run_type IN ('scope','enum','probe','nuclei','intel','full')),
 	status text NOT NULL DEFAULT 'running' CHECK (status IN ('queued','running','succeeded','failed','canceled')),
 	started_at timestamptz NOT NULL DEFAULT now(),
@@ -35,10 +59,24 @@ CREATE TABLE IF NOT EXISTS zero_scan_runs (
 	stats jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+ALTER TABLE zero_scan_runs
+	ADD COLUMN IF NOT EXISTS default_scan_cycle_id uuid REFERENCES zero_default_scan_cycles(id) ON DELETE SET NULL,
+	ADD COLUMN IF NOT EXISTS parent_scan_run_id uuid REFERENCES zero_scan_runs(id) ON DELETE SET NULL,
+	ADD COLUMN IF NOT EXISTS scan_request_id uuid,
+	ADD COLUMN IF NOT EXISTS scan_campaign_id uuid;
+
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_program_started
 	ON zero_scan_runs(program_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_status
 	ON zero_scan_runs(status, run_type, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_parent
+	ON zero_scan_runs(parent_scan_run_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_default_cycle
+	ON zero_scan_runs(default_scan_cycle_id, run_type, status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_request
+	ON zero_scan_runs(scan_request_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_campaign
+	ON zero_scan_runs(scan_campaign_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS zero_scan_campaigns (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -117,6 +155,28 @@ CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_program
 	ON zero_scan_requests(program_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_zero_scan_requests_campaign
 	ON zero_scan_requests(campaign_id, status, run_after, created_at);
+
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_constraint
+		WHERE conname = 'zero_scan_runs_scan_request_id_fkey'
+		  AND conrelid = 'zero_scan_runs'::regclass
+	) THEN
+		ALTER TABLE zero_scan_runs
+			ADD CONSTRAINT zero_scan_runs_scan_request_id_fkey
+			FOREIGN KEY (scan_request_id) REFERENCES zero_scan_requests(id) ON DELETE SET NULL;
+	END IF;
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_constraint
+		WHERE conname = 'zero_scan_runs_scan_campaign_id_fkey'
+		  AND conrelid = 'zero_scan_runs'::regclass
+	) THEN
+		ALTER TABLE zero_scan_runs
+			ADD CONSTRAINT zero_scan_runs_scan_campaign_id_fkey
+			FOREIGN KEY (scan_campaign_id) REFERENCES zero_scan_campaigns(id) ON DELETE SET NULL;
+	END IF;
+END $$;
 
 ALTER TABLE zero_scan_requests
 	ADD COLUMN IF NOT EXISTS progress_stage text NOT NULL DEFAULT '',

@@ -194,6 +194,10 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 		fmt.Fprintln(parent.OutOrStdout(), "no due programs")
 		return nil
 	}
+	cycleID, err := repo.StartDefaultScanCycle(ctx, parallelism, len(programs))
+	if err != nil {
+		return err
+	}
 
 	jobs := make(chan db.Program)
 	var wg sync.WaitGroup
@@ -204,7 +208,14 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 		go func() {
 			defer wg.Done()
 			for program := range jobs {
-				if err := runProgramPipeline(ctx, parent, repo, program, cfg); err != nil {
+				if err := runProgramPipeline(ctx, parent, repo, program, cfg, cycleID); err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+				}
+				if err := repo.RefreshDefaultScanCycle(ctx, cycleID); err != nil {
 					mu.Lock()
 					if firstErr == nil {
 						firstErr = err
@@ -219,18 +230,23 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	}
 	close(jobs)
 	wg.Wait()
+	if err := repo.RefreshDefaultScanCycle(ctx, cycleID); err != nil && firstErr == nil {
+		firstErr = err
+	}
 	return firstErr
 }
 
-func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program, cfg config.Config) error {
+func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program, cfg config.Config, cycleID string) error {
 	fmt.Fprintf(parent.OutOrStdout(), "zero program pipeline starting: %s/%s %s\n", program.Platform, program.Handle, program.ID)
 	if err := repo.MarkProgramScanStarted(ctx, program.ID); err != nil {
 		return err
 	}
-	scanID, err := startScanRun(ctx, repo, "full", program.ID)
+	correlation := scanRunCorrelation{DefaultScanCycleID: cycleID}
+	scanID, err := startScanRunWithCorrelation(ctx, repo, "full", program.ID, correlation)
 	if err != nil {
 		return err
 	}
+	correlation.ParentScanRunID = scanID
 	steps := [][]string{
 		{"enum", "subfinder", "--program-id", program.ID},
 		{"probe", "dnsx", "--program-id", program.ID},
@@ -243,7 +259,7 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 	}
 	for _, step := range steps {
 		fmt.Fprintf(parent.OutOrStdout(), "zero program step %s/%s: %v\n", program.Platform, program.Handle, step)
-		if err := runChildE(parent, step...); err != nil {
+		if err := runChildEWithCorrelation(parent, correlation, step...); err != nil {
 			alertOnTimeout(ctx, parent, cfg, program.ID, program.Handle, step, err)
 			return finishScanRun(ctx, repo, scanID, err, 0, 0, map[string]any{
 				"program_id": program.ID,

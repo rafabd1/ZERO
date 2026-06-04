@@ -26,7 +26,7 @@ func newEnumCommand() *cobra.Command {
 			}
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "enum", programID)
+			scanID, err := startScanRun(ctx, cmd, repo, "enum", programID)
 			if err != nil {
 				return err
 			}

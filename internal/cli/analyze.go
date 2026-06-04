@@ -54,7 +54,7 @@ func newAnalyzeCommand() *cobra.Command {
 			}
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "intel", cvesProgramID)
+			scanID, err := startScanRun(ctx, cmd, repo, "intel", cvesProgramID)
 			if err != nil {
 				return err
 			}
@@ -130,7 +130,7 @@ func newAnalyzeCommand() *cobra.Command {
 				retries = 1
 			}
 			timeout := firstPositive(nucleiTimeout, 8)
-			scanID, err := startScanRun(ctx, repo, "nuclei", nucleiProgramID)
+			scanID, err := startScanRun(ctx, cmd, repo, "nuclei", nucleiProgramID)
 			if err != nil {
 				return err
 			}

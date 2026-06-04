@@ -518,27 +518,10 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 			SELECT *
 			FROM zero_scan_campaigns
 			WHERE id = $1::uuid
-		), campaign_programs AS (
-			SELECT DISTINCT program_id
-			FROM zero_scan_requests
-			WHERE campaign_id = $1::uuid
-			  AND program_id IS NOT NULL
-		), campaign_request_windows AS (
-			SELECT
-				r.id AS request_id,
-				r.program_id,
-				COALESCE(r.started_at, r.locked_at, r.created_at) AS since,
-				COALESCE(r.finished_at, r.updated_at, now()) + interval '2 minutes' AS until
-			FROM zero_scan_requests r
-			WHERE r.campaign_id = $1::uuid
-			  AND r.program_id IS NOT NULL
 		), campaign_scan_runs AS (
 			SELECT DISTINCT sr.id, sr.program_id, sr.run_type, sr.started_at
 			FROM zero_scan_runs sr
-			JOIN campaign_request_windows crw ON crw.program_id = sr.program_id
-			WHERE sr.run_type <> 'full'
-			  AND sr.started_at >= crw.since
-			  AND sr.started_at <= crw.until
+			WHERE sr.scan_campaign_id = $1::uuid
 		), campaign_shape AS (
 			SELECT
 				CASE
@@ -786,70 +769,36 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) defaultScans(w http.ResponseWriter, r *http.Request) {
 	p := listParamsFromRequest(r, 25)
 	rows, err := s.repo.QueryJSONRows(r.Context(), `
-		WITH full_runs AS (
+		WITH shaped AS (
 			SELECT
-				sr.*,
-				lag(sr.started_at) OVER (ORDER BY sr.started_at) AS previous_started_at
-			FROM zero_scan_runs sr
-			WHERE sr.run_type = 'full'
-			  AND sr.started_at IS NOT NULL
-		), marked AS (
-			SELECT
-				*,
-				CASE
-					WHEN previous_started_at IS NULL THEN 1
-					WHEN started_at - previous_started_at > interval '6 hours' THEN 1
-					ELSE 0
-				END AS starts_cycle
-			FROM full_runs
-		), grouped AS (
-			SELECT
-				*,
-				sum(starts_cycle) OVER (ORDER BY started_at) AS cycle_seq
-			FROM marked
-		), cycles AS (
-			SELECT
-				cycle_seq,
-				md5(min(started_at)::text || ':' || max(started_at)::text || ':' || count(*)::text) AS id,
-				min(started_at) AS started_at,
-				max(started_at) AS last_started_at,
-				max(COALESCE(finished_at, started_at)) AS last_activity_at,
-				count(*)::int AS total_requests,
-				count(*) FILTER (WHERE status = 'running')::int AS running_requests,
-				count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded_requests,
-				count(*) FILTER (WHERE status = 'failed')::int AS failed_requests,
-				count(*) FILTER (WHERE status = 'canceled')::int AS canceled_requests,
-				COALESCE(sum(input_count), 0)::int AS input_count,
-				COALESCE(sum(inserted_count), 0)::int AS inserted_count,
-				COALESCE(sum(updated_count), 0)::int AS updated_count,
-				COALESCE(sum(unchanged_count), 0)::int AS unchanged_count
-			FROM grouped
-			GROUP BY cycle_seq
-		), shaped AS (
-			SELECT
-				*,
-				CASE
-					WHEN running_requests > 0 THEN 'running'
-					WHEN failed_requests > 0 AND succeeded_requests > 0 THEN 'partial'
-					WHEN failed_requests > 0 THEN 'failed'
-					WHEN canceled_requests > 0 AND succeeded_requests = 0 THEN 'canceled'
-					ELSE 'succeeded'
-				END AS status,
-				CASE WHEN running_requests > 0 THEN now() ELSE last_activity_at END AS updated_at,
-				CASE WHEN running_requests > 0 THEN NULL ELSE last_activity_at END AS finished_at
-			FROM cycles
+				c.*,
+				COALESCE(stats.input_count, 0)::int AS input_count,
+				COALESCE(stats.inserted_count, 0)::int AS inserted_count,
+				COALESCE(stats.updated_count, 0)::int AS updated_count,
+				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count
+			FROM zero_default_scan_cycles c
+			LEFT JOIN LATERAL (
+				SELECT
+					sum(input_count) AS input_count,
+					sum(inserted_count) AS inserted_count,
+					sum(updated_count) AS updated_count,
+					sum(unchanged_count) AS unchanged_count
+				FROM zero_scan_runs sr
+				WHERE sr.default_scan_cycle_id = c.id
+				  AND sr.run_type = 'full'
+			) stats ON true
 		)
 		SELECT jsonb_build_object(
 			'id', id,
 			'name', 'Default Scan ' || to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC',
 			'status', status,
-			'parallelism', NULL,
-			'total_requests', total_requests,
+			'parallelism', parallelism,
+			'total_requests', total_programs,
 			'queued_requests', 0,
-			'running_requests', running_requests,
-			'succeeded_requests', succeeded_requests,
-			'failed_requests', failed_requests,
-			'canceled_requests', canceled_requests,
+			'running_requests', running_programs,
+			'succeeded_requests', succeeded_programs,
+			'failed_requests', failed_programs,
+			'canceled_requests', canceled_programs,
 			'started_at', started_at,
 			'finished_at', finished_at,
 			'created_at', started_at,
@@ -859,7 +808,7 @@ func (s *Server) defaultScans(w http.ResponseWriter, r *http.Request) {
 			'updated_count', updated_count,
 			'unchanged_count', unchanged_count,
 			'stats', jsonb_build_object(
-				'program_scans', total_requests,
+				'program_scans', total_programs,
 				'inputs', input_count,
 				'inserted', inserted_count,
 				'updated', updated_count,
@@ -884,81 +833,42 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.repo.QueryJSONRows(r.Context(), `
-		WITH full_runs AS (
+		WITH shaped AS (
 			SELECT
-				sr.*,
-				lag(sr.started_at) OVER (ORDER BY sr.started_at) AS previous_started_at
-			FROM zero_scan_runs sr
-			WHERE sr.run_type = 'full'
-			  AND sr.started_at IS NOT NULL
-		), marked AS (
-			SELECT
-				*,
-				CASE
-					WHEN previous_started_at IS NULL THEN 1
-					WHEN started_at - previous_started_at > interval '6 hours' THEN 1
-					ELSE 0
-				END AS starts_cycle
-			FROM full_runs
-		), grouped AS (
-			SELECT
-				*,
-				sum(starts_cycle) OVER (ORDER BY started_at) AS cycle_seq
-			FROM marked
-		), cycles AS (
-			SELECT
-				cycle_seq,
-				md5(min(started_at)::text || ':' || max(started_at)::text || ':' || count(*)::text) AS id,
-				min(started_at) AS started_at,
-				max(started_at) AS last_started_at,
-				max(COALESCE(finished_at, started_at)) AS last_activity_at,
-				count(*)::int AS total_requests,
-				count(*) FILTER (WHERE status = 'running')::int AS running_requests,
-				count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded_requests,
-				count(*) FILTER (WHERE status = 'failed')::int AS failed_requests,
-				count(*) FILTER (WHERE status = 'canceled')::int AS canceled_requests,
-				COALESCE(sum(input_count), 0)::int AS input_count,
-				COALESCE(sum(inserted_count), 0)::int AS inserted_count,
-				COALESCE(sum(updated_count), 0)::int AS updated_count,
-				COALESCE(sum(unchanged_count), 0)::int AS unchanged_count
-			FROM grouped
-			GROUP BY cycle_seq
-		), shaped AS (
-			SELECT
-				*,
-				CASE
-					WHEN running_requests > 0 THEN 'running'
-					WHEN failed_requests > 0 AND succeeded_requests > 0 THEN 'partial'
-					WHEN failed_requests > 0 THEN 'failed'
-					WHEN canceled_requests > 0 AND succeeded_requests = 0 THEN 'canceled'
-					ELSE 'succeeded'
-				END AS status,
-				CASE WHEN running_requests > 0 THEN now() ELSE last_activity_at END AS updated_at,
-				CASE WHEN running_requests > 0 THEN NULL ELSE last_activity_at END AS finished_at
-			FROM cycles
+				c.*,
+				COALESCE(stats.input_count, 0)::int AS input_count,
+				COALESCE(stats.inserted_count, 0)::int AS inserted_count,
+				COALESCE(stats.updated_count, 0)::int AS updated_count,
+				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count
+			FROM zero_default_scan_cycles c
+			LEFT JOIN LATERAL (
+				SELECT
+					sum(input_count) AS input_count,
+					sum(inserted_count) AS inserted_count,
+					sum(updated_count) AS updated_count,
+					sum(unchanged_count) AS unchanged_count
+				FROM zero_scan_runs sr
+				WHERE sr.default_scan_cycle_id = c.id
+				  AND sr.run_type = 'full'
+			) stats ON true
 		), cycle AS (
 			SELECT *
 			FROM shaped
-			WHERE id = $1
+			WHERE id = $1::uuid
 		), cycle_runs AS (
 			SELECT
-				g.*,
+				sr.*,
 				COALESCE(p.handle, '') AS program_handle,
 				COALESCE(p.platform, '') AS program_platform,
 				COALESCE(p.program_url, '') AS program_url
-			FROM grouped g
-			JOIN cycle c ON c.cycle_seq = g.cycle_seq
-			LEFT JOIN zero_programs p ON p.id = g.program_id
+			FROM zero_scan_runs sr
+			JOIN cycle c ON c.id = sr.default_scan_cycle_id
+			LEFT JOIN zero_programs p ON p.id = sr.program_id
+			WHERE sr.run_type = 'full'
 		), related_scan_runs AS (
 			SELECT DISTINCT sr.id, sr.program_id, sr.run_type, sr.started_at
 			FROM zero_scan_runs sr
-			JOIN cycle_runs cr ON cr.program_id = sr.program_id
-			WHERE sr.id = cr.id
-			   OR (
-				sr.id <> cr.id
-				AND sr.started_at >= cr.started_at
-				AND sr.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
-			   )
+			JOIN cycle_runs cr ON cr.id = sr.id OR sr.parent_scan_run_id = cr.id
 		)
 		SELECT jsonb_build_object(
 			'scan', (
@@ -966,13 +876,13 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 					'id', c.id,
 					'name', 'Default Scan ' || to_char(c.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC',
 					'status', c.status,
-					'parallelism', NULL,
-					'total_requests', c.total_requests,
+					'parallelism', c.parallelism,
+					'total_requests', c.total_programs,
 					'queued_requests', 0,
-					'running_requests', c.running_requests,
-					'succeeded_requests', c.succeeded_requests,
-					'failed_requests', c.failed_requests,
-					'canceled_requests', c.canceled_requests,
+					'running_requests', c.running_programs,
+					'succeeded_requests', c.succeeded_programs,
+					'failed_requests', c.failed_programs,
+					'canceled_requests', c.canceled_programs,
 					'started_at', c.started_at,
 					'finished_at', c.finished_at,
 					'created_at', c.started_at,
@@ -982,7 +892,7 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 					'updated_count', c.updated_count,
 					'unchanged_count', c.unchanged_count,
 					'stats', jsonb_build_object(
-						'program_scans', c.total_requests,
+						'program_scans', c.total_programs,
 						'inputs', c.input_count,
 						'inserted', c.inserted_count,
 						'updated', c.updated_count,
@@ -992,10 +902,10 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 				FROM cycle c
 			),
 			'request_counts', jsonb_build_object(
-				'running', COALESCE((SELECT running_requests FROM cycle), 0),
-				'succeeded', COALESCE((SELECT succeeded_requests FROM cycle), 0),
-				'failed', COALESCE((SELECT failed_requests FROM cycle), 0),
-				'canceled', COALESCE((SELECT canceled_requests FROM cycle), 0)
+				'running', COALESCE((SELECT running_programs FROM cycle), 0),
+				'succeeded', COALESCE((SELECT succeeded_programs FROM cycle), 0),
+				'failed', COALESCE((SELECT failed_programs FROM cycle), 0),
+				'canceled', COALESCE((SELECT canceled_programs FROM cycle), 0)
 			),
 			'recent_requests', COALESCE((
 				SELECT jsonb_agg(row ORDER BY sort_at DESC)
@@ -1041,18 +951,14 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 								)
 								FROM zero_scan_runs latest
 								WHERE latest.program_id = cr.program_id
-								  AND latest.id <> cr.id
-								  AND latest.started_at >= cr.started_at
-								  AND latest.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+								  AND latest.parent_scan_run_id = cr.id
 								ORDER BY latest.started_at DESC
 								LIMIT 1
 							), '{}'::jsonb)
 						) AS data
 						FROM zero_scan_runs child
 						WHERE child.program_id = cr.program_id
-						  AND child.id <> cr.id
-						  AND child.started_at >= cr.started_at
-						  AND child.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+						  AND child.parent_scan_run_id = cr.id
 					) progress ON true
 					ORDER BY cr.started_at DESC
 					LIMIT 250
@@ -1096,18 +1002,14 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 								)
 								FROM zero_scan_runs latest
 								WHERE latest.program_id = cr.program_id
-								  AND latest.id <> cr.id
-								  AND latest.started_at >= cr.started_at
-								  AND latest.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+								  AND latest.parent_scan_run_id = cr.id
 								ORDER BY latest.started_at DESC
 								LIMIT 1
 							), '{}'::jsonb)
 						) AS data
 						FROM zero_scan_runs child
 						WHERE child.program_id = cr.program_id
-						  AND child.id <> cr.id
-						  AND child.started_at >= cr.started_at
-						  AND child.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+						  AND child.parent_scan_run_id = cr.id
 					) progress ON true
 					WHERE cr.status = 'running'
 					ORDER BY cr.started_at ASC
@@ -1276,9 +1178,7 @@ func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {
 					)
 					FROM zero_scan_runs latest
 					WHERE latest.program_id = sr.program_id
-					  AND latest.id <> sr.id
-					  AND latest.started_at >= sr.started_at
-					  AND latest.started_at <= COALESCE(sr.finished_at, now()) + interval '2 minutes'
+					  AND latest.parent_scan_run_id = sr.id
 					ORDER BY latest.started_at DESC
 					LIMIT 1
 				), '{}'::jsonb)
@@ -1286,9 +1186,7 @@ func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {
 			FROM zero_scan_runs child
 			WHERE sr.run_type = 'full'
 			  AND child.program_id = sr.program_id
-			  AND child.id <> sr.id
-			  AND child.started_at >= sr.started_at
-			  AND child.started_at <= COALESCE(sr.finished_at, now()) + interval '2 minutes'
+			  AND child.parent_scan_run_id = sr.id
 		) progress ON sr.run_type = 'full'
 		WHERE ($1 = '' OR sr.run_type = $1)
 		ORDER BY sr.started_at DESC
@@ -1312,14 +1210,9 @@ func (s *Server) scanDetail(w http.ResponseWriter, r *http.Request) {
 		), related_scan_runs AS (
 			SELECT sr.*
 			FROM zero_scan_runs sr
-			JOIN scan s ON s.program_id = sr.program_id
+			JOIN scan s ON s.id = sr.id OR sr.parent_scan_run_id = s.id
 			WHERE sr.id = s.id
-			   OR (
-				s.run_type = 'full'
-				AND sr.id <> s.id
-				AND sr.started_at >= s.started_at
-				AND sr.started_at <= COALESCE(s.finished_at, now()) + interval '2 minutes'
-			   )
+			   OR s.run_type = 'full'
 		), child_scan_runs AS (
 			SELECT sr.*
 			FROM related_scan_runs sr

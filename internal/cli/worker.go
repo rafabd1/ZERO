@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -247,6 +248,7 @@ func runQueuedScanRequest(cmd *cobra.Command, repo *db.Repository, request db.Sc
 	}
 	if err == nil {
 		opts.ScanRequestID = request.ID
+		opts.ScanCampaignID = request.CampaignID
 	}
 	stopHeartbeat := startScanRequestHeartbeat(ctx, cmd, repo, request.ID, cfg.Worker.ScanRequestHeartbeat)
 	defer stopHeartbeat()
@@ -372,12 +374,33 @@ func runChild(parent *cobra.Command, args ...string) {
 }
 
 func runChildE(parent *cobra.Command, args ...string) error {
+	return runChildEWithCorrelation(parent, scanRunCorrelation{}, args...)
+}
+
+func runChildEWithCorrelation(parent *cobra.Command, correlation scanRunCorrelation, args ...string) error {
 	child := newRootCommand()
-	child.SetArgs(args)
+	child.SetArgs(appendInternalScanRunCorrelation(args, correlation))
 	child.SetOut(parent.OutOrStdout())
 	child.SetErr(parent.ErrOrStderr())
 	if err := child.Execute(); err != nil {
 		return fmt.Errorf("task %v failed: %w", args, err)
 	}
 	return nil
+}
+
+func appendInternalScanRunCorrelation(args []string, correlation scanRunCorrelation) []string {
+	out := append([]string{}, args...)
+	if strings.TrimSpace(correlation.DefaultScanCycleID) != "" {
+		out = append(out, "--"+internalDefaultScanCycleFlag, strings.TrimSpace(correlation.DefaultScanCycleID))
+	}
+	if strings.TrimSpace(correlation.ParentScanRunID) != "" {
+		out = append(out, "--"+internalParentScanRunFlag, strings.TrimSpace(correlation.ParentScanRunID))
+	}
+	if strings.TrimSpace(correlation.ScanRequestID) != "" {
+		out = append(out, "--"+internalScanRequestFlag, strings.TrimSpace(correlation.ScanRequestID))
+	}
+	if strings.TrimSpace(correlation.ScanCampaignID) != "" {
+		out = append(out, "--"+internalScanCampaignFlag, strings.TrimSpace(correlation.ScanCampaignID))
+	}
+	return out
 }

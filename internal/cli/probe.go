@@ -38,7 +38,7 @@ func newProbeCommand() *cobra.Command {
 			}
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "probe", dnsxProgramID)
+			scanID, err := startScanRun(ctx, cmd, repo, "probe", dnsxProgramID)
 			if err != nil {
 				return err
 			}
@@ -82,7 +82,7 @@ func newProbeCommand() *cobra.Command {
 			}
 			defer repo.Close()
 
-			scanID, err := startScanRun(ctx, repo, "probe", programID)
+			scanID, err := startScanRun(ctx, cmd, repo, "probe", programID)
 			if err != nil {
 				return err
 			}

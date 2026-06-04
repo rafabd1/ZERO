@@ -85,7 +85,7 @@ func runScopeSync(parent *cobra.Command, cfg config.Config, providers []string) 
 	if len(providers) == 0 {
 		return fmt.Errorf("no scope providers configured")
 	}
-	scanID, err := startScanRun(ctx, repo, "scope", "")
+	scanID, err := startScanRun(ctx, parent, repo, "scope", "")
 	if err != nil {
 		return err
 	}

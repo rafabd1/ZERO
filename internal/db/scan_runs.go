@@ -4,19 +4,40 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
+type ScanRunOptions struct {
+	DefaultScanCycleID string
+	ParentScanRunID    string
+	ScanRequestID      string
+	ScanCampaignID     string
+}
+
 func (r *Repository) StartScanRun(ctx context.Context, runType, workerID, programID string) (string, error) {
+	return r.StartScanRunWithOptions(ctx, runType, workerID, programID, ScanRunOptions{})
+}
+
+func (r *Repository) StartScanRunWithOptions(ctx context.Context, runType, workerID, programID string, opts ScanRunOptions) (string, error) {
 	if workerID == "" {
 		workerID = "cli"
 	}
+	programID = strings.TrimSpace(programID)
+	opts.DefaultScanCycleID = strings.TrimSpace(opts.DefaultScanCycleID)
+	opts.ParentScanRunID = strings.TrimSpace(opts.ParentScanRunID)
+	opts.ScanRequestID = strings.TrimSpace(opts.ScanRequestID)
+	opts.ScanCampaignID = strings.TrimSpace(opts.ScanCampaignID)
 	var id string
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO zero_scan_runs(run_type, worker_id, program_id)
-		VALUES ($1,$2,NULLIF($3, '')::uuid)
+		INSERT INTO zero_scan_runs(
+			run_type, worker_id, program_id, default_scan_cycle_id, parent_scan_run_id, scan_request_id, scan_campaign_id
+		)
+		VALUES (
+			$1,$2,NULLIF($3, '')::uuid,NULLIF($4, '')::uuid,NULLIF($5, '')::uuid,NULLIF($6, '')::uuid,NULLIF($7, '')::uuid
+		)
 		RETURNING id::text
-	`, runType, workerID, programID).Scan(&id)
+	`, runType, workerID, programID, opts.DefaultScanCycleID, opts.ParentScanRunID, opts.ScanRequestID, opts.ScanCampaignID).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("start scan run: %w", err)
 	}
@@ -44,6 +65,77 @@ func (r *Repository) FinishScanRun(ctx context.Context, id, status string, input
 	`, id, status, inputCount, insertedCount, errorText, string(rawStats))
 	if err != nil {
 		return fmt.Errorf("finish scan run: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) StartDefaultScanCycle(ctx context.Context, parallelism, totalPrograms int) (string, error) {
+	if parallelism < 1 {
+		parallelism = 1
+	}
+	if parallelism > 64 {
+		parallelism = 64
+	}
+	if totalPrograms < 0 {
+		totalPrograms = 0
+	}
+	var id string
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO zero_default_scan_cycles(parallelism, total_programs, running_programs, metadata)
+		VALUES ($1,$2,0,jsonb_build_object('source', 'run due'))
+		RETURNING id::text
+	`, parallelism, totalPrograms).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("start default scan cycle: %w", err)
+	}
+	return id, nil
+}
+
+func (r *Repository) RefreshDefaultScanCycle(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		WITH counts AS (
+			SELECT
+				count(*) FILTER (WHERE status = 'running')::int AS running,
+				count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
+				count(*) FILTER (WHERE status = 'failed')::int AS failed,
+				count(*) FILTER (WHERE status = 'canceled')::int AS canceled,
+				count(*)::int AS total
+			FROM zero_scan_runs
+			WHERE default_scan_cycle_id = $1::uuid
+			  AND run_type = 'full'
+		)
+		UPDATE zero_default_scan_cycles c
+		SET running_programs = counts.running,
+			succeeded_programs = counts.succeeded,
+			failed_programs = counts.failed,
+			canceled_programs = counts.canceled,
+			total_programs = GREATEST(c.total_programs, counts.total),
+			status = CASE
+				WHEN counts.running > 0 THEN 'running'
+				WHEN counts.failed > 0 AND counts.succeeded > 0 THEN 'partial'
+				WHEN counts.failed > 0 THEN 'failed'
+				WHEN counts.canceled > 0 AND counts.succeeded = 0 THEN 'canceled'
+				ELSE 'succeeded'
+			END,
+			finished_at = CASE
+				WHEN counts.running = 0 THEN COALESCE(c.finished_at, now())
+				ELSE NULL
+			END,
+			error = CASE
+				WHEN counts.failed > 0 AND counts.succeeded > 0 THEN counts.failed::text || ' default program scan(s) failed; completed partially'
+				WHEN counts.failed > 0 THEN 'all default program scans failed'
+				ELSE ''
+			END,
+			updated_at = now()
+		FROM counts
+		WHERE c.id = $1::uuid
+	`, id)
+	if err != nil {
+		return fmt.Errorf("refresh default scan cycle: %w", err)
 	}
 	return nil
 }
