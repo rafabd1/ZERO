@@ -520,9 +520,22 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 			FROM zero_scan_requests
 			WHERE campaign_id = $1::uuid
 			  AND program_id IS NOT NULL
-		), campaign_window AS (
-			SELECT COALESCE(started_at, created_at) AS since
-			FROM campaign
+		), campaign_request_windows AS (
+			SELECT
+				r.id AS request_id,
+				r.program_id,
+				COALESCE(r.started_at, r.locked_at, r.created_at) AS since,
+				COALESCE(r.finished_at, r.updated_at, now()) + interval '2 minutes' AS until
+			FROM zero_scan_requests r
+			WHERE r.campaign_id = $1::uuid
+			  AND r.program_id IS NOT NULL
+		), campaign_scan_runs AS (
+			SELECT DISTINCT sr.id, sr.program_id, sr.run_type, sr.started_at
+			FROM zero_scan_runs sr
+			JOIN campaign_request_windows crw ON crw.program_id = sr.program_id
+			WHERE sr.run_type <> 'full'
+			  AND sr.started_at >= crw.since
+			  AND sr.started_at <= crw.until
 		), campaign_shape AS (
 			SELECT
 				CASE
@@ -650,6 +663,41 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 					LIMIT 50
 				) running
 			), '[]'::jsonb),
+			'finding_counts', jsonb_build_object(
+				'total', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					WHERE (
+						n.scan_run_id IN (SELECT id FROM campaign_scan_runs)
+						OR EXISTS (
+							SELECT 1
+							FROM zero_change_events ce
+							JOIN campaign_scan_runs csr ON csr.id = ce.scan_run_id
+							WHERE ce.entity_type = 'candidate_finding'
+							  AND ce.entity_id = f.id
+						)
+					)
+				), 0),
+				'nuclei_confirmed', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					WHERE n.scan_run_id IN (SELECT id FROM campaign_scan_runs)
+				), 0),
+				'passive_unconfirmed', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					WHERE f.nuclei_result_id IS NULL
+					  AND EXISTS (
+						SELECT 1
+						FROM zero_change_events ce
+						JOIN campaign_scan_runs csr ON csr.id = ce.scan_run_id
+						WHERE ce.entity_type = 'candidate_finding'
+						  AND ce.entity_id = f.id
+					  )
+				), 0)
+			),
 			'findings', COALESCE((
 				SELECT jsonb_agg(row ORDER BY sort_at DESC)
 				FROM (
@@ -673,13 +721,20 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 						) AS row,
 						f.first_seen_at AS sort_at
 					FROM zero_candidate_findings f
-					JOIN campaign_programs cp ON cp.program_id = f.program_id
-					JOIN campaign_window cw ON true
+					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
 					LEFT JOIN zero_programs p ON p.id = f.program_id
 					LEFT JOIN zero_http_services s ON s.id = f.http_service_id
-					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
 					LEFT JOIN zero_vulnerability_records v ON v.id = f.vulnerability_id
-					WHERE f.first_seen_at >= cw.since
+					WHERE (
+						n.scan_run_id IN (SELECT id FROM campaign_scan_runs)
+						OR EXISTS (
+							SELECT 1
+							FROM zero_change_events ce
+							JOIN campaign_scan_runs csr ON csr.id = ce.scan_run_id
+							WHERE ce.entity_type = 'candidate_finding'
+							  AND ce.entity_id = f.id
+						)
+					)
 					ORDER BY f.first_seen_at DESC
 					LIMIT 50
 				) recent_findings
@@ -704,11 +759,9 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 						) AS row,
 						n.first_seen_at AS sort_at
 					FROM zero_nuclei_results n
-					JOIN campaign_programs cp ON cp.program_id = n.program_id
-					JOIN campaign_window cw ON true
 					LEFT JOIN zero_programs p ON p.id = n.program_id
 					LEFT JOIN zero_http_services s ON s.id = n.http_service_id
-					WHERE n.first_seen_at >= cw.since
+					WHERE n.scan_run_id IN (SELECT id FROM campaign_scan_runs)
 					ORDER BY n.first_seen_at DESC
 					LIMIT 50
 				) recent_nuclei
@@ -746,10 +799,46 @@ func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {
 			'updated_count', sr.updated_count,
 			'unchanged_count', sr.unchanged_count,
 			'error', sr.error,
-			'stats', sr.stats
+			'stats', sr.stats,
+			'progress', COALESCE(progress.data, '{}'::jsonb)
 		)
 		FROM zero_scan_runs sr
 		LEFT JOIN zero_programs p ON p.id = sr.program_id
+		LEFT JOIN LATERAL (
+			SELECT jsonb_build_object(
+				'steps_total', 8,
+				'child_scan_runs', count(*)::int,
+				'child_succeeded', count(*) FILTER (WHERE child.status = 'succeeded')::int,
+				'child_failed', count(*) FILTER (WHERE child.status = 'failed')::int,
+				'child_running', count(*) FILTER (WHERE child.status = 'running')::int,
+				'current_step', COALESCE((
+					SELECT jsonb_build_object(
+						'id', latest.id,
+						'run_type', latest.run_type,
+						'status', latest.status,
+						'started_at', latest.started_at,
+						'finished_at', latest.finished_at,
+						'input_count', latest.input_count,
+						'inserted_count', latest.inserted_count,
+						'error', latest.error,
+						'stats', latest.stats
+					)
+					FROM zero_scan_runs latest
+					WHERE latest.program_id = sr.program_id
+					  AND latest.id <> sr.id
+					  AND latest.started_at >= sr.started_at
+					  AND latest.started_at <= COALESCE(sr.finished_at, now()) + interval '2 minutes'
+					ORDER BY latest.started_at DESC
+					LIMIT 1
+				), '{}'::jsonb)
+			) AS data
+			FROM zero_scan_runs child
+			WHERE sr.run_type = 'full'
+			  AND child.program_id = sr.program_id
+			  AND child.id <> sr.id
+			  AND child.started_at >= sr.started_at
+			  AND child.started_at <= COALESCE(sr.finished_at, now()) + interval '2 minutes'
+		) progress ON sr.run_type = 'full'
 		WHERE ($1 = '' OR sr.run_type = $1)
 		ORDER BY sr.started_at DESC
 		LIMIT $2 OFFSET $3

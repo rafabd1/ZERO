@@ -169,6 +169,7 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 				evidence_hash,
 				jsonb_build_object(
 					'source', 'nvd-passive',
+					'scan_run_id', $2,
 					'validation_status', 'potential_unconfirmed',
 					'nuclei_validation', nuclei_validation_reason,
 					'nuclei_validation_reason', nuclei_validation_reason,
@@ -291,6 +292,7 @@ func (r *Repository) UpsertUnconfirmedFingerprintFindings(ctx context.Context, p
 				evidence_hash,
 				jsonb_build_object(
 					'source', 'custom-fingerprint-passive',
+					'scan_run_id', $2,
 					'validation_status', 'potential_unconfirmed',
 					'nuclei_validation', nuclei_validation_reason,
 					'nuclei_validation_reason', nuclei_validation_reason,

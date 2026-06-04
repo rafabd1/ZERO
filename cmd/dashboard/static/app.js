@@ -43,7 +43,7 @@ async function loadAll(showLoading = true) {
     const [stats, programs, scans, campaigns, findings] = await Promise.all([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/programs"),
-      getJSON("/api/v1/scans/latest?run_type=full"),
+      getJSON("/api/v1/scans/latest?run_type=full&limit=100"),
       getJSON("/api/v1/scan-campaigns"),
       getJSON("/api/v1/findings?limit=100"),
     ]);
@@ -55,6 +55,7 @@ async function loadAll(showLoading = true) {
     renderGlobalStats();
     renderPrograms();
     renderScans();
+    renderDefaultScanProgress();
     renderCampaigns();
     renderFindings();
     if (state.selectedProgramId) {
@@ -230,6 +231,46 @@ function renderScans() {
   }
 }
 
+function renderDefaultScanProgress() {
+  const running = state.scans.filter((scan) => scan.status === "running");
+  setText("defaultScanCount", `${running.length} running`);
+  const container = $("defaultScanProgress");
+  if (running.length === 0) {
+    container.innerHTML = `<p class="muted">No default program scans are running.</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="work-list">
+      ${running.map((scan) => {
+        const progress = scanProgressPercent(scan);
+        const current = scanCurrentStep(scan);
+        const progressData = scan.progress || {};
+        return `
+          <div class="work-row">
+            <div class="work-head">
+              <div>
+                <strong>${escapeHTML(scan.program_handle || shortID(scan.program_id) || "unknown")}</strong>
+                <small>${escapeHTML(current)}</small>
+              </div>
+              <div>
+                ${scanStatusPill(scan.status)}
+                <small>${timeAgo(scan.started_at)}</small>
+              </div>
+            </div>
+            <div class="thin-progress"><span style="width: ${progress}%"></span></div>
+            <div class="work-meta">
+              <span>${fmt(progressData.child_succeeded)} succeeded step runs</span>
+              <span>${fmt(progressData.child_running)} running step runs</span>
+              <span>${fmt(progressData.child_failed)} failed step runs</span>
+              <span>${fmt(scan.input_count)} full inputs</span>
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function renderCampaigns() {
   setText("campaignCount", `${state.campaigns.length} rows`);
   const tbody = $("campaignRows");
@@ -287,6 +328,7 @@ async function loadCampaignDetail(campaignID, showLoading = true) {
 function renderCampaignDetail(detail) {
   const campaign = detail.campaign || {};
   const counts = detail.request_counts || {};
+  const findingCounts = detail.finding_counts || {};
   const findings = Array.isArray(detail.findings) ? detail.findings : [];
   const requests = Array.isArray(detail.recent_requests) ? detail.recent_requests : [];
   const runningRequests = Array.isArray(detail.running_requests) ? detail.running_requests : [];
@@ -303,7 +345,7 @@ function renderCampaignDetail(detail) {
       ${detailCard("Status", scanStatusPill(campaign.status), campaign.error || "")}
       ${detailCard("Requests", `${fmt(campaign.succeeded_requests)} succeeded`, `${fmt(campaign.running_requests)} running, ${fmt(campaign.queued_requests)} queued, ${fmt(campaign.failed_requests)} failed`)}
       ${detailCard("Parallelism", fmt(campaign.parallelism), "campaign configured")}
-      ${detailCard("Findings", fmt(findings.length), "new since campaign start")}
+      ${detailCard("Findings", fmt(findingCounts.total), `${fmt(findingCounts.nuclei_confirmed)} confirmed, ${fmt(findingCounts.passive_unconfirmed)} passive`)}
       ${detailCard("Nuclei", fmt(nuclei.length), "recent validation results")}
     </div>
     <div class="drawer-section">
@@ -669,12 +711,42 @@ function scanSummary(scan) {
   const stats = scan.stats || {};
   const parts = [];
   if (scan.finished_at) parts.push(`finished ${timeAgo(scan.finished_at)}`);
+  if (scan.status === "running") parts.push(scanCurrentStep(scan));
   if (stats.steps) parts.push(`${stats.steps} steps`);
   if (stats.stale_http_services) parts.push(`${stats.stale_http_services} stale services`);
   if (stats.handle) parts.push(stats.handle);
   if (!scan.finished_at && scan.status === "running") parts.push("program pipeline in progress");
   if (scan.error) parts.push(`error`);
   return parts.join(" | ") || "-";
+}
+
+function scanCurrentStep(scan) {
+  const progress = scan.progress || {};
+  const current = progress.current_step || {};
+  const runType = firstNonEmpty(current.run_type, "planning");
+  const status = firstNonEmpty(current.status, "running");
+  const childRuns = Number(progress.child_scan_runs || 0);
+  const total = Number(progress.steps_total || 8);
+  if (childRuns <= 0) {
+    return "waiting for first pipeline step";
+  }
+  return `${runType} ${status}: ${fmt(Math.min(childRuns + 1, total))}/${fmt(total)} pipeline steps`;
+}
+
+function scanProgressPercent(scan) {
+  const progress = scan.progress || {};
+  const total = Number(progress.steps_total || 8);
+  if (total <= 0) return 0;
+  const childRuns = Number(progress.child_scan_runs || 0);
+  const current = progress.current_step || {};
+  const completed = Number(progress.child_succeeded || 0) + Number(progress.child_failed || 0);
+  let effective = completed;
+  if (current.status === "running") {
+    effective += 0.5;
+  } else if (childRuns > completed) {
+    effective = childRuns;
+  }
+  return Math.max(0, Math.min(100, Math.round((effective / total) * 100)));
 }
 
 function timeAgo(value) {
