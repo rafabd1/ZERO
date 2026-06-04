@@ -1,6 +1,7 @@
 const state = {
   stats: null,
   programs: [],
+  defaultScans: [],
   scans: [],
   campaigns: [],
   findings: [],
@@ -43,15 +44,17 @@ async function loadAll(showLoading = true) {
     setStatus("Refreshing...");
   }
   try {
-    const [stats, programs, scans, campaigns, findings] = await Promise.all([
+    const [stats, programs, defaultScans, scans, campaigns, findings] = await Promise.all([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/programs"),
+      getJSON("/api/v1/default-scans?limit=100"),
       getJSON("/api/v1/scans/latest?run_type=full&limit=250"),
       getJSON("/api/v1/scan-campaigns"),
       getJSON("/api/v1/findings?limit=100"),
     ]);
     state.stats = stats;
     state.programs = Array.isArray(programs) ? programs : [];
+    state.defaultScans = Array.isArray(defaultScans) ? defaultScans : [];
     state.scans = Array.isArray(scans) ? scans : [];
     state.campaigns = Array.isArray(campaigns) ? campaigns : [];
     state.findings = Array.isArray(findings) ? findings : [];
@@ -62,7 +65,7 @@ async function loadAll(showLoading = true) {
     renderCampaigns();
     renderFindings();
     if (state.selectedDefaultScanId) {
-      const scan = state.scans.find((item) => item.id === state.selectedDefaultScanId);
+      const scan = state.defaultScans.find((item) => item.id === state.selectedDefaultScanId);
       if (scan) {
         await loadDefaultScanDetail(scan.id, false);
       } else {
@@ -243,14 +246,9 @@ function renderScans() {
 }
 
 function renderDefaultScanProgress() {
-  const scans = [...state.scans].sort((a, b) => {
-    const ar = a.status === "running" ? 0 : 1;
-    const br = b.status === "running" ? 0 : 1;
-    if (ar !== br) return ar - br;
-    return new Date(b.started_at || 0).getTime() - new Date(a.started_at || 0).getTime();
-  });
+  const scans = [...state.defaultScans];
   const running = scans.filter((scan) => scan.status === "running").length;
-  setText("defaultScanCount", `${fmt(running)} running, ${fmt(scans.length)} scans`);
+  setText("defaultScanCount", `${fmt(running)} running, ${fmt(scans.length)} cycles`);
   const tbody = $("defaultScanRows");
   tbody.innerHTML = "";
   for (const scan of scans) {
@@ -260,11 +258,11 @@ function renderDefaultScanProgress() {
     }
     tr.addEventListener("click", () => loadDefaultScanDetail(scan.id));
     tr.innerHTML = `
-      <td><strong>${escapeHTML(scan.program_handle || shortID(scan.program_id) || "unknown")}</strong><small>${escapeHTML(scan.program_platform || scan.run_type || "")}</small></td>
+      <td><strong>${escapeHTML(scan.name || shortID(scan.id) || "default scan")}</strong><small>${escapeHTML(shortID(scan.id))}</small></td>
       <td>${scanStatusPill(scan.status)}</td>
-      <td><strong>${escapeHTML(scanStatsSummary(scan))}</strong><small>${escapeHTML(scanStaleSummary(scan))}</small></td>
-      <td><strong>${escapeHTML(scanStepSummary(scan))}</strong><small>${escapeHTML(scanCurrentStep(scan))}</small></td>
-      <td><strong>${timeAgo(scan.finished_at || scan.started_at)}</strong><small>${escapeHTML(scanDuration(scan))}</small></td>
+      <td>${escapeHTML(campaignProgress(scan))}</td>
+      <td>${escapeHTML(defaultScanParallelism(scan))}</td>
+      <td><strong>${timeAgo(scan.updated_at || scan.finished_at || scan.started_at)}</strong><small>${escapeHTML(scanDuration(scan))}</small></td>
       <td><button class="ghost-button row-action" type="button" data-scan-detail="${escapeHTML(scan.id)}">View</button></td>
     `;
     const detailButton = tr.querySelector("[data-scan-detail]");
@@ -277,7 +275,7 @@ function renderDefaultScanProgress() {
     tbody.appendChild(tr);
   }
   if (scans.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="muted">No default program scans yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">No default scan cycles yet.</td></tr>`;
   }
 }
 
@@ -293,7 +291,7 @@ async function loadDefaultScanDetail(scanID, showLoading = true) {
     $("defaultScanDetailBody").innerHTML = "";
   }
   try {
-    const detail = await getJSON(`/api/v1/scans/${encodeURIComponent(scanID)}`);
+    const detail = await getJSON(`/api/v1/default-scans/${encodeURIComponent(scanID)}`);
     state.selectedDefaultScanDetail = detail;
     renderDefaultScanDetail(detail);
   } catch (error) {
@@ -304,21 +302,23 @@ async function loadDefaultScanDetail(scanID, showLoading = true) {
 
 function renderDefaultScanDetail(detail) {
   const scan = detail.scan || {};
-  const stepCounts = detail.step_counts || {};
-  const childRuns = Array.isArray(detail.child_scan_runs) ? detail.child_scan_runs : [];
+  const counts = detail.request_counts || {};
+  const requests = Array.isArray(detail.recent_requests) ? detail.recent_requests : [];
+  const runningRequests = Array.isArray(detail.running_requests) ? detail.running_requests : [];
   const findingCounts = detail.finding_counts || {};
   const findings = Array.isArray(detail.findings) ? detail.findings : [];
   const nuclei = Array.isArray(detail.nuclei_results) ? detail.nuclei_results : [];
   const stats = scan.stats || {};
 
-  setText("defaultScanDetailTitle", scan.program_handle || shortID(scan.program_id) || "Default Scan Detail");
-  setText("defaultScanDetailMeta", `${shortID(scan.id)} | ${scanStatsSummary(scan)} | ${timeAgo(scan.finished_at || scan.started_at)}`);
+  setText("defaultScanDetailTitle", scan.name || shortID(scan.id) || "Default Scan Detail");
+  setText("defaultScanDetailMeta", `${shortID(scan.id)} | ${campaignProgress(scan)} | ${timeAgo(scan.updated_at || scan.started_at)}`);
   $("defaultScanDetailBody").innerHTML = `
     <div class="drawer-grid">
       ${detailCard("Status", scanStatusPill(scan.status), scan.error || "")}
-      ${detailCard("Stats", escapeHTML(scanStatsSummary(scan)), scanStaleSummary(scan))}
-      ${detailCard("Step Runs", fmt(childRuns.length), `${fmt(stepCounts.succeeded)} succeeded, ${fmt(stepCounts.running)} running, ${fmt(stepCounts.failed)} failed`)}
+      ${detailCard("Program Scans", `${fmt(scan.succeeded_requests)} succeeded`, `${fmt(scan.running_requests)} running, ${fmt(scan.failed_requests)} failed`)}
+      ${detailCard("Parallelism", escapeHTML(defaultScanParallelism(scan)), "default scheduler")}
       ${detailCard("Findings", fmt(findingCounts.total), `${fmt(findingCounts.nuclei_confirmed)} confirmed, ${fmt(findingCounts.passive_unconfirmed)} passive`)}
+      ${detailCard("Nuclei", fmt(nuclei.length), "recent validation results")}
     </div>
     <div class="drawer-section">
       <h4>Scan Timing</h4>
@@ -326,16 +326,20 @@ function renderDefaultScanDetail(detail) {
         <div><dt>Started</dt><dd>${escapeHTML(scan.started_at || "-")}</dd></div>
         <div><dt>Finished</dt><dd>${escapeHTML(scan.finished_at || "-")}</dd></div>
         <div><dt>Duration</dt><dd>${escapeHTML(scanDuration(scan))}</dd></div>
-        <div><dt>Program ID</dt><dd>${escapeHTML(shortID(scan.program_id) || "-")}</dd></div>
+        <div><dt>Cycle ID</dt><dd>${escapeHTML(shortID(scan.id) || "-")}</dd></div>
       </dl>
     </div>
     <div class="drawer-section">
-      <h4>Step Counts</h4>
-      <div class="inline-pills">${renderCountPills(stepCounts)}</div>
+      <h4>Program Counts</h4>
+      <div class="inline-pills">${renderCountPills(counts)}</div>
     </div>
     <div class="drawer-section">
-      <h4>Pipeline Steps</h4>
-      ${renderDefaultScanSteps(childRuns)}
+      <h4>Running Programs</h4>
+      ${renderDefaultProgramRuns(runningRequests, "No programs are currently running in this default scan.")}
+    </div>
+    <div class="drawer-section">
+      <h4>Program Runs</h4>
+      ${renderDefaultProgramRuns(requests, "No program runs are linked to this default scan.")}
     </div>
     <div class="drawer-section">
       <h4>Scan Findings</h4>
@@ -352,19 +356,19 @@ function renderDefaultScanDetail(detail) {
   `;
 }
 
-function renderDefaultScanSteps(steps) {
-  if (steps.length === 0) {
-    return `<p class="muted">No child step runs are linked to this scan.</p>`;
+function renderDefaultProgramRuns(runs, emptyMessage) {
+  if (runs.length === 0) {
+    return `<p class="muted">${escapeHTML(emptyMessage)}</p>`;
   }
   return `
     <div class="mini-list">
-      ${steps.map((step) => `
+      ${runs.map((run) => `
         <div class="mini-row">
           <div>
-            <strong>${escapeHTML(step.run_type || "step")}</strong>
-            <small>${escapeHTML(stepStatsSummary(step))}</small>
+            <strong>${escapeHTML(run.program_handle || shortID(run.program_id) || "unknown")}</strong>
+            <small>${escapeHTML(scanStepSummary(run))}</small>
           </div>
-          <div>${scanStatusPill(step.status)}<small>${escapeHTML(scanDuration(step))}</small></div>
+          <div>${scanStatusPill(run.status)}<small>${escapeHTML(scanDuration(run))}</small></div>
         </div>
       `).join("")}
     </div>
@@ -736,6 +740,12 @@ function campaignProgress(campaign) {
   const queued = Number(campaign.queued_requests || 0);
   if (total <= 0) return "no programs";
   return `${fmt(succeeded + failed)}/${fmt(total)} done, ${fmt(running)} running, ${fmt(queued)} queued`;
+}
+
+function defaultScanParallelism(scan) {
+  const configured = Number(scan.parallelism || 0);
+  if (configured > 0) return fmt(configured);
+  return "default";
 }
 
 function statusPill(program) {

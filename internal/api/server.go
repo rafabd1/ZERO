@@ -132,6 +132,8 @@ func (s *Server) routes() {
 		ORDER BY r.created_at DESC
 		LIMIT 50
 	`))
+	s.mux.HandleFunc("GET /v1/default-scans", s.defaultScans)
+	s.mux.HandleFunc("GET /v1/default-scans/{cycle_id}", s.defaultScanDetail)
 	s.mux.HandleFunc("GET /v1/scans/latest", s.latestScans)
 	s.mux.HandleFunc("GET /v1/scans/{scan_id}", s.scanDetail)
 	s.mux.HandleFunc("GET /v1/scan-requests", s.scanRequests)
@@ -776,6 +778,454 @@ func (s *Server) scanCampaignDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(rows) == 0 {
 		writeError(w, http.StatusNotFound, "scan campaign not found")
+		return
+	}
+	writeRawJSON(w, rows[0])
+}
+
+func (s *Server) defaultScans(w http.ResponseWriter, r *http.Request) {
+	p := listParamsFromRequest(r, 25)
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		WITH full_runs AS (
+			SELECT
+				sr.*,
+				lag(sr.started_at) OVER (ORDER BY sr.started_at) AS previous_started_at
+			FROM zero_scan_runs sr
+			WHERE sr.run_type = 'full'
+			  AND sr.started_at IS NOT NULL
+		), marked AS (
+			SELECT
+				*,
+				CASE
+					WHEN previous_started_at IS NULL THEN 1
+					WHEN started_at - previous_started_at > interval '6 hours' THEN 1
+					ELSE 0
+				END AS starts_cycle
+			FROM full_runs
+		), grouped AS (
+			SELECT
+				*,
+				sum(starts_cycle) OVER (ORDER BY started_at) AS cycle_seq
+			FROM marked
+		), cycles AS (
+			SELECT
+				cycle_seq,
+				md5(min(started_at)::text || ':' || max(started_at)::text || ':' || count(*)::text) AS id,
+				min(started_at) AS started_at,
+				max(started_at) AS last_started_at,
+				max(COALESCE(finished_at, started_at)) AS last_activity_at,
+				count(*)::int AS total_requests,
+				count(*) FILTER (WHERE status = 'running')::int AS running_requests,
+				count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded_requests,
+				count(*) FILTER (WHERE status = 'failed')::int AS failed_requests,
+				count(*) FILTER (WHERE status = 'canceled')::int AS canceled_requests,
+				COALESCE(sum(input_count), 0)::int AS input_count,
+				COALESCE(sum(inserted_count), 0)::int AS inserted_count,
+				COALESCE(sum(updated_count), 0)::int AS updated_count,
+				COALESCE(sum(unchanged_count), 0)::int AS unchanged_count
+			FROM grouped
+			GROUP BY cycle_seq
+		), shaped AS (
+			SELECT
+				*,
+				CASE
+					WHEN running_requests > 0 THEN 'running'
+					WHEN failed_requests > 0 AND succeeded_requests > 0 THEN 'partial'
+					WHEN failed_requests > 0 THEN 'failed'
+					WHEN canceled_requests > 0 AND succeeded_requests = 0 THEN 'canceled'
+					ELSE 'succeeded'
+				END AS status,
+				CASE WHEN running_requests > 0 THEN now() ELSE last_activity_at END AS updated_at,
+				CASE WHEN running_requests > 0 THEN NULL ELSE last_activity_at END AS finished_at
+			FROM cycles
+		)
+		SELECT jsonb_build_object(
+			'id', id,
+			'name', 'Default Scan ' || to_char(started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC',
+			'status', status,
+			'parallelism', NULL,
+			'total_requests', total_requests,
+			'queued_requests', 0,
+			'running_requests', running_requests,
+			'succeeded_requests', succeeded_requests,
+			'failed_requests', failed_requests,
+			'canceled_requests', canceled_requests,
+			'started_at', started_at,
+			'finished_at', finished_at,
+			'created_at', started_at,
+			'updated_at', updated_at,
+			'input_count', input_count,
+			'inserted_count', inserted_count,
+			'updated_count', updated_count,
+			'unchanged_count', unchanged_count,
+			'stats', jsonb_build_object(
+				'program_scans', total_requests,
+				'inputs', input_count,
+				'inserted', inserted_count,
+				'updated', updated_count,
+				'unchanged', unchanged_count
+			)
+		)
+		FROM shaped
+		ORDER BY started_at DESC
+		LIMIT $1 OFFSET $2
+	`, p.Limit, p.Offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeRawJSONArray(w, rows)
+}
+
+func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
+	cycleID := strings.TrimSpace(r.PathValue("cycle_id"))
+	if cycleID == "" {
+		writeError(w, http.StatusBadRequest, "default scan id is required")
+		return
+	}
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		WITH full_runs AS (
+			SELECT
+				sr.*,
+				lag(sr.started_at) OVER (ORDER BY sr.started_at) AS previous_started_at
+			FROM zero_scan_runs sr
+			WHERE sr.run_type = 'full'
+			  AND sr.started_at IS NOT NULL
+		), marked AS (
+			SELECT
+				*,
+				CASE
+					WHEN previous_started_at IS NULL THEN 1
+					WHEN started_at - previous_started_at > interval '6 hours' THEN 1
+					ELSE 0
+				END AS starts_cycle
+			FROM full_runs
+		), grouped AS (
+			SELECT
+				*,
+				sum(starts_cycle) OVER (ORDER BY started_at) AS cycle_seq
+			FROM marked
+		), cycles AS (
+			SELECT
+				cycle_seq,
+				md5(min(started_at)::text || ':' || max(started_at)::text || ':' || count(*)::text) AS id,
+				min(started_at) AS started_at,
+				max(started_at) AS last_started_at,
+				max(COALESCE(finished_at, started_at)) AS last_activity_at,
+				count(*)::int AS total_requests,
+				count(*) FILTER (WHERE status = 'running')::int AS running_requests,
+				count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded_requests,
+				count(*) FILTER (WHERE status = 'failed')::int AS failed_requests,
+				count(*) FILTER (WHERE status = 'canceled')::int AS canceled_requests,
+				COALESCE(sum(input_count), 0)::int AS input_count,
+				COALESCE(sum(inserted_count), 0)::int AS inserted_count,
+				COALESCE(sum(updated_count), 0)::int AS updated_count,
+				COALESCE(sum(unchanged_count), 0)::int AS unchanged_count
+			FROM grouped
+			GROUP BY cycle_seq
+		), shaped AS (
+			SELECT
+				*,
+				CASE
+					WHEN running_requests > 0 THEN 'running'
+					WHEN failed_requests > 0 AND succeeded_requests > 0 THEN 'partial'
+					WHEN failed_requests > 0 THEN 'failed'
+					WHEN canceled_requests > 0 AND succeeded_requests = 0 THEN 'canceled'
+					ELSE 'succeeded'
+				END AS status,
+				CASE WHEN running_requests > 0 THEN now() ELSE last_activity_at END AS updated_at,
+				CASE WHEN running_requests > 0 THEN NULL ELSE last_activity_at END AS finished_at
+			FROM cycles
+		), cycle AS (
+			SELECT *
+			FROM shaped
+			WHERE id = $1
+		), cycle_runs AS (
+			SELECT
+				g.*,
+				COALESCE(p.handle, '') AS program_handle,
+				COALESCE(p.platform, '') AS program_platform,
+				COALESCE(p.program_url, '') AS program_url
+			FROM grouped g
+			JOIN cycle c ON c.cycle_seq = g.cycle_seq
+			LEFT JOIN zero_programs p ON p.id = g.program_id
+		), related_scan_runs AS (
+			SELECT DISTINCT sr.id, sr.program_id, sr.run_type, sr.started_at
+			FROM zero_scan_runs sr
+			JOIN cycle_runs cr ON cr.program_id = sr.program_id
+			WHERE sr.id = cr.id
+			   OR (
+				sr.id <> cr.id
+				AND sr.started_at >= cr.started_at
+				AND sr.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+			   )
+		)
+		SELECT jsonb_build_object(
+			'scan', (
+				SELECT jsonb_build_object(
+					'id', c.id,
+					'name', 'Default Scan ' || to_char(c.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC',
+					'status', c.status,
+					'parallelism', NULL,
+					'total_requests', c.total_requests,
+					'queued_requests', 0,
+					'running_requests', c.running_requests,
+					'succeeded_requests', c.succeeded_requests,
+					'failed_requests', c.failed_requests,
+					'canceled_requests', c.canceled_requests,
+					'started_at', c.started_at,
+					'finished_at', c.finished_at,
+					'created_at', c.started_at,
+					'updated_at', c.updated_at,
+					'input_count', c.input_count,
+					'inserted_count', c.inserted_count,
+					'updated_count', c.updated_count,
+					'unchanged_count', c.unchanged_count,
+					'stats', jsonb_build_object(
+						'program_scans', c.total_requests,
+						'inputs', c.input_count,
+						'inserted', c.inserted_count,
+						'updated', c.updated_count,
+						'unchanged', c.unchanged_count
+					)
+				)
+				FROM cycle c
+			),
+			'request_counts', jsonb_build_object(
+				'running', COALESCE((SELECT running_requests FROM cycle), 0),
+				'succeeded', COALESCE((SELECT succeeded_requests FROM cycle), 0),
+				'failed', COALESCE((SELECT failed_requests FROM cycle), 0),
+				'canceled', COALESCE((SELECT canceled_requests FROM cycle), 0)
+			),
+			'recent_requests', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', cr.id,
+							'program_id', cr.program_id,
+							'program_handle', cr.program_handle,
+							'program_platform', cr.program_platform,
+							'program_url', cr.program_url,
+							'status', cr.status,
+							'started_at', cr.started_at,
+							'finished_at', cr.finished_at,
+							'input_count', cr.input_count,
+							'inserted_count', cr.inserted_count,
+							'updated_count', cr.updated_count,
+							'unchanged_count', cr.unchanged_count,
+							'error', cr.error,
+							'stats', cr.stats,
+							'progress', COALESCE(progress.data, '{}'::jsonb)
+						) AS row,
+						cr.started_at AS sort_at
+					FROM cycle_runs cr
+					LEFT JOIN LATERAL (
+						SELECT jsonb_build_object(
+							'steps_total', 8,
+							'child_scan_runs', count(*)::int,
+							'child_succeeded', count(*) FILTER (WHERE child.status = 'succeeded')::int,
+							'child_failed', count(*) FILTER (WHERE child.status = 'failed')::int,
+							'child_running', count(*) FILTER (WHERE child.status = 'running')::int,
+							'current_step', COALESCE((
+								SELECT jsonb_build_object(
+									'id', latest.id,
+									'run_type', latest.run_type,
+									'status', latest.status,
+									'started_at', latest.started_at,
+									'finished_at', latest.finished_at,
+									'input_count', latest.input_count,
+									'inserted_count', latest.inserted_count,
+									'error', latest.error,
+									'stats', latest.stats
+								)
+								FROM zero_scan_runs latest
+								WHERE latest.program_id = cr.program_id
+								  AND latest.id <> cr.id
+								  AND latest.started_at >= cr.started_at
+								  AND latest.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+								ORDER BY latest.started_at DESC
+								LIMIT 1
+							), '{}'::jsonb)
+						) AS data
+						FROM zero_scan_runs child
+						WHERE child.program_id = cr.program_id
+						  AND child.id <> cr.id
+						  AND child.started_at >= cr.started_at
+						  AND child.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+					) progress ON true
+					ORDER BY cr.started_at DESC
+					LIMIT 250
+				) recent
+			), '[]'::jsonb),
+			'running_requests', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at ASC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', cr.id,
+							'program_id', cr.program_id,
+							'program_handle', cr.program_handle,
+							'program_platform', cr.program_platform,
+							'status', cr.status,
+							'started_at', cr.started_at,
+							'input_count', cr.input_count,
+							'stats', cr.stats,
+							'progress', COALESCE(progress.data, '{}'::jsonb)
+						) AS row,
+						cr.started_at AS sort_at
+					FROM cycle_runs cr
+					LEFT JOIN LATERAL (
+						SELECT jsonb_build_object(
+							'steps_total', 8,
+							'child_scan_runs', count(*)::int,
+							'child_succeeded', count(*) FILTER (WHERE child.status = 'succeeded')::int,
+							'child_failed', count(*) FILTER (WHERE child.status = 'failed')::int,
+							'child_running', count(*) FILTER (WHERE child.status = 'running')::int,
+							'current_step', COALESCE((
+								SELECT jsonb_build_object(
+									'id', latest.id,
+									'run_type', latest.run_type,
+									'status', latest.status,
+									'started_at', latest.started_at,
+									'finished_at', latest.finished_at,
+									'input_count', latest.input_count,
+									'inserted_count', latest.inserted_count,
+									'error', latest.error,
+									'stats', latest.stats
+								)
+								FROM zero_scan_runs latest
+								WHERE latest.program_id = cr.program_id
+								  AND latest.id <> cr.id
+								  AND latest.started_at >= cr.started_at
+								  AND latest.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+								ORDER BY latest.started_at DESC
+								LIMIT 1
+							), '{}'::jsonb)
+						) AS data
+						FROM zero_scan_runs child
+						WHERE child.program_id = cr.program_id
+						  AND child.id <> cr.id
+						  AND child.started_at >= cr.started_at
+						  AND child.started_at <= COALESCE(cr.finished_at, now()) + interval '2 minutes'
+					) progress ON true
+					WHERE cr.status = 'running'
+					ORDER BY cr.started_at ASC
+					LIMIT 100
+				) running
+			), '[]'::jsonb),
+			'finding_counts', jsonb_build_object(
+				'total', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					WHERE (
+						n.scan_run_id IN (SELECT id FROM related_scan_runs)
+						OR EXISTS (
+							SELECT 1
+							FROM zero_change_events ce
+							WHERE ce.entity_type = 'candidate_finding'
+							  AND ce.entity_id = f.id
+							  AND ce.scan_run_id IN (SELECT id FROM related_scan_runs)
+						)
+					)
+				), 0),
+				'nuclei_confirmed', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					WHERE n.scan_run_id IN (SELECT id FROM related_scan_runs)
+				), 0),
+				'passive_unconfirmed', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					WHERE f.nuclei_result_id IS NULL
+					  AND EXISTS (
+						SELECT 1
+						FROM zero_change_events ce
+						WHERE ce.entity_type = 'candidate_finding'
+						  AND ce.entity_id = f.id
+						  AND ce.scan_run_id IN (SELECT id FROM related_scan_runs)
+					  )
+				), 0)
+			),
+			'findings', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', f.id,
+							'program_id', f.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'program_platform', COALESCE(p.platform, ''),
+							'service_url', COALESCE(h.url, ''),
+							'nuclei_template_id', COALESCE(n.template_id, ''),
+							'vulnerability_id', COALESCE(v.vuln_id, ''),
+							'nuclei_result_id', f.nuclei_result_id,
+							'severity', f.severity,
+							'confidence', f.confidence,
+							'status', f.status,
+							'evidence', f.evidence,
+							'report_id', f.report_id,
+							'first_seen_at', f.first_seen_at,
+							'last_seen_at', f.last_seen_at
+						) AS row,
+						f.first_seen_at AS sort_at
+					FROM zero_candidate_findings f
+					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					LEFT JOIN zero_programs p ON p.id = f.program_id
+					LEFT JOIN zero_http_services h ON h.id = f.http_service_id
+					LEFT JOIN zero_vulnerability_records v ON v.id = f.vulnerability_id
+					WHERE (
+						n.scan_run_id IN (SELECT id FROM related_scan_runs)
+						OR EXISTS (
+							SELECT 1
+							FROM zero_change_events ce
+							WHERE ce.entity_type = 'candidate_finding'
+							  AND ce.entity_id = f.id
+							  AND ce.scan_run_id IN (SELECT id FROM related_scan_runs)
+						)
+					)
+					ORDER BY f.first_seen_at DESC
+					LIMIT 50
+				) recent_findings
+			), '[]'::jsonb),
+			'nuclei_results', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', n.id,
+							'program_id', n.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'service_url', COALESCE(h.url, ''),
+							'template_id', n.template_id,
+							'target_source', n.target_source,
+							'target_id', n.target_id,
+							'matched_at', n.matched_at,
+							'severity', n.severity,
+							'cves', n.cves,
+							'tags', n.tags,
+							'first_seen_at', n.first_seen_at
+						) AS row,
+						n.first_seen_at AS sort_at
+					FROM zero_nuclei_results n
+					LEFT JOIN zero_programs p ON p.id = n.program_id
+					LEFT JOIN zero_http_services h ON h.id = n.http_service_id
+					WHERE n.scan_run_id IN (SELECT id FROM related_scan_runs)
+					ORDER BY n.first_seen_at DESC
+					LIMIT 50
+				) recent_nuclei
+			), '[]'::jsonb)
+		)
+		FROM cycle
+	`, cycleID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusNotFound, "default scan not found")
 		return
 	}
 	writeRawJSON(w, rows[0])
