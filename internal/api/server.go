@@ -133,6 +133,7 @@ func (s *Server) routes() {
 		LIMIT 50
 	`))
 	s.mux.HandleFunc("GET /v1/scans/latest", s.latestScans)
+	s.mux.HandleFunc("GET /v1/scans/{scan_id}", s.scanDetail)
 	s.mux.HandleFunc("GET /v1/scan-requests", s.scanRequests)
 	s.mux.HandleFunc("GET /v1/scan-campaigns", s.query(`
 		SELECT jsonb_build_object(
@@ -848,6 +849,197 @@ func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRawJSONArray(w, rows)
+}
+
+func (s *Server) scanDetail(w http.ResponseWriter, r *http.Request) {
+	scanID := r.PathValue("scan_id")
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		WITH scan AS (
+			SELECT sr.*, COALESCE(p.handle, '') AS program_handle, COALESCE(p.platform, '') AS program_platform, COALESCE(p.program_url, '') AS program_url
+			FROM zero_scan_runs sr
+			LEFT JOIN zero_programs p ON p.id = sr.program_id
+			WHERE sr.id = $1::uuid
+		), related_scan_runs AS (
+			SELECT sr.*
+			FROM zero_scan_runs sr
+			JOIN scan s ON s.program_id = sr.program_id
+			WHERE sr.id = s.id
+			   OR (
+				s.run_type = 'full'
+				AND sr.id <> s.id
+				AND sr.started_at >= s.started_at
+				AND sr.started_at <= COALESCE(s.finished_at, now()) + interval '2 minutes'
+			   )
+		), child_scan_runs AS (
+			SELECT sr.*
+			FROM related_scan_runs sr
+			JOIN scan s ON s.id <> sr.id
+		)
+		SELECT jsonb_build_object(
+			'scan', (
+				SELECT jsonb_build_object(
+					'id', s.id,
+					'program_id', s.program_id,
+					'program_handle', s.program_handle,
+					'program_platform', s.program_platform,
+					'program_url', s.program_url,
+					'run_type', s.run_type,
+					'status', s.status,
+					'started_at', s.started_at,
+					'finished_at', s.finished_at,
+					'input_count', s.input_count,
+					'inserted_count', s.inserted_count,
+					'updated_count', s.updated_count,
+					'unchanged_count', s.unchanged_count,
+					'error', s.error,
+					'stats', s.stats
+				)
+				FROM scan s
+			),
+			'step_counts', COALESCE((
+				SELECT jsonb_object_agg(status, total)
+				FROM (
+					SELECT status, count(*)::int AS total
+					FROM child_scan_runs
+					GROUP BY status
+				) counts
+			), '{}'::jsonb),
+			'child_scan_runs', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at ASC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', sr.id,
+							'run_type', sr.run_type,
+							'status', sr.status,
+							'started_at', sr.started_at,
+							'finished_at', sr.finished_at,
+							'input_count', sr.input_count,
+							'inserted_count', sr.inserted_count,
+							'updated_count', sr.updated_count,
+							'unchanged_count', sr.unchanged_count,
+							'error', sr.error,
+							'stats', sr.stats
+						) AS row,
+						sr.started_at AS sort_at
+					FROM child_scan_runs sr
+				) children
+			), '[]'::jsonb),
+			'finding_counts', jsonb_build_object(
+				'total', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					WHERE (
+						n.scan_run_id IN (SELECT id FROM related_scan_runs)
+						OR EXISTS (
+							SELECT 1
+							FROM zero_change_events ce
+							WHERE ce.entity_type = 'candidate_finding'
+							  AND ce.entity_id = f.id
+							  AND ce.scan_run_id IN (SELECT id FROM related_scan_runs)
+						)
+					)
+				), 0),
+				'nuclei_confirmed', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					WHERE n.scan_run_id IN (SELECT id FROM related_scan_runs)
+				), 0),
+				'passive_unconfirmed', COALESCE((
+					SELECT count(*)::int
+					FROM zero_candidate_findings f
+					WHERE f.nuclei_result_id IS NULL
+					  AND EXISTS (
+						SELECT 1
+						FROM zero_change_events ce
+						WHERE ce.entity_type = 'candidate_finding'
+						  AND ce.entity_id = f.id
+						  AND ce.scan_run_id IN (SELECT id FROM related_scan_runs)
+					  )
+				), 0)
+			),
+			'findings', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', f.id,
+							'program_id', f.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'program_platform', COALESCE(p.platform, ''),
+							'service_url', COALESCE(h.url, ''),
+							'nuclei_template_id', COALESCE(n.template_id, ''),
+							'vulnerability_id', COALESCE(v.vuln_id, ''),
+							'nuclei_result_id', f.nuclei_result_id,
+							'severity', f.severity,
+							'confidence', f.confidence,
+							'status', f.status,
+							'evidence', f.evidence,
+							'report_id', f.report_id,
+							'first_seen_at', f.first_seen_at,
+							'last_seen_at', f.last_seen_at
+						) AS row,
+						f.first_seen_at AS sort_at
+					FROM zero_candidate_findings f
+					LEFT JOIN zero_nuclei_results n ON n.id = f.nuclei_result_id
+					LEFT JOIN zero_programs p ON p.id = f.program_id
+					LEFT JOIN zero_http_services h ON h.id = f.http_service_id
+					LEFT JOIN zero_vulnerability_records v ON v.id = f.vulnerability_id
+					WHERE (
+						n.scan_run_id IN (SELECT id FROM related_scan_runs)
+						OR EXISTS (
+							SELECT 1
+							FROM zero_change_events ce
+							WHERE ce.entity_type = 'candidate_finding'
+							  AND ce.entity_id = f.id
+							  AND ce.scan_run_id IN (SELECT id FROM related_scan_runs)
+						)
+					)
+					ORDER BY f.first_seen_at DESC
+					LIMIT 50
+				) recent_findings
+			), '[]'::jsonb),
+			'nuclei_results', COALESCE((
+				SELECT jsonb_agg(row ORDER BY sort_at DESC)
+				FROM (
+					SELECT
+						jsonb_build_object(
+							'id', n.id,
+							'program_id', n.program_id,
+							'program_handle', COALESCE(p.handle, ''),
+							'service_url', COALESCE(h.url, ''),
+							'template_id', n.template_id,
+							'target_source', n.target_source,
+							'target_id', n.target_id,
+							'matched_at', n.matched_at,
+							'severity', n.severity,
+							'cves', n.cves,
+							'tags', n.tags,
+							'first_seen_at', n.first_seen_at
+						) AS row,
+						n.first_seen_at AS sort_at
+					FROM zero_nuclei_results n
+					LEFT JOIN zero_programs p ON p.id = n.program_id
+					LEFT JOIN zero_http_services h ON h.id = n.http_service_id
+					WHERE n.scan_run_id IN (SELECT id FROM related_scan_runs)
+					ORDER BY n.first_seen_at DESC
+					LIMIT 50
+				) recent_nuclei
+			), '[]'::jsonb)
+		)
+		FROM scan
+	`, scanID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusNotFound, "scan not found")
+		return
+	}
+	writeRawJSON(w, rows[0])
 }
 
 func (s *Server) services(programID string) http.HandlerFunc {

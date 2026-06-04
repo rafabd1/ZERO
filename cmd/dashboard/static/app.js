@@ -6,6 +6,7 @@ const state = {
   findings: [],
   selectedProgramId: "",
   selectedDefaultScanId: "",
+  selectedDefaultScanDetail: null,
   selectedCampaignId: "",
   selectedCampaignDetail: null,
   selectedFindingId: "",
@@ -45,7 +46,7 @@ async function loadAll(showLoading = true) {
     const [stats, programs, scans, campaigns, findings] = await Promise.all([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/programs"),
-      getJSON("/api/v1/scans/latest?run_type=full&limit=100"),
+      getJSON("/api/v1/scans/latest?run_type=full&limit=250"),
       getJSON("/api/v1/scan-campaigns"),
       getJSON("/api/v1/findings?limit=100"),
     ]);
@@ -63,7 +64,7 @@ async function loadAll(showLoading = true) {
     if (state.selectedDefaultScanId) {
       const scan = state.scans.find((item) => item.id === state.selectedDefaultScanId);
       if (scan) {
-        renderDefaultScanDetail(scan);
+        await loadDefaultScanDetail(scan.id, false);
       } else {
         clearDefaultScanDetail();
       }
@@ -249,68 +250,100 @@ function renderDefaultScanProgress() {
     return new Date(b.started_at || 0).getTime() - new Date(a.started_at || 0).getTime();
   });
   const running = scans.filter((scan) => scan.status === "running").length;
-  setText("defaultScanCount", `${fmt(running)} running, ${fmt(scans.length)} recent`);
+  setText("defaultScanCount", `${fmt(running)} running, ${fmt(scans.length)} scans`);
   const tbody = $("defaultScanRows");
   tbody.innerHTML = "";
   for (const scan of scans) {
-    const progress = scanProgressPercent(scan);
     const tr = document.createElement("tr");
     if (scan.id === state.selectedDefaultScanId) {
       tr.className = "selected";
     }
-    tr.addEventListener("click", () => renderDefaultScanDetail(scan));
+    tr.addEventListener("click", () => loadDefaultScanDetail(scan.id));
     tr.innerHTML = `
       <td><strong>${escapeHTML(scan.program_handle || shortID(scan.program_id) || "unknown")}</strong><small>${escapeHTML(scan.program_platform || scan.run_type || "")}</small></td>
       <td>${scanStatusPill(scan.status)}</td>
-      <td><div class="thin-progress table-progress"><span style="width: ${progress}%"></span></div><small>${fmt(progress)}%</small></td>
-      <td>${timeAgo(scan.started_at)}</td>
-      <td><strong>${escapeHTML(scanCurrentStep(scan))}</strong><small>${escapeHTML(scanSummary(scan))}</small></td>
+      <td><strong>${escapeHTML(scanStatsSummary(scan))}</strong><small>${escapeHTML(scanStaleSummary(scan))}</small></td>
+      <td><strong>${escapeHTML(scanStepSummary(scan))}</strong><small>${escapeHTML(scanCurrentStep(scan))}</small></td>
+      <td><strong>${timeAgo(scan.finished_at || scan.started_at)}</strong><small>${escapeHTML(scanDuration(scan))}</small></td>
+      <td><button class="ghost-button row-action" type="button" data-scan-detail="${escapeHTML(scan.id)}">View</button></td>
     `;
+    const detailButton = tr.querySelector("[data-scan-detail]");
+    if (detailButton) {
+      detailButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        loadDefaultScanDetail(scan.id);
+      });
+    }
     tbody.appendChild(tr);
   }
   if (scans.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="muted">No default program scans yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">No default program scans yet.</td></tr>`;
   }
 }
 
-function renderDefaultScanDetail(scan) {
-  state.selectedDefaultScanId = scan.id;
+async function loadDefaultScanDetail(scanID, showLoading = true) {
+  if (!scanID) return;
+  state.selectedDefaultScanId = scanID;
   renderDefaultScanProgress();
-  const progress = scan.progress || {};
-  const current = progress.current_step || {};
+  const panel = $("defaultScanDetailPanel");
+  panel.classList.remove("hidden");
+  if (showLoading) {
+    setText("defaultScanDetailTitle", "Default Scan Detail");
+    setText("defaultScanDetailMeta", "Loading...");
+    $("defaultScanDetailBody").innerHTML = "";
+  }
+  try {
+    const detail = await getJSON(`/api/v1/scans/${encodeURIComponent(scanID)}`);
+    state.selectedDefaultScanDetail = detail;
+    renderDefaultScanDetail(detail);
+  } catch (error) {
+    setText("defaultScanDetailMeta", `Error: ${error.message}`);
+    $("defaultScanDetailBody").innerHTML = "";
+  }
+}
+
+function renderDefaultScanDetail(detail) {
+  const scan = detail.scan || {};
+  const stepCounts = detail.step_counts || {};
+  const childRuns = Array.isArray(detail.child_scan_runs) ? detail.child_scan_runs : [];
+  const findingCounts = detail.finding_counts || {};
+  const findings = Array.isArray(detail.findings) ? detail.findings : [];
+  const nuclei = Array.isArray(detail.nuclei_results) ? detail.nuclei_results : [];
   const stats = scan.stats || {};
-  $("defaultScanDetailPanel").classList.remove("hidden");
+
   setText("defaultScanDetailTitle", scan.program_handle || shortID(scan.program_id) || "Default Scan Detail");
-  setText("defaultScanDetailMeta", `${shortID(scan.id)} | ${scanSummary(scan)} | started ${timeAgo(scan.started_at)}`);
+  setText("defaultScanDetailMeta", `${shortID(scan.id)} | ${scanStatsSummary(scan)} | ${timeAgo(scan.finished_at || scan.started_at)}`);
   $("defaultScanDetailBody").innerHTML = `
     <div class="drawer-grid">
       ${detailCard("Status", scanStatusPill(scan.status), scan.error || "")}
-      ${detailCard("Progress", `${fmt(scanProgressPercent(scan))}%`, scanCurrentStep(scan))}
-      ${detailCard("Step Runs", fmt(progress.child_scan_runs), `${fmt(progress.child_succeeded)} succeeded, ${fmt(progress.child_running)} running, ${fmt(progress.child_failed)} failed`)}
-      ${detailCard("Inputs", fmt(scan.input_count), `${fmt(scan.inserted_count)} inserted`)}
+      ${detailCard("Stats", escapeHTML(scanStatsSummary(scan)), scanStaleSummary(scan))}
+      ${detailCard("Step Runs", fmt(childRuns.length), `${fmt(stepCounts.succeeded)} succeeded, ${fmt(stepCounts.running)} running, ${fmt(stepCounts.failed)} failed`)}
+      ${detailCard("Findings", fmt(findingCounts.total), `${fmt(findingCounts.nuclei_confirmed)} confirmed, ${fmt(findingCounts.passive_unconfirmed)} passive`)}
     </div>
     <div class="drawer-section">
-      <h4>Current Step</h4>
-      ${renderDefaultScanCurrentStep(current)}
-    </div>
-    <div class="drawer-section">
-      <h4>Pipeline Counters</h4>
-      <div class="inline-pills">
-        <span class="pill">total ${fmt(progress.steps_total || 8)}</span>
-        <span class="pill">children ${fmt(progress.child_scan_runs)}</span>
-        <span class="pill good">succeeded ${fmt(progress.child_succeeded)}</span>
-        <span class="pill info">running ${fmt(progress.child_running)}</span>
-        <span class="pill danger">failed ${fmt(progress.child_failed)}</span>
-      </div>
-    </div>
-    <div class="drawer-section">
-      <h4>Timing</h4>
+      <h4>Scan Timing</h4>
       <dl class="compact-kv">
         <div><dt>Started</dt><dd>${escapeHTML(scan.started_at || "-")}</dd></div>
         <div><dt>Finished</dt><dd>${escapeHTML(scan.finished_at || "-")}</dd></div>
+        <div><dt>Duration</dt><dd>${escapeHTML(scanDuration(scan))}</dd></div>
         <div><dt>Program ID</dt><dd>${escapeHTML(shortID(scan.program_id) || "-")}</dd></div>
-        <div><dt>Scan ID</dt><dd>${escapeHTML(shortID(scan.id) || "-")}</dd></div>
       </dl>
+    </div>
+    <div class="drawer-section">
+      <h4>Step Counts</h4>
+      <div class="inline-pills">${renderCountPills(stepCounts)}</div>
+    </div>
+    <div class="drawer-section">
+      <h4>Pipeline Steps</h4>
+      ${renderDefaultScanSteps(childRuns)}
+    </div>
+    <div class="drawer-section">
+      <h4>Scan Findings</h4>
+      ${renderCampaignFindings(findings, "No findings have been associated with this scan.")}
+    </div>
+    <div class="drawer-section">
+      <h4>Nuclei Results</h4>
+      ${renderCampaignNuclei(nuclei, "No Nuclei results have been associated with this scan.")}
     </div>
     <div class="drawer-section">
       <h4>Stats</h4>
@@ -319,23 +352,28 @@ function renderDefaultScanDetail(scan) {
   `;
 }
 
-function renderDefaultScanCurrentStep(step) {
-  if (!step || Object.keys(step).length === 0) {
-    return `<p class="muted">No child step has started yet.</p>`;
+function renderDefaultScanSteps(steps) {
+  if (steps.length === 0) {
+    return `<p class="muted">No child step runs are linked to this scan.</p>`;
   }
   return `
-    <dl class="compact-kv">
-      <div><dt>Type</dt><dd>${escapeHTML(firstNonEmpty(step.run_type, "-"))}</dd></div>
-      <div><dt>Status</dt><dd>${escapeHTML(firstNonEmpty(step.status, "-"))}</dd></div>
-      <div><dt>Started</dt><dd>${escapeHTML(firstNonEmpty(step.started_at, "-"))}</dd></div>
-      <div><dt>Updated</dt><dd>${escapeHTML(firstNonEmpty(step.finished_at, step.updated_at, "-"))}</dd></div>
-    </dl>
-    ${step.error ? `<pre class="json-box">${escapeHTML(step.error)}</pre>` : ""}
+    <div class="mini-list">
+      ${steps.map((step) => `
+        <div class="mini-row">
+          <div>
+            <strong>${escapeHTML(step.run_type || "step")}</strong>
+            <small>${escapeHTML(stepStatsSummary(step))}</small>
+          </div>
+          <div>${scanStatusPill(step.status)}<small>${escapeHTML(scanDuration(step))}</small></div>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 
 function clearDefaultScanDetail() {
   state.selectedDefaultScanId = "";
+  state.selectedDefaultScanDetail = null;
   $("defaultScanDetailPanel").classList.add("hidden");
   renderDefaultScanProgress();
 }
@@ -521,9 +559,9 @@ function requestProgressPercent(request) {
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 }
 
-function renderCampaignFindings(findings) {
+function renderCampaignFindings(findings, emptyMessage = "No findings have been associated with this campaign window yet.") {
   if (findings.length === 0) {
-    return `<p class="muted">No findings have been associated with this campaign window yet.</p>`;
+    return `<p class="muted">${escapeHTML(emptyMessage)}</p>`;
   }
   return `
     <div class="mini-list">
@@ -544,9 +582,9 @@ function renderCampaignFindings(findings) {
   `;
 }
 
-function renderCampaignNuclei(results) {
+function renderCampaignNuclei(results, emptyMessage = "No Nuclei results have been associated with this campaign window yet.") {
   if (results.length === 0) {
-    return `<p class="muted">No Nuclei results have been associated with this campaign window yet.</p>`;
+    return `<p class="muted">${escapeHTML(emptyMessage)}</p>`;
   }
   return `
     <div class="mini-list">
@@ -787,6 +825,80 @@ function scanSummary(scan) {
   if (!scan.finished_at && scan.status === "running") parts.push("program pipeline in progress");
   if (scan.error) parts.push(`error`);
   return parts.join(" | ") || "-";
+}
+
+function scanStatsSummary(scan) {
+  const stats = scan.stats || {};
+  const findings = Number(stats.findings || 0);
+  const reports = Number(stats.reports || 0);
+  if (findings > 0 || reports > 0) {
+    return `${fmt(findings)} findings, ${fmt(reports)} reports`;
+  }
+  const inserted = Number(scan.inserted_count || stats.inserted || 0);
+  const updated = Number(scan.updated_count || stats.updated || 0);
+  const unchanged = Number(scan.unchanged_count || stats.unchanged || 0);
+  const changes = inserted + updated;
+  if (changes > 0 || unchanged > 0) {
+    return `${fmt(changes)} changes, ${fmt(unchanged)} unchanged`;
+  }
+  if (Number(scan.input_count || 0) > 0) {
+    return `${fmt(scan.input_count)} inputs`;
+  }
+  return "no stored changes";
+}
+
+function scanStaleSummary(scan) {
+  const stats = scan.stats || {};
+  const staleServices = Number(stats.stale_http_services || 0);
+  const staleSubdomains = Number(stats.stale_subdomains || 0);
+  const staleTech = Number(stats.stale_technologies || 0);
+  const stale = staleServices + staleSubdomains + staleTech;
+  if (stale > 0) {
+    return `${fmt(staleServices)} stale services, ${fmt(staleSubdomains)} stale subdomains, ${fmt(staleTech)} stale tech`;
+  }
+  if (stats.steps) {
+    return `${fmt(stats.steps)} configured steps`;
+  }
+  return scan.error ? "scan stored an error" : "no stale cleanup";
+}
+
+function scanStepSummary(scan) {
+  const progress = scan.progress || {};
+  const stats = scan.stats || {};
+  const total = Number(stats.steps || progress.steps_total || 8);
+  const childRuns = Number(progress.child_scan_runs || 0);
+  const succeeded = Number(progress.child_succeeded || 0);
+  const failed = Number(progress.child_failed || 0);
+  const running = Number(progress.child_running || 0);
+  if (scan.status === "succeeded") {
+    return `${fmt(total)} steps`;
+  }
+  return `${fmt(childRuns)} step runs, ${fmt(succeeded + failed)} done, ${fmt(running)} running`;
+}
+
+function stepStatsSummary(step) {
+  const stats = step.stats || {};
+  const parts = [];
+  if (Number(step.input_count || 0) > 0) parts.push(`${fmt(step.input_count)} inputs`);
+  if (Number(step.inserted_count || 0) > 0) parts.push(`${fmt(step.inserted_count)} inserted`);
+  if (Number(step.updated_count || 0) > 0) parts.push(`${fmt(step.updated_count)} updated`);
+  if (Number(stats.findings || 0) > 0) parts.push(`${fmt(stats.findings)} findings`);
+  if (Number(stats.reports || 0) > 0) parts.push(`${fmt(stats.reports)} reports`);
+  if (step.error) parts.push("error");
+  return parts.join(", ") || scanDuration(step);
+}
+
+function scanDuration(scan) {
+  if (!scan || !scan.started_at) return "-";
+  const start = new Date(scan.started_at).getTime();
+  const end = scan.finished_at ? new Date(scan.finished_at).getTime() : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "-";
+  const seconds = Math.round((end - start) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h`;
 }
 
 function scanCurrentStep(scan) {
