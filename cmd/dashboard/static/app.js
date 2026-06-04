@@ -5,6 +5,7 @@ const state = {
   campaigns: [],
   findings: [],
   selectedProgramId: "",
+  selectedDefaultScanId: "",
   selectedCampaignId: "",
   selectedCampaignDetail: null,
   selectedFindingId: "",
@@ -18,6 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("autoRefresh").addEventListener("change", () => configureAutoRefresh());
   $("programSearch").addEventListener("input", () => renderPrograms());
   $("programFilter").addEventListener("change", () => renderPrograms());
+  $("closeDefaultScanDetail").addEventListener("click", () => clearDefaultScanDetail());
   $("closeCampaignDetail").addEventListener("click", () => clearCampaignDetail());
   $("cancelCampaignButton").addEventListener("click", () => cancelSelectedCampaign());
   $("closeFindingDetail").addEventListener("click", () => clearFindingDetail());
@@ -58,6 +60,14 @@ async function loadAll(showLoading = true) {
     renderDefaultScanProgress();
     renderCampaigns();
     renderFindings();
+    if (state.selectedDefaultScanId) {
+      const scan = state.scans.find((item) => item.id === state.selectedDefaultScanId);
+      if (scan) {
+        renderDefaultScanDetail(scan);
+      } else {
+        clearDefaultScanDetail();
+      }
+    }
     if (state.selectedProgramId) {
       await loadProgramDetail(state.selectedProgramId);
     }
@@ -232,43 +242,102 @@ function renderScans() {
 }
 
 function renderDefaultScanProgress() {
-  const running = state.scans.filter((scan) => scan.status === "running");
-  setText("defaultScanCount", `${running.length} running`);
-  const container = $("defaultScanProgress");
-  if (running.length === 0) {
-    container.innerHTML = `<p class="muted">No default program scans are running.</p>`;
-    return;
+  const scans = [...state.scans].sort((a, b) => {
+    const ar = a.status === "running" ? 0 : 1;
+    const br = b.status === "running" ? 0 : 1;
+    if (ar !== br) return ar - br;
+    return new Date(b.started_at || 0).getTime() - new Date(a.started_at || 0).getTime();
+  });
+  const running = scans.filter((scan) => scan.status === "running").length;
+  setText("defaultScanCount", `${fmt(running)} running, ${fmt(scans.length)} recent`);
+  const tbody = $("defaultScanRows");
+  tbody.innerHTML = "";
+  for (const scan of scans) {
+    const progress = scanProgressPercent(scan);
+    const tr = document.createElement("tr");
+    if (scan.id === state.selectedDefaultScanId) {
+      tr.className = "selected";
+    }
+    tr.addEventListener("click", () => renderDefaultScanDetail(scan));
+    tr.innerHTML = `
+      <td><strong>${escapeHTML(scan.program_handle || shortID(scan.program_id) || "unknown")}</strong><small>${escapeHTML(scan.program_platform || scan.run_type || "")}</small></td>
+      <td>${scanStatusPill(scan.status)}</td>
+      <td><div class="thin-progress table-progress"><span style="width: ${progress}%"></span></div><small>${fmt(progress)}%</small></td>
+      <td>${timeAgo(scan.started_at)}</td>
+      <td><strong>${escapeHTML(scanCurrentStep(scan))}</strong><small>${escapeHTML(scanSummary(scan))}</small></td>
+    `;
+    tbody.appendChild(tr);
   }
-  container.innerHTML = `
-    <div class="work-list">
-      ${running.map((scan) => {
-        const progress = scanProgressPercent(scan);
-        const current = scanCurrentStep(scan);
-        const progressData = scan.progress || {};
-        return `
-          <div class="work-row">
-            <div class="work-head">
-              <div>
-                <strong>${escapeHTML(scan.program_handle || shortID(scan.program_id) || "unknown")}</strong>
-                <small>${escapeHTML(current)}</small>
-              </div>
-              <div>
-                ${scanStatusPill(scan.status)}
-                <small>${timeAgo(scan.started_at)}</small>
-              </div>
-            </div>
-            <div class="thin-progress"><span style="width: ${progress}%"></span></div>
-            <div class="work-meta">
-              <span>${fmt(progressData.child_succeeded)} succeeded step runs</span>
-              <span>${fmt(progressData.child_running)} running step runs</span>
-              <span>${fmt(progressData.child_failed)} failed step runs</span>
-              <span>${fmt(scan.input_count)} full inputs</span>
-            </div>
-          </div>
-        `;
-      }).join("")}
+  if (scans.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">No default program scans yet.</td></tr>`;
+  }
+}
+
+function renderDefaultScanDetail(scan) {
+  state.selectedDefaultScanId = scan.id;
+  renderDefaultScanProgress();
+  const progress = scan.progress || {};
+  const current = progress.current_step || {};
+  const stats = scan.stats || {};
+  $("defaultScanDetailPanel").classList.remove("hidden");
+  setText("defaultScanDetailTitle", scan.program_handle || shortID(scan.program_id) || "Default Scan Detail");
+  setText("defaultScanDetailMeta", `${shortID(scan.id)} | ${scanSummary(scan)} | started ${timeAgo(scan.started_at)}`);
+  $("defaultScanDetailBody").innerHTML = `
+    <div class="drawer-grid">
+      ${detailCard("Status", scanStatusPill(scan.status), scan.error || "")}
+      ${detailCard("Progress", `${fmt(scanProgressPercent(scan))}%`, scanCurrentStep(scan))}
+      ${detailCard("Step Runs", fmt(progress.child_scan_runs), `${fmt(progress.child_succeeded)} succeeded, ${fmt(progress.child_running)} running, ${fmt(progress.child_failed)} failed`)}
+      ${detailCard("Inputs", fmt(scan.input_count), `${fmt(scan.inserted_count)} inserted`)}
+    </div>
+    <div class="drawer-section">
+      <h4>Current Step</h4>
+      ${renderDefaultScanCurrentStep(current)}
+    </div>
+    <div class="drawer-section">
+      <h4>Pipeline Counters</h4>
+      <div class="inline-pills">
+        <span class="pill">total ${fmt(progress.steps_total || 8)}</span>
+        <span class="pill">children ${fmt(progress.child_scan_runs)}</span>
+        <span class="pill good">succeeded ${fmt(progress.child_succeeded)}</span>
+        <span class="pill info">running ${fmt(progress.child_running)}</span>
+        <span class="pill danger">failed ${fmt(progress.child_failed)}</span>
+      </div>
+    </div>
+    <div class="drawer-section">
+      <h4>Timing</h4>
+      <dl class="compact-kv">
+        <div><dt>Started</dt><dd>${escapeHTML(scan.started_at || "-")}</dd></div>
+        <div><dt>Finished</dt><dd>${escapeHTML(scan.finished_at || "-")}</dd></div>
+        <div><dt>Program ID</dt><dd>${escapeHTML(shortID(scan.program_id) || "-")}</dd></div>
+        <div><dt>Scan ID</dt><dd>${escapeHTML(shortID(scan.id) || "-")}</dd></div>
+      </dl>
+    </div>
+    <div class="drawer-section">
+      <h4>Stats</h4>
+      <pre class="json-box">${escapeHTML(JSON.stringify(stats, null, 2))}</pre>
     </div>
   `;
+}
+
+function renderDefaultScanCurrentStep(step) {
+  if (!step || Object.keys(step).length === 0) {
+    return `<p class="muted">No child step has started yet.</p>`;
+  }
+  return `
+    <dl class="compact-kv">
+      <div><dt>Type</dt><dd>${escapeHTML(firstNonEmpty(step.run_type, "-"))}</dd></div>
+      <div><dt>Status</dt><dd>${escapeHTML(firstNonEmpty(step.status, "-"))}</dd></div>
+      <div><dt>Started</dt><dd>${escapeHTML(firstNonEmpty(step.started_at, "-"))}</dd></div>
+      <div><dt>Updated</dt><dd>${escapeHTML(firstNonEmpty(step.finished_at, step.updated_at, "-"))}</dd></div>
+    </dl>
+    ${step.error ? `<pre class="json-box">${escapeHTML(step.error)}</pre>` : ""}
+  `;
+}
+
+function clearDefaultScanDetail() {
+  state.selectedDefaultScanId = "";
+  $("defaultScanDetailPanel").classList.add("hidden");
+  renderDefaultScanProgress();
 }
 
 function renderCampaigns() {
@@ -721,6 +790,15 @@ function scanSummary(scan) {
 }
 
 function scanCurrentStep(scan) {
+  if (scan.status === "succeeded") {
+    return "pipeline completed";
+  }
+  if (scan.status === "failed") {
+    return "pipeline failed";
+  }
+  if (scan.status === "canceled") {
+    return "pipeline canceled";
+  }
   const progress = scan.progress || {};
   const current = progress.current_step || {};
   const runType = firstNonEmpty(current.run_type, "planning");
@@ -734,6 +812,9 @@ function scanCurrentStep(scan) {
 }
 
 function scanProgressPercent(scan) {
+  if (scan.status === "succeeded") {
+    return 100;
+  }
   const progress = scan.progress || {};
   const total = Number(progress.steps_total || 8);
   if (total <= 0) return 0;
