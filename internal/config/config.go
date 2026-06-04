@@ -63,50 +63,52 @@ type ScopeConfig struct {
 }
 
 type ToolConfig struct {
-	SubfinderBin            string
-	SubfinderProviderConfig string
-	SubfinderSources        string
-	SubfinderRateLimits     string
-	DNSXBin                 string
-	DNSXResolvers           string
-	DNSXRate                int
-	DNSXBatchSize           int
-	DNSXBatchTimeout        time.Duration
-	HTTPXBin                string
-	HTTPXTimeout            int
-	HTTPXThreads            int
-	HTTPXBatchSize          int
-	HTTPXBatchTimeout       time.Duration
-	HTTPXPatternMinGroup    int
-	HTTPXPatternCap         int
-	HTTPXTLSProbe           bool
-	WebanalyzeBin           string
-	WebanalyzeApps          string
-	WebanalyzeWorkers       int
-	WebanalyzeCrawl         int
-	WebanalyzeBatchSize     int
-	WebanalyzeBatchTimeout  time.Duration
-	NucleiBin               string
-	NucleiTemplateDir       string
-	NucleiUpdateTemplates   bool
-	NucleiFromCVEs          bool
-	NucleiTags              string
-	NucleiSeverities        string
-	NucleiTemplateIDs       string
-	NucleiTargetSource      string
-	NucleiProtocol          string
-	NucleiHeaders           string
-	NucleiProxy             string
-	NucleiScanStrategy      string
-	NucleiMaxHostError      int
-	NucleiWAFDetect         bool
-	NucleiWAFSampleSize     int
-	NucleiWAFProbeTimeout   int
-	NucleiCVELimit          int
-	NucleiRate              int
-	NucleiC                 int
-	NucleiBulkSize          int
-	ToolTimeout             time.Duration
+	SubfinderBin             string
+	SubfinderProviderConfig  string
+	SubfinderSources         string
+	SubfinderRateLimits      string
+	DNSXBin                  string
+	DNSXResolvers            string
+	DNSXRate                 int
+	DNSXBatchSize            int
+	DNSXBatchTimeout         time.Duration
+	HTTPXBin                 string
+	HTTPXTimeout             int
+	HTTPXThreads             int
+	HTTPXBatchSize           int
+	HTTPXBatchTimeout        time.Duration
+	HTTPXPatternMinGroup     int
+	HTTPXPatternCap          int
+	HTTPXTLSProbe            bool
+	WebanalyzeBin            string
+	WebanalyzeApps           string
+	WebanalyzeWorkers        int
+	WebanalyzeCrawl          int
+	WebanalyzeBatchSize      int
+	WebanalyzeBatchTimeout   time.Duration
+	NucleiBin                string
+	NucleiTemplateDir        string
+	NucleiUpdateTemplates    bool
+	NucleiFromCVEs           bool
+	NucleiTags               string
+	NucleiSeverities         string
+	NucleiTemplateIDs        string
+	NucleiTargetSource       string
+	NucleiProtocol           string
+	NucleiHeaders            string
+	NucleiProxy              string
+	NucleiScanStrategy       string
+	NucleiMaxHostError       int
+	NucleiWAFDetect          bool
+	NucleiWAFSampleSize      int
+	NucleiWAFProbeTimeout    int
+	NucleiCVELimit           int
+	NucleiRate               int
+	NucleiC                  int
+	NucleiBulkSize           int
+	NucleiTargetBatchSize    int
+	NucleiTargetBatchTimeout time.Duration
+	ToolTimeout              time.Duration
 }
 
 type APIConfig struct {
@@ -212,6 +214,8 @@ func Load() (Config, error) {
 	v.SetDefault("tools.nuclei_rate", 80)
 	v.SetDefault("tools.nuclei_c", 20)
 	v.SetDefault("tools.nuclei_bulk_size", 5)
+	v.SetDefault("tools.nuclei_target_batch_size", 500)
+	v.SetDefault("tools.nuclei_target_batch_timeout", "20m")
 	v.SetDefault("tools.timeout", "20m")
 	v.SetDefault("target_parallelism", 12)
 	v.SetDefault("schedule.full", "0 15 3 */3 * *")
@@ -307,6 +311,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.nuclei_rate", "ZERO_NUCLEI_RATE")
 	_ = v.BindEnv("tools.nuclei_c", "ZERO_NUCLEI_CONCURRENCY")
 	_ = v.BindEnv("tools.nuclei_bulk_size", "ZERO_NUCLEI_BULK_SIZE")
+	_ = v.BindEnv("tools.nuclei_target_batch_size", "ZERO_NUCLEI_TARGET_BATCH_SIZE")
+	_ = v.BindEnv("tools.nuclei_target_batch_timeout", "ZERO_NUCLEI_TARGET_BATCH_TIMEOUT")
 	_ = v.BindEnv("tools.timeout", "ZERO_TOOL_TIMEOUT")
 	_ = v.BindEnv("target_parallelism", "ZERO_TARGET_PARALLELISM")
 	_ = v.BindEnv("schedule.full", "ZERO_SCHEDULE_FULL")
@@ -374,50 +380,52 @@ func Load() (Config, error) {
 			SyncMaxAge:  v.GetDuration("scope.sync_max_age"),
 		},
 		Tools: ToolConfig{
-			SubfinderBin:            v.GetString("tools.subfinder_bin"),
-			SubfinderProviderConfig: v.GetString("tools.subfinder_provider_config"),
-			SubfinderSources:        v.GetString("tools.subfinder_sources"),
-			SubfinderRateLimits:     v.GetString("tools.subfinder_rate_limits"),
-			DNSXBin:                 v.GetString("tools.dnsx_bin"),
-			DNSXResolvers:           v.GetString("tools.dnsx_resolvers"),
-			DNSXRate:                v.GetInt("tools.dnsx_rate"),
-			DNSXBatchSize:           clampInt(v.GetInt("tools.dnsx_batch_size"), 100, 100000),
-			DNSXBatchTimeout:        v.GetDuration("tools.dnsx_batch_timeout"),
-			HTTPXBin:                v.GetString("tools.httpx_bin"),
-			HTTPXTimeout:            clampInt(v.GetInt("tools.httpx_timeout"), 1, 60),
-			HTTPXThreads:            clampInt(v.GetInt("tools.httpx_threads"), 1, 200),
-			HTTPXBatchSize:          clampInt(v.GetInt("tools.httpx_batch_size"), 50, 10000),
-			HTTPXBatchTimeout:       v.GetDuration("tools.httpx_batch_timeout"),
-			HTTPXPatternMinGroup:    clampInt(v.GetInt("tools.httpx_pattern_min_group"), 0, 100000),
-			HTTPXPatternCap:         clampInt(v.GetInt("tools.httpx_pattern_cap"), 0, 100000),
-			HTTPXTLSProbe:           v.GetBool("tools.httpx_tls_probe"),
-			WebanalyzeBin:           v.GetString("tools.webanalyze_bin"),
-			WebanalyzeApps:          v.GetString("tools.webanalyze_apps"),
-			WebanalyzeWorkers:       v.GetInt("tools.webanalyze_workers"),
-			WebanalyzeCrawl:         v.GetInt("tools.webanalyze_crawl"),
-			WebanalyzeBatchSize:     clampInt(v.GetInt("tools.webanalyze_batch_size"), 50, 5000),
-			WebanalyzeBatchTimeout:  v.GetDuration("tools.webanalyze_batch_timeout"),
-			NucleiBin:               v.GetString("tools.nuclei_bin"),
-			NucleiTemplateDir:       v.GetString("tools.nuclei_template_dir"),
-			NucleiUpdateTemplates:   v.GetBool("tools.nuclei_update_templates"),
-			NucleiFromCVEs:          v.GetBool("tools.nuclei_from_cves"),
-			NucleiTags:              v.GetString("tools.nuclei_tags"),
-			NucleiSeverities:        v.GetString("tools.nuclei_severities"),
-			NucleiTemplateIDs:       v.GetString("tools.nuclei_template_ids"),
-			NucleiTargetSource:      v.GetString("tools.nuclei_target_source"),
-			NucleiProtocol:          v.GetString("tools.nuclei_protocol"),
-			NucleiHeaders:           v.GetString("tools.nuclei_headers"),
-			NucleiProxy:             v.GetString("tools.nuclei_proxy"),
-			NucleiScanStrategy:      v.GetString("tools.nuclei_scan_strategy"),
-			NucleiMaxHostError:      clampInt(v.GetInt("tools.nuclei_max_host_error"), 0, 100000),
-			NucleiWAFDetect:         v.GetBool("tools.nuclei_waf_detect"),
-			NucleiWAFSampleSize:     clampInt(v.GetInt("tools.nuclei_waf_sample_size"), 0, 50),
-			NucleiWAFProbeTimeout:   clampInt(v.GetInt("tools.nuclei_waf_probe_timeout"), 1, 30),
-			NucleiCVELimit:          v.GetInt("tools.nuclei_cve_limit"),
-			NucleiRate:              v.GetInt("tools.nuclei_rate"),
-			NucleiC:                 v.GetInt("tools.nuclei_c"),
-			NucleiBulkSize:          v.GetInt("tools.nuclei_bulk_size"),
-			ToolTimeout:             v.GetDuration("tools.timeout"),
+			SubfinderBin:             v.GetString("tools.subfinder_bin"),
+			SubfinderProviderConfig:  v.GetString("tools.subfinder_provider_config"),
+			SubfinderSources:         v.GetString("tools.subfinder_sources"),
+			SubfinderRateLimits:      v.GetString("tools.subfinder_rate_limits"),
+			DNSXBin:                  v.GetString("tools.dnsx_bin"),
+			DNSXResolvers:            v.GetString("tools.dnsx_resolvers"),
+			DNSXRate:                 v.GetInt("tools.dnsx_rate"),
+			DNSXBatchSize:            clampInt(v.GetInt("tools.dnsx_batch_size"), 100, 100000),
+			DNSXBatchTimeout:         v.GetDuration("tools.dnsx_batch_timeout"),
+			HTTPXBin:                 v.GetString("tools.httpx_bin"),
+			HTTPXTimeout:             clampInt(v.GetInt("tools.httpx_timeout"), 1, 60),
+			HTTPXThreads:             clampInt(v.GetInt("tools.httpx_threads"), 1, 200),
+			HTTPXBatchSize:           clampInt(v.GetInt("tools.httpx_batch_size"), 50, 10000),
+			HTTPXBatchTimeout:        v.GetDuration("tools.httpx_batch_timeout"),
+			HTTPXPatternMinGroup:     clampInt(v.GetInt("tools.httpx_pattern_min_group"), 0, 100000),
+			HTTPXPatternCap:          clampInt(v.GetInt("tools.httpx_pattern_cap"), 0, 100000),
+			HTTPXTLSProbe:            v.GetBool("tools.httpx_tls_probe"),
+			WebanalyzeBin:            v.GetString("tools.webanalyze_bin"),
+			WebanalyzeApps:           v.GetString("tools.webanalyze_apps"),
+			WebanalyzeWorkers:        v.GetInt("tools.webanalyze_workers"),
+			WebanalyzeCrawl:          v.GetInt("tools.webanalyze_crawl"),
+			WebanalyzeBatchSize:      clampInt(v.GetInt("tools.webanalyze_batch_size"), 50, 5000),
+			WebanalyzeBatchTimeout:   v.GetDuration("tools.webanalyze_batch_timeout"),
+			NucleiBin:                v.GetString("tools.nuclei_bin"),
+			NucleiTemplateDir:        v.GetString("tools.nuclei_template_dir"),
+			NucleiUpdateTemplates:    v.GetBool("tools.nuclei_update_templates"),
+			NucleiFromCVEs:           v.GetBool("tools.nuclei_from_cves"),
+			NucleiTags:               v.GetString("tools.nuclei_tags"),
+			NucleiSeverities:         v.GetString("tools.nuclei_severities"),
+			NucleiTemplateIDs:        v.GetString("tools.nuclei_template_ids"),
+			NucleiTargetSource:       v.GetString("tools.nuclei_target_source"),
+			NucleiProtocol:           v.GetString("tools.nuclei_protocol"),
+			NucleiHeaders:            v.GetString("tools.nuclei_headers"),
+			NucleiProxy:              v.GetString("tools.nuclei_proxy"),
+			NucleiScanStrategy:       v.GetString("tools.nuclei_scan_strategy"),
+			NucleiMaxHostError:       clampInt(v.GetInt("tools.nuclei_max_host_error"), 0, 100000),
+			NucleiWAFDetect:          v.GetBool("tools.nuclei_waf_detect"),
+			NucleiWAFSampleSize:      clampInt(v.GetInt("tools.nuclei_waf_sample_size"), 0, 50),
+			NucleiWAFProbeTimeout:    clampInt(v.GetInt("tools.nuclei_waf_probe_timeout"), 1, 30),
+			NucleiCVELimit:           v.GetInt("tools.nuclei_cve_limit"),
+			NucleiRate:               v.GetInt("tools.nuclei_rate"),
+			NucleiC:                  v.GetInt("tools.nuclei_c"),
+			NucleiBulkSize:           v.GetInt("tools.nuclei_bulk_size"),
+			NucleiTargetBatchSize:    clampInt(v.GetInt("tools.nuclei_target_batch_size"), 0, 100000),
+			NucleiTargetBatchTimeout: v.GetDuration("tools.nuclei_target_batch_timeout"),
+			ToolTimeout:              v.GetDuration("tools.timeout"),
 		},
 		Schedule: ScheduleConfig{
 			Full:            v.GetString("schedule.full"),

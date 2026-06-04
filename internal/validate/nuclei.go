@@ -18,33 +18,35 @@ import (
 )
 
 type NucleiRunner struct {
-	repo         *db.Repository
-	bin          string
-	tags         string
-	severities   string
-	templateIDs  string
-	templates    []string
-	templateDir  string
-	techFilter   string
-	techMaxAge   time.Duration
-	targetSource string
-	protocol     string
-	headers      []string
-	proxy        string
-	strategy     string
-	maxHostErr   int
-	wafDetect    bool
-	wafSample    int
-	wafTimeout   int
-	rate         int
-	concurrency  int
-	bulkSize     int
-	retries      int
-	timeout      int
-	scanRunID    string
-	programID    string
-	limit        int
-	toolTimeout  time.Duration
+	repo               *db.Repository
+	bin                string
+	tags               string
+	severities         string
+	templateIDs        string
+	templates          []string
+	templateDir        string
+	techFilter         string
+	techMaxAge         time.Duration
+	targetSource       string
+	protocol           string
+	headers            []string
+	proxy              string
+	strategy           string
+	maxHostErr         int
+	wafDetect          bool
+	wafSample          int
+	wafTimeout         int
+	rate               int
+	concurrency        int
+	bulkSize           int
+	retries            int
+	timeout            int
+	targetBatchSize    int
+	targetBatchTimeout time.Duration
+	scanRunID          string
+	programID          string
+	limit              int
+	toolTimeout        time.Duration
 }
 
 type NucleiResult struct {
@@ -52,6 +54,10 @@ type NucleiResult struct {
 	Results          int
 	Inserted         int
 	FindingsInserted int
+	Batches          int
+	CompletedBatches int
+	BatchSize        int
+	BatchTimeout     time.Duration
 	Skipped          string
 	WAF              WAFDiagnostic
 }
@@ -61,20 +67,21 @@ func NewNucleiRunner(repo *db.Repository, bin string) *NucleiRunner {
 		bin = "nuclei"
 	}
 	return &NucleiRunner{
-		repo:         repo,
-		bin:          bin,
-		tags:         "cve",
-		severities:   "medium,high,critical",
-		targetSource: db.NucleiTargetSourceHTTPServices,
-		protocol:     "http",
-		rate:         80,
-		concurrency:  20,
-		bulkSize:     5,
-		retries:      1,
-		timeout:      8,
-		wafDetect:    false,
-		wafSample:    8,
-		wafTimeout:   5,
+		repo:            repo,
+		bin:             bin,
+		tags:            "cve",
+		severities:      "medium,high,critical",
+		targetSource:    db.NucleiTargetSourceHTTPServices,
+		protocol:        "http",
+		rate:            80,
+		concurrency:     20,
+		bulkSize:        5,
+		retries:         1,
+		timeout:         8,
+		targetBatchSize: 500,
+		wafDetect:       false,
+		wafSample:       8,
+		wafTimeout:      5,
 	}
 }
 
@@ -159,6 +166,16 @@ func (r *NucleiRunner) WithRuntime(retries, timeout int) *NucleiRunner {
 	return r
 }
 
+func (r *NucleiRunner) WithBatching(size int, timeout time.Duration) *NucleiRunner {
+	if size >= 0 {
+		r.targetBatchSize = size
+	}
+	if timeout > 0 {
+		r.targetBatchTimeout = timeout
+	}
+	return r
+}
+
 func (r *NucleiRunner) WithLimit(limit int) *NucleiRunner {
 	r.limit = limit
 	return r
@@ -189,7 +206,14 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 	if r.limit > 0 && len(targets) > r.limit {
 		targets = targets[:r.limit]
 	}
-	result := NucleiResult{Targets: len(targets)}
+	batches := batchNucleiTargets(targets, r.targetBatchSize)
+	batchTimeout := firstPositiveDuration(r.targetBatchTimeout, r.toolTimeout)
+	result := NucleiResult{
+		Targets:      len(targets),
+		Batches:      len(batches),
+		BatchSize:    r.targetBatchSize,
+		BatchTimeout: batchTimeout,
+	}
 	if len(targets) == 0 {
 		result.Skipped = "no active HTTP services"
 		return result, nil
@@ -199,13 +223,6 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		wafBase = startWAFDiagnostic(ctx, targets, r.headers, r.wafSample, r.wafTimeout)
 	}
 
-	var input bytes.Buffer
-	for _, target := range targets {
-		input.WriteString(target.Input)
-		input.WriteByte('\n')
-	}
-
-	index := newTargetIndex(targets)
 	args := r.buildArgs()
 	if len(r.templates) > 0 {
 		for _, template := range r.templates {
@@ -220,7 +237,31 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		args = append(args, "-tags", r.tags)
 	}
 
-	err = tools.RunLinesWithTimeout(ctx, r.toolTimeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
+	for _, batch := range batches {
+		err = r.runBatch(ctx, batch, args, batchTimeout, &result)
+		if err != nil {
+			break
+		}
+		result.CompletedBatches++
+	}
+	if err != nil && isNoTemplatesError(err) {
+		result.Skipped = "no matching local Nuclei templates"
+		return result, nil
+	}
+	if r.wafDetect && r.targetSource == db.NucleiTargetSourceHTTPServices && (err != nil || result.Results == 0) {
+		result.WAF = finishWAFDiagnostic(ctx, wafBase, err, result.Results)
+	}
+	return result, err
+}
+
+func (r *NucleiRunner) runBatch(ctx context.Context, targets []db.NucleiTarget, args []string, timeout time.Duration, result *NucleiResult) error {
+	var input bytes.Buffer
+	for _, target := range targets {
+		input.WriteString(target.Input)
+		input.WriteByte('\n')
+	}
+	index := newTargetIndex(targets)
+	return tools.RunLinesWithTimeout(ctx, timeout, r.bin, args, bufio.NewReader(&input), func(line string) error {
 		parsed, err := parseNucleiLine(line)
 		if err != nil {
 			return err
@@ -251,14 +292,33 @@ func (r *NucleiRunner) Run(ctx context.Context) (NucleiResult, error) {
 		}
 		return nil
 	})
-	if err != nil && isNoTemplatesError(err) {
-		result.Skipped = "no matching local Nuclei templates"
-		return result, nil
+}
+
+func batchNucleiTargets(targets []db.NucleiTarget, size int) [][]db.NucleiTarget {
+	if len(targets) == 0 {
+		return nil
 	}
-	if r.wafDetect && r.targetSource == db.NucleiTargetSourceHTTPServices && (err != nil || result.Results == 0) {
-		result.WAF = finishWAFDiagnostic(ctx, wafBase, err, result.Results)
+	if size <= 0 || size >= len(targets) {
+		return [][]db.NucleiTarget{targets}
 	}
-	return result, err
+	batches := make([][]db.NucleiTarget, 0, (len(targets)+size-1)/size)
+	for start := 0; start < len(targets); start += size {
+		end := start + size
+		if end > len(targets) {
+			end = len(targets)
+		}
+		batches = append(batches, targets[start:end])
+	}
+	return batches
+}
+
+func firstPositiveDuration(values ...time.Duration) time.Duration {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func normalizeNucleiList(values []string) []string {

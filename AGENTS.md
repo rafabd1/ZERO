@@ -41,6 +41,7 @@ Custom campaigns can skip parts of that path:
 - `--nuclei-tech-max-age` is mainly for scans that skip fingerprinting and intentionally use existing database observations.
 - `--nuclei-target-source` selects what Nuclei receives. Use `http-services` for alive HTTP URLs and `subdomains` for scoped hostnames/DNS templates.
 - `--nuclei-protocol` controls Nuclei `-pt`; use `http`, `dns`, or `auto` depending on the template family.
+- `--nuclei-target-batch-size` and `--nuclei-target-batch-timeout` keep broad Nuclei campaigns bounded per process.
 - `--disable-passive-fingerprint-reports` should be used when a custom campaign must report only Nuclei-confirmed findings.
 
 Default/due scans use `ZERO_TARGET_PARALLELISM`. Custom campaigns use their own campaign parallelism and can run independently.

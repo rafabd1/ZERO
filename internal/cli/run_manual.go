@@ -62,6 +62,8 @@ type manualRunOptions struct {
 	NucleiRateLimit                  int
 	NucleiConcurrency                int
 	NucleiBulkSize                   int
+	NucleiTargetBatchSize            int
+	NucleiTargetBatchTimeout         string
 	NucleiRetries                    int
 	NucleiTimeout                    int
 	NucleiFromCVEs                   bool
@@ -190,6 +192,8 @@ func bindManualRunFlags(cmd *cobra.Command, opts *manualRunOptions) {
 	cmd.Flags().IntVar(&opts.NucleiRateLimit, "nuclei-rate-limit", 0, "custom Nuclei rate limit for this run only")
 	cmd.Flags().IntVar(&opts.NucleiConcurrency, "nuclei-concurrency", 0, "custom Nuclei concurrency for this run only")
 	cmd.Flags().IntVar(&opts.NucleiBulkSize, "nuclei-bulk-size", 0, "custom Nuclei bulk size for this run only")
+	cmd.Flags().IntVar(&opts.NucleiTargetBatchSize, "nuclei-target-batch-size", 0, "custom Nuclei targets per process for this run only")
+	cmd.Flags().StringVar(&opts.NucleiTargetBatchTimeout, "nuclei-target-batch-timeout", "", "custom max wall-clock time per Nuclei target batch, for example 20m")
 	cmd.Flags().IntVar(&opts.NucleiRetries, "nuclei-retries", -1, "custom Nuclei retries for this run only")
 	cmd.Flags().IntVar(&opts.NucleiTimeout, "nuclei-timeout", 0, "custom Nuclei timeout seconds for this run only")
 	cmd.Flags().BoolVar(&opts.NucleiFromCVEs, "nuclei-from-cves", false, "derive Nuclei template ids from passive CVE matches for this run only")
@@ -311,6 +315,8 @@ func runManualPipelineWithProgress(parent *cobra.Command, opts manualRunOptions,
 		step = appendIntFlag(step, "--rate-limit", opts.NucleiRateLimit)
 		step = appendIntFlag(step, "--concurrency", opts.NucleiConcurrency)
 		step = appendIntFlag(step, "--bulk-size", opts.NucleiBulkSize)
+		step = appendIntFlag(step, "--target-batch-size", opts.NucleiTargetBatchSize)
+		step = appendStringFlag(step, "--target-batch-timeout", opts.NucleiTargetBatchTimeout)
 		if opts.NucleiRetries >= 0 {
 			step = append(step, "--retries", fmt.Sprint(opts.NucleiRetries))
 		}

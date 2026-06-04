@@ -157,6 +157,36 @@ func TestNormalizeNucleiListSplitsAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestBatchNucleiTargetsSplitsBySize(t *testing.T) {
+	targets := []db.NucleiTarget{
+		{Input: "https://a.example.com"},
+		{Input: "https://b.example.com"},
+		{Input: "https://c.example.com"},
+		{Input: "https://d.example.com"},
+		{Input: "https://e.example.com"},
+	}
+
+	batches := batchNucleiTargets(targets, 2)
+	if len(batches) != 3 {
+		t.Fatalf("batch count = %d; want 3", len(batches))
+	}
+	if len(batches[0]) != 2 || len(batches[1]) != 2 || len(batches[2]) != 1 {
+		t.Fatalf("batch sizes = %d,%d,%d; want 2,2,1", len(batches[0]), len(batches[1]), len(batches[2]))
+	}
+	if batches[2][0].Input != "https://e.example.com" {
+		t.Fatalf("last batch target = %q", batches[2][0].Input)
+	}
+}
+
+func TestBatchNucleiTargetsUsesSingleBatchWhenDisabled(t *testing.T) {
+	targets := []db.NucleiTarget{{Input: "https://a.example.com"}, {Input: "https://b.example.com"}}
+
+	batches := batchNucleiTargets(targets, 0)
+	if len(batches) != 1 || len(batches[0]) != 2 {
+		t.Fatalf("batches = %#v; want one full batch", batches)
+	}
+}
+
 func TestClassifyWAFResponseDetectsBlockedCloudflarePage(t *testing.T) {
 	headers := http.Header{}
 	headers.Set("cf-ray", "example")

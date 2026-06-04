@@ -58,7 +58,7 @@ base URL + every --webanalyze-probe-path
 
 For example, 250 services with 5 probe paths means up to 1500 Webanalyze URLs.
 
-Zero defaults Webanalyze batches to 50 expanded URLs and 10 minutes per batch. `ZERO_TOOL_TIMEOUT` applies to external steps that do not have a dedicated batch timeout, such as subfinder, Nuclei, and template updates. Use a larger explicit `--webanalyze-batch-size` only after a staged run shows it is stable.
+Zero defaults Webanalyze batches to 50 expanded URLs and 10 minutes per batch. Use a larger explicit `--webanalyze-batch-size` only after a staged run shows it is stable.
 
 Use `--nuclei-tech-filter` to run Nuclei only on services where `httpx`, Webanalyze, title, server text, or stored technology observations match the target product.
 
@@ -194,7 +194,18 @@ Keep templates safe and bounded:
 - prefer `GET`/read-only probes when possible;
 - avoid state-changing requests unless the campaign explicitly requires them;
 - make matchers specific enough to avoid generic 200 responses;
-- set `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, and `--nuclei-retries` explicitly for broad campaigns.
+- set `--nuclei-rate-limit`, `--nuclei-concurrency`, `--nuclei-bulk-size`, `--nuclei-timeout`, `--nuclei-retries`, `--nuclei-target-batch-size`, and `--nuclei-target-batch-timeout` explicitly for broad campaigns.
+
+Zero runs Nuclei in target batches so large programs do not consume the whole wall-clock timeout in one process. The defaults are 500 targets per batch and 20 minutes per batch. This means a program with 2,200 alive services runs as five bounded Nuclei processes under one scan run.
+
+For broad safe templates, keep the per-program batch size moderate:
+
+```bash
+--nuclei-target-batch-size 500 \
+--nuclei-target-batch-timeout 20m
+```
+
+If the template is expensive, reduce the batch size before increasing concurrency. `ZERO_TOOL_TIMEOUT` still applies to external steps without a dedicated batch timeout.
 
 Minimal DNS template shape:
 
@@ -243,6 +254,8 @@ docker compose run --rm zero run schedule \
   --nuclei-rate-limit 30 \
   --nuclei-concurrency 8 \
   --nuclei-bulk-size 5 \
+  --nuclei-target-batch-size 500 \
+  --nuclei-target-batch-timeout 20m \
   --nuclei-timeout 10 \
   --nuclei-retries 1
 ```
@@ -270,7 +283,9 @@ docker compose run --rm zero run schedule \
   --nuclei-template /home/zero/custom-assets/example-product-check.yaml \
   --nuclei-tech-filter "Example Product" \
   --nuclei-rate-limit 20 \
-  --nuclei-concurrency 5
+  --nuclei-concurrency 5 \
+  --nuclei-target-batch-size 300 \
+  --nuclei-target-batch-timeout 20m
 ```
 
 ### Fingerprint-Only Triage
@@ -311,6 +326,8 @@ docker compose run --rm zero run schedule \
   --nuclei-template /home/zero/custom-assets/dangling-dns.yaml \
   --nuclei-rate-limit 50 \
   --nuclei-concurrency 10 \
+  --nuclei-target-batch-size 1000 \
+  --nuclei-target-batch-timeout 20m \
   --nuclei-timeout 8 \
   --nuclei-retries 1
 ```
@@ -339,7 +356,9 @@ docker compose run --rm zero run schedule \
   --nuclei-template /home/zero/custom-assets/example-safe-check.yaml \
   --nuclei-force \
   --nuclei-rate-limit 20 \
-  --nuclei-concurrency 5
+  --nuclei-concurrency 5 \
+  --nuclei-target-batch-size 500 \
+  --nuclei-target-batch-timeout 20m
 ```
 
 Only use this for narrow, low-noise templates. For product-specific checks, prefer fingerprint gating first.

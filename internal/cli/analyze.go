@@ -27,6 +27,8 @@ func newAnalyzeCommand() *cobra.Command {
 	var nucleiRate int
 	var nucleiConcurrency int
 	var nucleiBulkSize int
+	var nucleiTargetBatchSize int
+	var nucleiTargetBatchTimeout time.Duration
 	var nucleiRetries int
 	var nucleiTimeout int
 	var nucleiFromCVEs bool
@@ -114,6 +116,8 @@ func newAnalyzeCommand() *cobra.Command {
 			rate := firstPositive(nucleiRate, cfg.Tools.NucleiRate)
 			concurrency := firstPositive(nucleiConcurrency, cfg.Tools.NucleiC)
 			bulkSize := firstPositive(nucleiBulkSize, cfg.Tools.NucleiBulkSize)
+			targetBatchSize := firstPositive(nucleiTargetBatchSize, cfg.Tools.NucleiTargetBatchSize)
+			targetBatchTimeout := firstDuration(nucleiTargetBatchTimeout, cfg.Tools.NucleiTargetBatchTimeout)
 			headers := validate.SplitHeaderConfig(cfg.Tools.NucleiHeaders)
 			if len(nucleiHeaders) > 0 {
 				headers = nucleiHeaders
@@ -163,6 +167,7 @@ func newAnalyzeCommand() *cobra.Command {
 				WithTemplates(nucleiTemplatePaths).
 				WithTemplateDir(cfg.Tools.NucleiTemplateDir).
 				WithRuntime(retries, timeout).
+				WithBatching(targetBatchSize, targetBatchTimeout).
 				WithScanRunID(scanID).
 				WithProgramID(nucleiProgramID).
 				WithLimit(nucleiLimit).
@@ -170,32 +175,36 @@ func newAnalyzeCommand() *cobra.Command {
 				WithToolTimeout(cfg.Tools.ToolTimeout)
 			result, err := runner.Run(ctx)
 			stats := map[string]any{
-				"targets":           result.Targets,
-				"results":           result.Results,
-				"inserted_results":  result.Inserted,
-				"inserted_findings": result.FindingsInserted,
-				"program_id":        nucleiProgramID,
-				"tool":              "nuclei",
-				"from_cves":         fromCVEs,
-				"template_ids":      templateIDs,
-				"template_paths":    nucleiTemplatePaths,
-				"tech_filter":       nucleiTechFilter,
-				"tech_max_age":      nucleiTechMaxAge.String(),
-				"target_source":     targetSource,
-				"protocol":          protocol,
-				"cve_min_year":      cfg.Intel.CVEMinYear,
-				"tags":              tags,
-				"severities":        severities,
-				"headers":           headers,
-				"proxy_configured":  proxy != "",
-				"scan_strategy":     scanStrategy,
-				"max_host_error":    maxHostError,
-				"rate":              rate,
-				"concurrency":       concurrency,
-				"bulk_size":         bulkSize,
-				"retries":           retries,
-				"timeout":           timeout,
-				"skipped":           result.Skipped,
+				"targets":              result.Targets,
+				"results":              result.Results,
+				"inserted_results":     result.Inserted,
+				"inserted_findings":    result.FindingsInserted,
+				"program_id":           nucleiProgramID,
+				"tool":                 "nuclei",
+				"from_cves":            fromCVEs,
+				"template_ids":         templateIDs,
+				"template_paths":       nucleiTemplatePaths,
+				"tech_filter":          nucleiTechFilter,
+				"tech_max_age":         nucleiTechMaxAge.String(),
+				"target_source":        targetSource,
+				"protocol":             protocol,
+				"cve_min_year":         cfg.Intel.CVEMinYear,
+				"tags":                 tags,
+				"severities":           severities,
+				"headers":              headers,
+				"proxy_configured":     proxy != "",
+				"scan_strategy":        scanStrategy,
+				"max_host_error":       maxHostError,
+				"rate":                 rate,
+				"concurrency":          concurrency,
+				"bulk_size":            bulkSize,
+				"target_batch_size":    result.BatchSize,
+				"target_batch_timeout": result.BatchTimeout.String(),
+				"batches":              result.Batches,
+				"completed_batches":    result.CompletedBatches,
+				"retries":              retries,
+				"timeout":              timeout,
+				"skipped":              result.Skipped,
 			}
 			if result.WAF.Enabled {
 				stats["waf_diagnostic"] = result.WAF
@@ -212,7 +221,7 @@ func newAnalyzeCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "nuclei skipped: %s\n", result.Skipped)
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "nuclei scanned %d URLs, observed %d results, inserted %d new results and %d new findings\n", result.Targets, result.Results, result.Inserted, result.FindingsInserted)
+			fmt.Fprintf(cmd.OutOrStdout(), "nuclei scanned %d URLs in %d batch(es), observed %d results, inserted %d new results and %d new findings\n", result.Targets, result.Batches, result.Results, result.Inserted, result.FindingsInserted)
 			return nil
 		},
 	}
@@ -234,6 +243,8 @@ func newAnalyzeCommand() *cobra.Command {
 	nuclei.Flags().IntVar(&nucleiRate, "rate-limit", 0, "override Nuclei rate limit for this run")
 	nuclei.Flags().IntVar(&nucleiConcurrency, "concurrency", 0, "override Nuclei concurrency for this run")
 	nuclei.Flags().IntVar(&nucleiBulkSize, "bulk-size", 0, "override Nuclei bulk size for this run")
+	nuclei.Flags().IntVar(&nucleiTargetBatchSize, "target-batch-size", 0, "override number of Nuclei targets per process")
+	nuclei.Flags().DurationVar(&nucleiTargetBatchTimeout, "target-batch-timeout", 0, "override max wall-clock time per Nuclei target batch, for example 20m")
 	nuclei.Flags().IntVar(&nucleiRetries, "retries", -1, "override Nuclei retries for this run")
 	nuclei.Flags().IntVar(&nucleiTimeout, "timeout", 0, "override Nuclei timeout seconds for this run")
 	nuclei.Flags().BoolVar(&nucleiFromCVEs, "from-cves", false, "run only Nuclei template ids linked from passive CVE matching")
