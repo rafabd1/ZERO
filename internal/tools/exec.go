@@ -62,55 +62,14 @@ func RunLinesWithTimeout(ctx context.Context, timeout time.Duration, bin string,
 		cmd.Stdin = stdin
 	}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	stdoutErr := make(chan error, 1)
-	stderrErr := make(chan error, 1)
+	var outBuf bytes.Buffer
 	var errBuf bytes.Buffer
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			if err := onLine(line); err != nil {
-				_ = cmd.Process.Kill()
-				stdoutErr <- err
-				return
-			}
-		}
-		stdoutErr <- scanner.Err()
-	}()
-	go func() {
-		_, err := io.Copy(&errBuf, stderr)
-		stderrErr <- err
-	}()
-	scanErr := <-stdoutErr
-	errReadErr := <-stderrErr
-	waitErr := cmd.Wait()
-
-	if scanErr != nil {
-		return scanErr
-	}
-	if errReadErr != nil {
-		return errReadErr
-	}
-	if waitErr != nil {
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(errBuf.String())
 		if msg == "" {
-			msg = waitErr.Error()
+			msg = err.Error()
 		}
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			return TimeoutError{Bin: bin, Args: append([]string(nil), args...), Timeout: timeout}
@@ -120,7 +79,30 @@ func RunLinesWithTimeout(ctx context.Context, timeout time.Duration, bin string,
 		}
 		return fmt.Errorf("%s failed: %s", bin, msg)
 	}
+
+	scanner := bufio.NewScanner(&outBuf)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if err := onLine(line); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil && !isBenignPipeClose(err) {
+		return err
+	}
 	return nil
+}
+
+func isBenignPipeClose(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "file already closed") || strings.Contains(text, "read |0")
 }
 
 func RunLinesRetry(ctx context.Context, attempts int, delay time.Duration, bin string, args []string, stdinFactory func() (io.Reader, error), onLine func(string) error) error {

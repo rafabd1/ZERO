@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/rafabd1/ZERO/internal/sanitize"
@@ -60,6 +61,13 @@ func (r *Repository) ListDuePrograms(ctx context.Context, limit int) ([]Program,
 			last_scan_finished_at IS NULL
 			OR last_scan_finished_at <= now() - make_interval(hours => scan_interval_hours)
 		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM zero_scan_runs sr
+			WHERE sr.program_id = zero_programs.id
+			  AND sr.run_type = 'full'
+			  AND sr.status = 'running'
+		  )
 		ORDER BY last_scan_finished_at NULLS FIRST, last_seen_at DESC, platform, handle
 		LIMIT $1
 	`, limit)
@@ -91,6 +99,13 @@ func (r *Repository) ListProgramsForCampaign(ctx context.Context, dueOnly bool, 
 			$1 = false
 			OR last_scan_finished_at IS NULL
 			OR last_scan_finished_at <= now() - make_interval(hours => scan_interval_hours)
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM zero_scan_runs sr
+			WHERE sr.program_id = zero_programs.id
+			  AND sr.run_type = 'full'
+			  AND sr.status = 'running'
 		  )
 		ORDER BY last_scan_finished_at NULLS FIRST, last_seen_at DESC, platform, handle
 		LIMIT $2
@@ -663,7 +678,8 @@ func (r *Repository) MarkMissingHTTPServicesInactiveForHosts(ctx context.Context
 		return 0, nil
 	}
 	var count int
-	if err := r.pool.QueryRow(ctx, `
+	if err := withRetryableDB(ctx, 6, 250*time.Millisecond, func() error {
+		return r.pool.QueryRow(ctx, `
 		WITH stale AS (
 			UPDATE zero_http_services s
 			SET active = false,
@@ -681,7 +697,8 @@ func (r *Repository) MarkMissingHTTPServicesInactiveForHosts(ctx context.Context
 			RETURNING s.id
 		)
 		SELECT count(*) FROM stale
-	`, programID, scanRunID, cleanHosts).Scan(&count); err != nil {
+	`, programID, scanRunID, cleanHosts).Scan(&count)
+	}); err != nil {
 		return 0, fmt.Errorf("mark missing http services inactive: %w", err)
 	}
 	return count, nil
@@ -864,7 +881,8 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 
 	var id string
 	var inserted bool
-	err := r.pool.QueryRow(ctx, `
+	err := withRetryableDB(ctx, 6, 250*time.Millisecond, func() error {
+		return r.pool.QueryRow(ctx, `
 		INSERT INTO zero_http_services(
 			program_id, subdomain_id, url, scheme, host, port, status_code, title, webserver,
 			technologies, favicon_hash, tls, raw, last_scan_run_id
@@ -887,7 +905,8 @@ func (r *Repository) UpsertHTTPService(ctx context.Context, service HTTPService)
 			last_seen_at = now()
 		RETURNING id, (xmax = 0) AS inserted
 	`, service.ProgramID, nullString(service.SubdomainID), service.URL, service.Scheme, service.Host, service.Port, service.StatusCode,
-		service.Title, service.Webserver, string(tech), service.FaviconHash, string(service.TLS), string(service.Raw), service.LastScanRunID).Scan(&id, &inserted)
+			service.Title, service.Webserver, string(tech), service.FaviconHash, string(service.TLS), string(service.Raw), service.LastScanRunID).Scan(&id, &inserted)
+	})
 	if err != nil {
 		return "", fmt.Errorf("upsert http service: %w", err)
 	}

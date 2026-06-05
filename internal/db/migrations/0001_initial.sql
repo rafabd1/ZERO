@@ -21,13 +21,14 @@ CREATE INDEX IF NOT EXISTS idx_zero_programs_due
 
 CREATE TABLE IF NOT EXISTS zero_default_scan_cycles (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-	status text NOT NULL DEFAULT 'running' CHECK (status IN ('running','succeeded','partial','failed','canceled')),
+	status text NOT NULL DEFAULT 'running' CHECK (status IN ('running','succeeded','partial','failed','canceled','incomplete')),
 	parallelism integer NOT NULL DEFAULT 1 CHECK (parallelism >= 1 AND parallelism <= 64),
 	total_programs integer NOT NULL DEFAULT 0,
 	running_programs integer NOT NULL DEFAULT 0,
 	succeeded_programs integer NOT NULL DEFAULT 0,
 	failed_programs integer NOT NULL DEFAULT 0,
 	canceled_programs integer NOT NULL DEFAULT 0,
+	incomplete_programs integer NOT NULL DEFAULT 0,
 	started_at timestamptz NOT NULL DEFAULT now(),
 	finished_at timestamptz,
 	error text NOT NULL DEFAULT '',
@@ -39,6 +40,24 @@ CREATE TABLE IF NOT EXISTS zero_default_scan_cycles (
 CREATE INDEX IF NOT EXISTS idx_zero_default_scan_cycles_status
 	ON zero_default_scan_cycles(status, started_at DESC);
 
+ALTER TABLE zero_default_scan_cycles
+	ADD COLUMN IF NOT EXISTS incomplete_programs integer NOT NULL DEFAULT 0;
+
+DO $$
+BEGIN
+	IF EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'zero_default_scan_cycles_status_check'
+		  AND conrelid = 'zero_default_scan_cycles'::regclass
+	) THEN
+		ALTER TABLE zero_default_scan_cycles DROP CONSTRAINT zero_default_scan_cycles_status_check;
+	END IF;
+	ALTER TABLE zero_default_scan_cycles
+		ADD CONSTRAINT zero_default_scan_cycles_status_check
+		CHECK (status IN ('running','succeeded','partial','failed','canceled','incomplete'));
+END $$;
+
 CREATE TABLE IF NOT EXISTS zero_scan_runs (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	program_id uuid REFERENCES zero_programs(id) ON DELETE CASCADE,
@@ -47,7 +66,7 @@ CREATE TABLE IF NOT EXISTS zero_scan_runs (
 	scan_request_id uuid,
 	scan_campaign_id uuid,
 	run_type text NOT NULL CHECK (run_type IN ('scope','enum','probe','nuclei','intel','full')),
-	status text NOT NULL DEFAULT 'running' CHECK (status IN ('queued','running','succeeded','failed','canceled')),
+	status text NOT NULL DEFAULT 'running' CHECK (status IN ('queued','running','succeeded','failed','canceled','incomplete')),
 	started_at timestamptz NOT NULL DEFAULT now(),
 	finished_at timestamptz,
 	worker_id text NOT NULL DEFAULT '',
@@ -64,6 +83,21 @@ ALTER TABLE zero_scan_runs
 	ADD COLUMN IF NOT EXISTS parent_scan_run_id uuid REFERENCES zero_scan_runs(id) ON DELETE SET NULL,
 	ADD COLUMN IF NOT EXISTS scan_request_id uuid,
 	ADD COLUMN IF NOT EXISTS scan_campaign_id uuid;
+
+DO $$
+BEGIN
+	IF EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'zero_scan_runs_status_check'
+		  AND conrelid = 'zero_scan_runs'::regclass
+	) THEN
+		ALTER TABLE zero_scan_runs DROP CONSTRAINT zero_scan_runs_status_check;
+	END IF;
+	ALTER TABLE zero_scan_runs
+		ADD CONSTRAINT zero_scan_runs_status_check
+		CHECK (status IN ('queued','running','succeeded','failed','canceled','incomplete'));
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_program_started
 	ON zero_scan_runs(program_id, started_at DESC);

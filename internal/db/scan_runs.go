@@ -107,6 +107,7 @@ func (r *Repository) RefreshDefaultScanCycle(ctx context.Context, id string) err
 				count(*) FILTER (WHERE status = 'succeeded')::int AS succeeded,
 				count(*) FILTER (WHERE status = 'failed')::int AS failed,
 				count(*) FILTER (WHERE status = 'canceled')::int AS canceled,
+				count(*) FILTER (WHERE status = 'incomplete')::int AS incomplete,
 				count(*)::int AS total
 			FROM zero_scan_runs
 			WHERE default_scan_cycle_id = $1::uuid
@@ -117,12 +118,16 @@ func (r *Repository) RefreshDefaultScanCycle(ctx context.Context, id string) err
 			succeeded_programs = counts.succeeded,
 			failed_programs = counts.failed,
 			canceled_programs = counts.canceled,
+			incomplete_programs = counts.incomplete,
 			total_programs = GREATEST(c.total_programs, counts.total),
 			status = CASE
 				WHEN counts.running > 0 THEN 'running'
-				WHEN counts.failed > 0 AND counts.succeeded > 0 THEN 'partial'
-				WHEN counts.failed > 0 THEN 'failed'
-				WHEN counts.canceled > 0 AND counts.succeeded = 0 THEN 'canceled'
+				WHEN counts.incomplete > 0 AND (counts.succeeded > 0 OR counts.failed > 0 OR counts.canceled > 0) THEN 'partial'
+				WHEN counts.failed > 0 AND (counts.succeeded > 0 OR counts.canceled > 0) THEN 'partial'
+				WHEN counts.canceled > 0 AND counts.succeeded > 0 THEN 'partial'
+				WHEN counts.failed > 0 AND counts.incomplete = 0 THEN 'failed'
+				WHEN counts.canceled > 0 AND counts.succeeded = 0 AND counts.failed = 0 AND counts.incomplete = 0 THEN 'canceled'
+				WHEN counts.incomplete > 0 THEN 'incomplete'
 				ELSE 'succeeded'
 			END,
 			finished_at = CASE
@@ -130,6 +135,11 @@ func (r *Repository) RefreshDefaultScanCycle(ctx context.Context, id string) err
 				ELSE NULL
 			END,
 			error = CASE
+				WHEN counts.running > 0 AND counts.incomplete > 0 AND counts.failed > 0 THEN counts.incomplete::text || ' default program scan(s) interrupted; ' || counts.failed::text || ' failed so far'
+				WHEN counts.running > 0 AND counts.incomplete > 0 THEN counts.incomplete::text || ' default program scan(s) interrupted so far'
+				WHEN counts.running > 0 AND counts.failed > 0 THEN counts.failed::text || ' default program scan(s) failed so far'
+				WHEN counts.incomplete > 0 AND counts.failed > 0 THEN counts.incomplete::text || ' default program scan(s) interrupted; ' || counts.failed::text || ' failed'
+				WHEN counts.incomplete > 0 THEN counts.incomplete::text || ' default program scan(s) interrupted before completion'
 				WHEN counts.failed > 0 AND counts.succeeded > 0 THEN counts.failed::text || ' default program scan(s) failed; completed partially'
 				WHEN counts.failed > 0 THEN 'all default program scans failed'
 				ELSE ''
@@ -182,22 +192,24 @@ func (r *Repository) RecoverRunningScanRuns(ctx context.Context) (int, error) {
 	err := r.pool.QueryRow(ctx, `
 		WITH recovered AS (
 			UPDATE zero_scan_runs
-			SET status = 'failed',
+			SET status = 'incomplete',
 				finished_at = now(),
 				error = CASE
-					WHEN error = '' THEN 'recovered on worker startup after interrupted execution'
+					WHEN error = '' THEN 'interrupted before completion; recovered on worker startup'
 					ELSE error
 				END,
-				stats = stats || jsonb_build_object('recovered_on_startup', true)
+				stats = stats || jsonb_build_object(
+					'recovered_on_startup', true,
+					'recovery_status', 'incomplete'
+				)
 			WHERE status = 'running'
 			RETURNING id, program_id, run_type, error
 		), recovered_programs AS (
 			UPDATE zero_programs p
-			SET last_scan_finished_at = now(),
-				metadata = metadata || jsonb_build_object(
-					'last_scan_status', 'failed',
-					'last_scan_error', 'recovered on worker startup after interrupted execution',
-					'last_scan_finished_at', now()
+			SET metadata = metadata || jsonb_build_object(
+					'last_scan_status', 'incomplete',
+					'last_scan_error', 'interrupted before completion; recovered on worker startup',
+					'last_scan_interrupted_at', now()
 				)
 			WHERE EXISTS (
 				SELECT 1

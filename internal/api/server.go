@@ -279,6 +279,13 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 						last_scan_finished_at IS NULL
 						OR last_scan_finished_at < now() - (scan_interval_hours * interval '1 hour')
 					  )
+					  AND NOT EXISTS (
+						SELECT 1
+						FROM zero_scan_runs sr
+						WHERE sr.program_id = zero_programs.id
+						  AND sr.run_type = 'full'
+						  AND sr.status = 'running'
+					  )
 				)
 			),
 			'scan_runs', jsonb_build_object(
@@ -286,18 +293,21 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 				'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE status = 'running' AND run_type = 'full' AND program_id IS NOT NULL),
 				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND run_type = 'full'),
 				'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND run_type = 'full'),
+				'incomplete', (SELECT count(*) FROM zero_scan_runs WHERE status = 'incomplete' AND run_type = 'full'),
 				'total', (SELECT count(*) FROM zero_scan_runs WHERE run_type = 'full'),
 				'recent_24h', jsonb_build_object(
 					'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
 					'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE status = 'running' AND run_type = 'full' AND program_id IS NOT NULL AND started_at > now() - interval '24 hours'),
 					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
 					'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'incomplete', (SELECT count(*) FROM zero_scan_runs WHERE status = 'incomplete' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
 					'total', (SELECT count(*) FROM zero_scan_runs WHERE run_type = 'full' AND started_at > now() - interval '24 hours')
 				),
 				'task_runs', jsonb_build_object(
 					'running', (SELECT count(*) FROM zero_scan_runs WHERE status = 'running' AND run_type <> 'full'),
 					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE status = 'succeeded' AND run_type <> 'full'),
 					'failed', (SELECT count(*) FROM zero_scan_runs WHERE status = 'failed' AND run_type <> 'full'),
+					'incomplete', (SELECT count(*) FROM zero_scan_runs WHERE status = 'incomplete' AND run_type <> 'full'),
 					'total', (SELECT count(*) FROM zero_scan_runs WHERE run_type <> 'full')
 				)
 			),
@@ -383,6 +393,12 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 				'is_due', p.active AND (
 					p.last_scan_finished_at IS NULL
 					OR p.last_scan_finished_at < now() - (p.scan_interval_hours * interval '1 hour')
+				) AND NOT EXISTS (
+					SELECT 1
+					FROM zero_scan_runs sr
+					WHERE sr.program_id = p.id
+					  AND sr.run_type = 'full'
+					  AND sr.status = 'running'
 				)
 			),
 			'scan_runs', jsonb_build_object(
@@ -390,18 +406,21 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 				'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type = 'full'),
 				'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND run_type = 'full'),
 				'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND run_type = 'full'),
+				'incomplete', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'incomplete' AND run_type = 'full'),
 				'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND run_type = 'full'),
 				'recent_24h', jsonb_build_object(
 					'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
 					'running_programs', (SELECT count(DISTINCT program_id) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
 					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
 					'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
+					'incomplete', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'incomplete' AND run_type = 'full' AND started_at > now() - interval '24 hours'),
 					'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND run_type = 'full' AND started_at > now() - interval '24 hours')
 				),
 				'task_runs', jsonb_build_object(
 					'running', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'running' AND run_type <> 'full'),
 					'succeeded', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'succeeded' AND run_type <> 'full'),
 					'failed', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'failed' AND run_type <> 'full'),
+					'incomplete', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND status = 'incomplete' AND run_type <> 'full'),
 					'total', (SELECT count(*) FROM zero_scan_runs WHERE program_id = p.id AND run_type <> 'full')
 				),
 				'by_type', COALESCE((
@@ -777,7 +796,7 @@ func (s *Server) defaultScans(w http.ResponseWriter, r *http.Request) {
 				COALESCE(stats.updated_count, 0)::int AS updated_count,
 				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count,
 				GREATEST(
-					c.total_programs - c.running_programs - c.succeeded_programs - c.failed_programs - c.canceled_programs,
+					c.total_programs - c.running_programs - c.succeeded_programs - c.failed_programs - c.canceled_programs - c.incomplete_programs,
 					0
 				)::int AS queued_programs
 			FROM zero_default_scan_cycles c
@@ -803,6 +822,7 @@ func (s *Server) defaultScans(w http.ResponseWriter, r *http.Request) {
 			'succeeded_requests', succeeded_programs,
 			'failed_requests', failed_programs,
 			'canceled_requests', canceled_programs,
+			'incomplete_requests', incomplete_programs,
 			'started_at', started_at,
 			'finished_at', finished_at,
 			'created_at', started_at,
@@ -845,7 +865,7 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 				COALESCE(stats.updated_count, 0)::int AS updated_count,
 				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count,
 				GREATEST(
-					c.total_programs - c.running_programs - c.succeeded_programs - c.failed_programs - c.canceled_programs,
+					c.total_programs - c.running_programs - c.succeeded_programs - c.failed_programs - c.canceled_programs - c.incomplete_programs,
 					0
 				)::int AS queued_programs
 			FROM zero_default_scan_cycles c
@@ -891,6 +911,7 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 					'succeeded_requests', c.succeeded_programs,
 					'failed_requests', c.failed_programs,
 					'canceled_requests', c.canceled_programs,
+					'incomplete_requests', c.incomplete_programs,
 					'started_at', c.started_at,
 					'finished_at', c.finished_at,
 					'created_at', c.started_at,
@@ -914,7 +935,8 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 				'queued', COALESCE((SELECT queued_programs FROM cycle), 0),
 				'succeeded', COALESCE((SELECT succeeded_programs FROM cycle), 0),
 				'failed', COALESCE((SELECT failed_programs FROM cycle), 0),
-				'canceled', COALESCE((SELECT canceled_programs FROM cycle), 0)
+				'canceled', COALESCE((SELECT canceled_programs FROM cycle), 0),
+				'incomplete', COALESCE((SELECT incomplete_programs FROM cycle), 0)
 			),
 			'recent_requests', COALESCE((
 				SELECT jsonb_agg(row ORDER BY sort_at DESC)
@@ -945,6 +967,7 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 							'child_scan_runs', count(*)::int,
 							'child_succeeded', count(*) FILTER (WHERE child.status = 'succeeded')::int,
 							'child_failed', count(*) FILTER (WHERE child.status = 'failed')::int,
+							'child_incomplete', count(*) FILTER (WHERE child.status = 'incomplete')::int,
 							'child_running', count(*) FILTER (WHERE child.status = 'running')::int,
 							'current_step', COALESCE((
 								SELECT jsonb_build_object(
@@ -996,6 +1019,7 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 							'child_scan_runs', count(*)::int,
 							'child_succeeded', count(*) FILTER (WHERE child.status = 'succeeded')::int,
 							'child_failed', count(*) FILTER (WHERE child.status = 'failed')::int,
+							'child_incomplete', count(*) FILTER (WHERE child.status = 'incomplete')::int,
 							'child_running', count(*) FILTER (WHERE child.status = 'running')::int,
 							'current_step', COALESCE((
 								SELECT jsonb_build_object(
@@ -1172,6 +1196,7 @@ func (s *Server) latestScans(w http.ResponseWriter, r *http.Request) {
 				'child_scan_runs', count(*)::int,
 				'child_succeeded', count(*) FILTER (WHERE child.status = 'succeeded')::int,
 				'child_failed', count(*) FILTER (WHERE child.status = 'failed')::int,
+				'child_incomplete', count(*) FILTER (WHERE child.status = 'incomplete')::int,
 				'child_running', count(*) FILTER (WHERE child.status = 'running')::int,
 				'current_step', COALESCE((
 					SELECT jsonb_build_object(

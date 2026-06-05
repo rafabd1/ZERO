@@ -199,7 +199,7 @@ func (r *Repository) UpsertTechnologyObservation(ctx context.Context, obs Techno
 	evidence, _ := json.Marshal(emptyMap(obs.Evidence))
 	var id string
 	var inserted bool
-	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+	err := withRetryableDB(ctx, 8, 300*time.Millisecond, func() error {
 		return r.pool.QueryRow(ctx, `
 		INSERT INTO zero_technology_observations(
 			program_id, http_service_id, last_scan_run_id, name, version, source, confidence, evidence

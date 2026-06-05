@@ -332,7 +332,7 @@ function renderDefaultScanDetail(detail) {
   $("defaultScanDetailBody").innerHTML = `
     <div class="drawer-grid">
       ${detailCard("Status", scanStatusPill(scan.status), scan.error || "")}
-      ${detailCard("Program Scans", `${fmt(scan.succeeded_requests)} succeeded`, `${fmt(scan.running_requests)} running, ${fmt(scan.queued_requests)} queued, ${fmt(scan.failed_requests)} failed`)}
+      ${detailCard("Program Scans", `${fmt(scan.succeeded_requests)} succeeded`, `${fmt(scan.running_requests)} running, ${fmt(scan.queued_requests)} queued, ${fmt(scan.failed_requests)} failed, ${fmt(scan.incomplete_requests)} incomplete`)}
       ${detailCard("Parallelism", escapeHTML(defaultScanParallelism(scan)), "default scheduler")}
       ${detailCard("Findings", fmt(findingCounts.total), `${fmt(findingCounts.nuclei_confirmed)} confirmed, ${fmt(findingCounts.passive_unconfirmed)} passive`)}
       ${detailCard("Nuclei", fmt(nuclei.length), "recent validation results")}
@@ -756,11 +756,13 @@ function campaignProgress(campaign) {
   const running = Number(campaign.running_requests || 0);
   const queued = Number(campaign.queued_requests || 0);
   const canceled = Number(campaign.canceled_requests || 0);
+  const incomplete = Number(campaign.incomplete_requests || 0);
   if (total <= 0) return "no programs";
-  const final = succeeded + failed + canceled;
+  const final = succeeded + failed + canceled + incomplete;
   const issues = [];
   if (failed > 0) issues.push(`${fmt(failed)} failed`);
   if (canceled > 0) issues.push(`${fmt(canceled)} canceled`);
+  if (incomplete > 0) issues.push(`${fmt(incomplete)} incomplete`);
   const issueText = issues.length > 0 ? ` (${issues.join(", ")})` : "";
   return `${fmt(final)}/${fmt(total)} finished${issueText}, ${fmt(running)} running, ${fmt(queued)} queued`;
 }
@@ -784,6 +786,7 @@ function scanStatusPill(status) {
   if (clean === "succeeded") return `<span class="pill good">Succeeded</span>`;
   if (clean === "running") return `<span class="pill info">Running</span>`;
   if (clean === "partial") return `<span class="pill warn">Partial</span>`;
+  if (clean === "incomplete") return `<span class="pill warn">Incomplete</span>`;
   if (clean === "failed") return `<span class="pill danger">Failed</span>`;
   return `<span class="pill">${escapeHTML(clean)}</span>`;
 }
@@ -840,7 +843,7 @@ function detailCard(label, value, note = "") {
 }
 
 function renderCountPills(counts) {
-  const keys = ["queued", "running", "succeeded", "failed", "canceled"];
+  const keys = ["queued", "running", "succeeded", "failed", "canceled", "incomplete"];
   const rendered = keys
     .filter((key) => Number(counts[key] || 0) > 0)
     .map((key) => `<span class="pill">${escapeHTML(key)} ${fmt(counts[key])}</span>`);
@@ -902,11 +905,12 @@ function scanStepSummary(scan) {
   const childRuns = Number(progress.child_scan_runs || 0);
   const succeeded = Number(progress.child_succeeded || 0);
   const failed = Number(progress.child_failed || 0);
+  const incomplete = Number(progress.child_incomplete || 0);
   const running = Number(progress.child_running || 0);
   if (scan.status === "succeeded") {
     return `${fmt(total)} steps`;
   }
-  return `${fmt(childRuns)} step runs, ${fmt(succeeded + failed)} done, ${fmt(running)} running`;
+  return `${fmt(childRuns)} step runs, ${fmt(succeeded + failed + incomplete)} done, ${fmt(running)} running`;
 }
 
 function stepStatsSummary(step) {
@@ -965,7 +969,7 @@ function scanProgressPercent(scan) {
   if (total <= 0) return 0;
   const childRuns = Number(progress.child_scan_runs || 0);
   const current = progress.current_step || {};
-  const completed = Number(progress.child_succeeded || 0) + Number(progress.child_failed || 0);
+  const completed = Number(progress.child_succeeded || 0) + Number(progress.child_failed || 0) + Number(progress.child_incomplete || 0);
   let effective = completed;
   if (current.status === "running") {
     effective += 0.5;

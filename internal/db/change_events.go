@@ -31,7 +31,7 @@ func (r *Repository) RecordChangeEvent(ctx context.Context, event ChangeEvent) e
 		return nil
 	}
 	args := changeEventArgs(event)
-	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+	err := withRetryableDB(ctx, 8, 300*time.Millisecond, func() error {
 		_, err := r.pool.Exec(ctx, changeEventInsertSQL, args...)
 		return err
 	})
@@ -55,7 +55,7 @@ func (r *Repository) RecordChangeEvents(ctx context.Context, events []ChangeEven
 	if len(validEvents) == 0 {
 		return nil
 	}
-	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+	err := withRetryableDB(ctx, 8, 300*time.Millisecond, func() error {
 		batch := &pgx.Batch{}
 		for _, event := range validEvents {
 			batch.Queue(changeEventInsertSQL, changeEventArgs(event)...)
