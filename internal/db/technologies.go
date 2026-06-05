@@ -13,7 +13,19 @@ func (r *Repository) ListWebTechTargets(ctx context.Context, programID string, l
 		limit = 100000
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, program_id::text, COALESCE(last_scan_run_id::text, ''), url
+		SELECT
+			id::text,
+			program_id::text,
+			COALESCE(last_scan_run_id::text, ''),
+			url,
+			host,
+			COALESCE(status_code, -1),
+			COALESCE(title, ''),
+			COALESCE(webserver, ''),
+			COALESCE(technologies, '[]'::jsonb)::text,
+			COALESCE(favicon_hash, ''),
+			COALESCE(raw->>'location', ''),
+			COALESCE(raw->>'cname', '')
 		FROM zero_http_services
 		WHERE active = true
 		  AND ($1 = '' OR program_id::text = $1)
@@ -28,9 +40,24 @@ func (r *Repository) ListWebTechTargets(ctx context.Context, programID string, l
 	targets := []WebTechTarget{}
 	for rows.Next() {
 		var target WebTechTarget
-		if err := rows.Scan(&target.HTTPServiceID, &target.ProgramID, &target.LastScanRunID, &target.URL); err != nil {
+		var technologies string
+		if err := rows.Scan(
+			&target.HTTPServiceID,
+			&target.ProgramID,
+			&target.LastScanRunID,
+			&target.URL,
+			&target.Host,
+			&target.StatusCode,
+			&target.Title,
+			&target.Webserver,
+			&technologies,
+			&target.FaviconHash,
+			&target.RedirectLocation,
+			&target.CNAME,
+		); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(technologies), &target.Technologies)
 		targets = append(targets, target)
 	}
 	return targets, rows.Err()

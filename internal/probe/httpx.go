@@ -16,19 +16,20 @@ import (
 )
 
 type HTTPXRunner struct {
-	repo       *db.Repository
-	bin        string
-	scanRunID  string
-	programID  string
-	limit      int
-	timeout    time.Duration
-	reqTimeout int
-	threads    int
-	batchSize  int
-	batchTO    time.Duration
-	patternMin int
-	patternCap int
-	tlsProbe   bool
+	repo             *db.Repository
+	bin              string
+	scanRunID        string
+	programID        string
+	limit            int
+	timeout          time.Duration
+	reqTimeout       int
+	threads          int
+	batchSize        int
+	batchTO          time.Duration
+	patternMin       int
+	patternCap       int
+	patternFamilyCap int
+	tlsProbe         bool
 }
 
 type HTTPXResult struct {
@@ -38,6 +39,7 @@ type HTTPXResult struct {
 	SkippedByPattern int
 	PriorityKept     int
 	BudgetedRoots    int
+	BudgetedFamilies int
 }
 
 type httpxLine struct {
@@ -51,6 +53,8 @@ type httpxLine struct {
 	Webserver    string          `json:"webserver"`
 	Technologies []string        `json:"tech"`
 	FaviconHash  string          `json:"favicon_hash"`
+	Location     string          `json:"location"`
+	CNAME        json.RawMessage `json:"cname"`
 	TLS          json.RawMessage `json:"tls"`
 }
 
@@ -97,9 +101,10 @@ func (r *HTTPXRunner) WithBatchTimeout(timeout time.Duration) *HTTPXRunner {
 	return r
 }
 
-func (r *HTTPXRunner) WithPatternBudget(minGroup, cap int) *HTTPXRunner {
+func (r *HTTPXRunner) WithPatternBudget(minGroup, cap, familyCap int) *HTTPXRunner {
 	r.patternMin = minGroup
 	r.patternCap = cap
+	r.patternFamilyCap = familyCap
 	return r
 }
 
@@ -139,8 +144,9 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	}
 
 	budgeted := applyHostBudget(hosts, byHost, hostBudgetPolicy{
-		MinGroup: r.patternMin,
-		Cap:      r.patternCap,
+		MinGroup:  r.patternMin,
+		Cap:       r.patternCap,
+		FamilyCap: r.patternFamilyCap,
 	})
 	hosts = budgeted.Hosts
 	if r.limit > 0 && len(hosts) > r.limit {
@@ -152,6 +158,7 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		SkippedByPattern: budgeted.Skipped,
 		PriorityKept:     budgeted.PriorityKept,
 		BudgetedRoots:    budgeted.BudgetedRoot,
+		BudgetedFamilies: budgeted.BudgetedFamilies,
 	}
 	args := buildHTTPXArgs(r.reqTimeout, r.threads, r.tlsProbe)
 	batchSize := r.batchSize
@@ -244,6 +251,8 @@ func buildHTTPXArgs(reqTimeout, threads int, tlsProbe bool) []string {
 		"-title",
 		"-web-server",
 		"-favicon",
+		"-location",
+		"-cname",
 	}
 	if tlsProbe {
 		args = append(args, "-tls-probe")

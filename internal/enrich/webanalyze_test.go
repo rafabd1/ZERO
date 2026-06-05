@@ -112,3 +112,57 @@ func TestExpandWebTechTargetsWithProbePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterWebTechTargetsByHTTPXFingerprintCapsDuplicates(t *testing.T) {
+	targets := []db.WebTechTarget{}
+	for i := 0; i < 12; i++ {
+		targets = append(targets, db.WebTechTarget{
+			ProgramID:     "p1",
+			HTTPServiceID: "svc",
+			URL:           "https://tenant.example.com/" + string(rune('a'+i)),
+			Host:          "tenant.example.com",
+			StatusCode:    200,
+			Title:         "Welcome",
+			Webserver:     "cloudfront",
+			Technologies:  []string{"HSTS"},
+			FaviconHash:   "123",
+		})
+	}
+
+	filtered, skipped, groups := filterWebTechTargetsByHTTPXFingerprint(targets, 3)
+	if len(filtered) != 3 {
+		t.Fatalf("filtered targets = %d; want 3", len(filtered))
+	}
+	if skipped != 9 || groups != 1 {
+		t.Fatalf("skipped=%d groups=%d; want 9/1", skipped, groups)
+	}
+}
+
+func TestWebTechHTTPXFingerprintKeyIncludesRedirectHost(t *testing.T) {
+	a := db.WebTechTarget{
+		ProgramID:        "p1",
+		URL:              "https://a.example.com",
+		Host:             "a.example.com",
+		StatusCode:       301,
+		Webserver:        "akamai",
+		RedirectLocation: "https://www.example.com/login",
+	}
+	b := a
+	b.URL = "https://b.example.com"
+	b.Host = "b.example.com"
+	b.RedirectLocation = "https://www.example.com/account"
+
+	if webTechHTTPXFingerprintKey(a) != webTechHTTPXFingerprintKey(b) {
+		t.Fatal("redirects to the same final host should share a fingerprint key")
+	}
+}
+
+func TestWebTechCanonicalRedirectHostFallsBackToCNAME(t *testing.T) {
+	target := db.WebTechTarget{
+		CNAME: `["edge.example.cdn.net."]`,
+	}
+
+	if got := webTechCanonicalRedirectHost(target); got != "edge.example.cdn.net" {
+		t.Fatalf("canonical CNAME host = %q; want edge.example.cdn.net", got)
+	}
+}

@@ -6,37 +6,42 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rafabd1/ZERO/internal/db"
 	"github.com/rafabd1/ZERO/internal/tools"
 )
 
 type WebanalyzeRunner struct {
-	repo          *db.Repository
-	bin           string
-	apps          []string
-	probePaths    []string
-	workers       int
-	crawl         int
-	scanRunID     string
-	programID     string
-	limit         int
-	timeout       time.Duration
-	batchSize     int
-	authoritative bool
-	onBatchDone   func(batch, totalBatches, processed, totalTargets, size int)
+	repo           *db.Repository
+	bin            string
+	apps           []string
+	probePaths     []string
+	workers        int
+	crawl          int
+	scanRunID      string
+	programID      string
+	limit          int
+	timeout        time.Duration
+	batchSize      int
+	authoritative  bool
+	fingerprintCap int
+	onBatchDone    func(batch, totalBatches, processed, totalTargets, size int)
 }
 
 type WebanalyzeResult struct {
-	Targets       int
-	Matches       int
-	Inserted      int
-	Versioned     int
-	SkippedOutput int
-	Deactivated   int
+	Targets              int
+	Matches              int
+	Inserted             int
+	Versioned            int
+	SkippedOutput        int
+	Deactivated          int
+	SkippedByFingerprint int
+	BudgetedFingerprints int
 }
 
 func NewWebanalyzeRunner(repo *db.Repository, bin string) *WebanalyzeRunner {
@@ -104,6 +109,13 @@ func (r *WebanalyzeRunner) WithAuthoritative(authoritative bool) *WebanalyzeRunn
 	return r
 }
 
+func (r *WebanalyzeRunner) WithFingerprintCap(cap int) *WebanalyzeRunner {
+	if cap > 0 {
+		r.fingerprintCap = cap
+	}
+	return r
+}
+
 func (r *WebanalyzeRunner) WithBatchProgress(onBatchDone func(batch, totalBatches, processed, totalTargets, size int)) *WebanalyzeRunner {
 	r.onBatchDone = onBatchDone
 	return r
@@ -117,6 +129,16 @@ func (r *WebanalyzeRunner) Run(ctx context.Context) (WebanalyzeResult, error) {
 	result := WebanalyzeResult{Targets: len(targets)}
 	if len(targets) == 0 {
 		return result, nil
+	}
+	if r.authoritative && len(r.probePaths) == 0 && len(r.apps) == 0 && r.fingerprintCap > 0 {
+		filtered, skipped, groups := filterWebTechTargetsByHTTPXFingerprint(targets, r.fingerprintCap)
+		targets = filtered
+		result.SkippedByFingerprint = skipped
+		result.BudgetedFingerprints = groups
+		result.Targets = len(targets)
+		if len(targets) == 0 {
+			return result, nil
+		}
 	}
 	targets = expandWebTechTargets(targets, r.probePaths)
 	result.Targets = len(targets)
@@ -226,6 +248,171 @@ func addWebTechTarget(out *[]db.WebTechTarget, seen map[string]struct{}, target 
 	}
 	seen[key] = struct{}{}
 	*out = append(*out, target)
+}
+
+func filterWebTechTargetsByHTTPXFingerprint(targets []db.WebTechTarget, cap int) ([]db.WebTechTarget, int, int) {
+	if cap <= 0 || len(targets) == 0 {
+		return targets, 0, 0
+	}
+	byFingerprint := map[string][]db.WebTechTarget{}
+	out := []db.WebTechTarget{}
+	for _, target := range targets {
+		key := webTechHTTPXFingerprintKey(target)
+		if key == "" {
+			out = append(out, target)
+			continue
+		}
+		byFingerprint[key] = append(byFingerprint[key], target)
+	}
+	skipped := 0
+	budgeted := 0
+	for _, group := range byFingerprint {
+		if len(group) <= webTechFingerprintThreshold(cap) {
+			out = append(out, group...)
+			continue
+		}
+		budgeted++
+		sort.Slice(group, func(i, j int) bool {
+			return webTechTargetRank(group[i]) < webTechTargetRank(group[j])
+		})
+		kept := 0
+		for _, target := range group {
+			if webTechAlwaysKeep(target) {
+				out = append(out, target)
+				continue
+			}
+			if kept < cap {
+				out = append(out, target)
+				kept++
+				continue
+			}
+			skipped++
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return normalizeURLKey(out[i].URL) < normalizeURLKey(out[j].URL)
+	})
+	return out, skipped, budgeted
+}
+
+func webTechHTTPXFingerprintKey(target db.WebTechTarget) string {
+	parts := []string{
+		target.ProgramID,
+		fmt.Sprint(target.StatusCode),
+		webTechCanonicalRedirectHost(target),
+		normalizeFingerprintText(target.Title),
+		normalizeFingerprintText(target.Webserver),
+		strings.ToLower(strings.TrimSpace(target.FaviconHash)),
+	}
+	techs := append([]string{}, target.Technologies...)
+	for i, tech := range techs {
+		techs[i] = normalizeFingerprintText(tech)
+	}
+	sort.Strings(techs)
+	material := false
+	for _, value := range append(parts[2:], techs...) {
+		if value != "" {
+			material = true
+			break
+		}
+	}
+	if !material {
+		return ""
+	}
+	parts = append(parts, techs...)
+	return strings.Join(parts, "\x00")
+}
+
+func webTechCanonicalRedirectHost(target db.WebTechTarget) string {
+	location := strings.TrimSpace(target.RedirectLocation)
+	if location != "" {
+		parsed, err := url.Parse(location)
+		if err == nil && parsed.Hostname() != "" {
+			return strings.ToLower(parsed.Hostname())
+		}
+	}
+	cname := strings.TrimSpace(target.CNAME)
+	if cname == "" {
+		return ""
+	}
+	for _, part := range strings.FieldsFunc(cname, func(r rune) bool {
+		return r == ',' || r == ';' || r == '[' || r == ']' || r == '"' || unicode.IsSpace(r)
+	}) {
+		part = strings.Trim(strings.TrimSpace(part), ".")
+		if part == "" {
+			continue
+		}
+		return strings.ToLower(part)
+	}
+	return ""
+}
+
+func normalizeFingerprintText(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
+}
+
+func webTechFingerprintThreshold(cap int) int {
+	if cap < 4 {
+		return cap + 2
+	}
+	return cap * 2
+}
+
+func webTechAlwaysKeep(target db.WebTechTarget) bool {
+	host := strings.ToLower(strings.TrimSpace(target.Host))
+	if host == "" {
+		if parsed, err := url.Parse(target.URL); err == nil {
+			host = parsed.Hostname()
+		}
+	}
+	left := host
+	if root, ok := dbRootFromHost(host); ok {
+		left = strings.TrimSuffix(host, "."+root)
+	}
+	for _, label := range strings.FieldsFunc(left, func(r rune) bool {
+		return r == '.' || r == '-' || r == '_'
+	}) {
+		if webTechPriorityLabel(label) {
+			return true
+		}
+	}
+	return false
+}
+
+func dbRootFromHost(host string) (string, bool) {
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 {
+		return "", false
+	}
+	return strings.Join(parts[len(parts)-2:], "."), true
+}
+
+func webTechPriorityLabel(label string) bool {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "api", "admin", "auth", "oauth", "oidc", "saml", "sso", "login", "account",
+		"payment", "pay", "checkout", "billing", "wallet", "secure", "security",
+		"app", "portal", "console", "dashboard", "developer", "dev", "docs", "doc",
+		"staging", "stage", "test", "testing", "qa", "uat", "preprod", "prod",
+		"vpn", "jira", "jenkins", "grafana", "kibana", "status", "support",
+		"upload", "uploads", "files", "mail", "mobile", "internal", "corp", "idp":
+		return true
+	default:
+		return false
+	}
+}
+
+func webTechTargetRank(target db.WebTechTarget) int {
+	rank := len(target.URL)
+	if redirectHost := webTechCanonicalRedirectHost(target); redirectHost != "" && strings.EqualFold(target.Host, redirectHost) {
+		rank -= 200
+	}
+	if strings.Contains(target.URL, "://www.") {
+		rank -= 100
+	}
+	if strings.HasSuffix(strings.ToLower(target.Host), ".com") {
+		rank -= 50
+	}
+	return rank
 }
 
 func targetWithProbePath(target db.WebTechTarget, probePath string) (db.WebTechTarget, bool) {

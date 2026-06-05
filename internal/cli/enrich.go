@@ -56,16 +56,16 @@ func newEnrichCommand() *cobra.Command {
 			}
 			effectiveBatchSize := webanalyzeEffectiveBatchSize(batchSize, cfg.Tools.WebanalyzeBatchSize)
 			effectiveBatchTimeout := webanalyzeEffectiveBatchTimeout(batchTimeout, cfg.Tools.WebanalyzeBatchTimeout)
-			effectiveLimit := webanalyzeEffectiveLimit(limit, cfg.Tools.WebanalyzeMaxServices, authoritative)
 			runner := enrich.NewWebanalyzeRunner(repo, cfg.Tools.WebanalyzeBin).
 				WithScanRunID(scanID).
 				WithProgramID(programID).
 				WithApps(appPaths).
 				WithProbePaths(probePaths).
 				WithAuthoritative(authoritative).
+				WithFingerprintCap(cfg.Tools.WebanalyzeFingerprintCap).
 				WithWorkers(workerCount).
 				WithCrawl(crawlDepth).
-				WithLimit(effectiveLimit).
+				WithLimit(limit).
 				WithBatchSize(effectiveBatchSize).
 				WithTimeout(effectiveBatchTimeout)
 			if strings.TrimSpace(scanRequestID) != "" {
@@ -99,41 +99,45 @@ func newEnrichCommand() *cobra.Command {
 			result, err := runner.Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, result.Targets, result.Inserted, map[string]any{
-					"targets":        result.Targets,
-					"matches":        result.Matches,
-					"inserted":       result.Inserted,
-					"versioned":      result.Versioned,
-					"deactivated":    result.Deactivated,
-					"skipped_output": result.SkippedOutput,
-					"program_id":     programID,
-					"tool":           "webanalyze",
-					"apps":           appPaths,
-					"probe_paths":    probePaths,
-					"authoritative":  authoritative,
-					"workers":        workerCount,
-					"crawl":          crawlDepth,
-					"batch_size":     effectiveBatchSize,
-					"batch_timeout":  effectiveBatchTimeout.String(),
-					"limit":          effectiveLimit,
+					"targets":             result.Targets,
+					"matches":             result.Matches,
+					"inserted":            result.Inserted,
+					"versioned":           result.Versioned,
+					"deactivated":         result.Deactivated,
+					"fingerprint_skipped": result.SkippedByFingerprint,
+					"fingerprint_groups":  result.BudgetedFingerprints,
+					"skipped_output":      result.SkippedOutput,
+					"program_id":          programID,
+					"tool":                "webanalyze",
+					"apps":                appPaths,
+					"probe_paths":         probePaths,
+					"authoritative":       authoritative,
+					"workers":             workerCount,
+					"crawl":               crawlDepth,
+					"batch_size":          effectiveBatchSize,
+					"batch_timeout":       effectiveBatchTimeout.String(),
+					"limit":               limit,
 				})
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Targets, result.Inserted, map[string]any{
-				"targets":        result.Targets,
-				"matches":        result.Matches,
-				"inserted":       result.Inserted,
-				"versioned":      result.Versioned,
-				"deactivated":    result.Deactivated,
-				"skipped_output": result.SkippedOutput,
-				"program_id":     programID,
-				"tool":           "webanalyze",
-				"apps":           appPaths,
-				"probe_paths":    probePaths,
-				"authoritative":  authoritative,
-				"workers":        workerCount,
-				"crawl":          crawlDepth,
-				"batch_size":     effectiveBatchSize,
-				"batch_timeout":  effectiveBatchTimeout.String(),
-				"limit":          effectiveLimit,
+				"targets":             result.Targets,
+				"matches":             result.Matches,
+				"inserted":            result.Inserted,
+				"versioned":           result.Versioned,
+				"deactivated":         result.Deactivated,
+				"fingerprint_skipped": result.SkippedByFingerprint,
+				"fingerprint_groups":  result.BudgetedFingerprints,
+				"skipped_output":      result.SkippedOutput,
+				"program_id":          programID,
+				"tool":                "webanalyze",
+				"apps":                appPaths,
+				"probe_paths":         probePaths,
+				"authoritative":       authoritative,
+				"workers":             workerCount,
+				"crawl":               crawlDepth,
+				"batch_size":          effectiveBatchSize,
+				"batch_timeout":       effectiveBatchTimeout.String(),
+				"limit":               limit,
 			}); err != nil {
 				return err
 			}
@@ -173,14 +177,4 @@ func webanalyzeEffectiveBatchTimeout(requested, configured time.Duration) time.D
 		return configured
 	}
 	return 10 * time.Minute
-}
-
-func webanalyzeEffectiveLimit(requested, configured int, authoritative bool) int {
-	if requested > 0 {
-		return requested
-	}
-	if authoritative && configured > 0 {
-		return configured
-	}
-	return 0
 }

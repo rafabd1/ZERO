@@ -167,10 +167,10 @@ Broad scopes can contain many near-identical tenant, CDN, or default-page hosts.
 - `ZERO_HTTPX_BATCH_TIMEOUT=5m`
 - `ZERO_HTTPX_PATTERN_MIN_GROUP=200`
 - `ZERO_HTTPX_PATTERN_CAP=120`
-- `ZERO_HTTPX_MAX_HOSTS=1500`
+- `ZERO_HTTPX_PATTERN_FAMILY_CAP=12`
 - `ZERO_HTTPX_TLS_PROBE=false`
 
-`ZERO_HTTPX_MAX_HOSTS` is applied after scope validation and repeated-pattern budgeting, so broad programs still get prioritization before the final host cap.
+`dnsx` runs before `httpx` in the normal pipeline and marks unresolved subdomains inactive, which is the cheap pre-HTTP filter. After that, `httpx` applies repeated-pattern budgeting. `ZERO_HTTPX_PATTERN_FAMILY_CAP` keeps representative hosts from highly similar families such as locale labels, generated tenant IDs, and country-market roots while preserving explicit scope assets and high-value labels such as `api`, `admin`, `login`, and `console`.
 
 For DNS resolution:
 
@@ -181,11 +181,11 @@ For DNS resolution:
 For Webanalyze and custom path probes:
 
 - `ZERO_WEBANALYZE_WORKERS=4`
-- `ZERO_WEBANALYZE_MAX_SERVICES=1500`
+- `ZERO_WEBANALYZE_FINGERPRINT_CAP=8`
 - `ZERO_WEBANALYZE_BATCH_SIZE=50`
 - `ZERO_WEBANALYZE_BATCH_TIMEOUT=10m`
 
-`ZERO_WEBANALYZE_MAX_SERVICES` applies to normal authoritative Webanalyze scans. Custom campaigns remain uncapped unless `--webanalyze-limit` is provided. Webanalyze batches count expanded URLs, not base services. A service plus four probe paths becomes five Webanalyze URLs.
+Before a normal authoritative Webanalyze run, Zero also deduplicates services with identical fresh `httpx` fingerprints: status, title, server, favicon, technologies, and redirect host. `ZERO_WEBANALYZE_FINGERPRINT_CAP` controls how many representatives from each identical fingerprint group are sent to Webanalyze. Custom Webanalyze campaigns with app files or probe paths bypass this fingerprint dedup by default because their value may depend on path-specific markers. Webanalyze batches count expanded URLs, not base services. A service plus four probe paths becomes five Webanalyze URLs.
 
 For Nuclei:
 

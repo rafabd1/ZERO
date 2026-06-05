@@ -137,10 +137,18 @@ type HTTPService struct {
 }
 
 type WebTechTarget struct {
-	ProgramID     string
-	HTTPServiceID string
-	LastScanRunID string
-	URL           string
+	ProgramID        string
+	HTTPServiceID    string
+	LastScanRunID    string
+	URL              string
+	Host             string
+	StatusCode       int
+	Title            string
+	Webserver        string
+	Technologies     []string
+	FaviconHash      string
+	RedirectLocation string
+	CNAME            string
 }
 
 type TechnologyObservation struct {

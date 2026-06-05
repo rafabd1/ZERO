@@ -56,6 +56,46 @@ func TestHostBudgetDoesNotCapSmallerSemanticRoot(t *testing.T) {
 	}
 }
 
+func TestHostBudgetCapsLocaleFamiliesAcrossCountryRoots(t *testing.T) {
+	hosts := []string{}
+	byHost := map[string][]db.ProbeTarget{}
+	for _, root := range []string{
+		"amazon.com", "amazon.co.uk", "amazon.co.jp", "amazon.com.au", "amazon.com.br",
+		"amazon.ca", "amazon.de", "amazon.es", "amazon.fr", "amazon.it", "amazon.nl",
+		"amazon.pl", "amazon.se", "amazon.sg", "amazon.com.mx",
+	} {
+		host := "www." + root
+		hosts = append(hosts, host)
+		byHost[host] = []db.ProbeTarget{{ProgramID: "p1", RootDomain: root, MatchMode: db.ProbeMatchWildcard}}
+	}
+
+	result := applyHostBudget(hosts, byHost, hostBudgetPolicy{MinGroup: 100, Cap: 120, FamilyCap: 4})
+	if len(result.Hosts) != 4 {
+		t.Fatalf("locale family hosts = %d; want 4: %#v", len(result.Hosts), result)
+	}
+	if result.BudgetedFamilies != 1 || result.Skipped == 0 {
+		t.Fatalf("expected one budgeted family with skipped hosts; result=%#v", result)
+	}
+}
+
+func TestHostBudgetCapsLanguageLabelFamilies(t *testing.T) {
+	hosts := []string{}
+	byHost := map[string][]db.ProbeTarget{}
+	for _, locale := range []string{"en", "pt", "jp", "de", "fr", "it", "es", "nl", "pl", "se"} {
+		host := locale + ".example.com"
+		hosts = append(hosts, host)
+		byHost[host] = []db.ProbeTarget{{ProgramID: "p1", RootDomain: "example.com", MatchMode: db.ProbeMatchWildcard}}
+	}
+
+	result := applyHostBudget(hosts, byHost, hostBudgetPolicy{MinGroup: 100, Cap: 120, FamilyCap: 3})
+	if len(result.Hosts) != 3 {
+		t.Fatalf("language family hosts = %d; want 3: %#v", len(result.Hosts), result)
+	}
+	if result.BudgetedFamilies != 1 {
+		t.Fatalf("budgeted families = %d; want 1", result.BudgetedFamilies)
+	}
+}
+
 func set(values []string) map[string]bool {
 	out := map[string]bool{}
 	for _, value := range values {
