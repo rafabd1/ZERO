@@ -349,6 +349,11 @@ func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Conf
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(cmd.OutOrStdout(), "startup recovery: default scan cycles")
+	refreshedDefaultCycles, err := repo.RefreshRunningDefaultScanCycles(ctx)
+	if err != nil {
+		return err
+	}
 	if recovered > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "recovered %d interrupted scan run(s)\n", recovered)
 	}
@@ -363,6 +368,9 @@ func recoverWorkerState(ctx context.Context, cmd *cobra.Command, cfg config.Conf
 	}
 	if recoveredCampaigns > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "refreshed %d interrupted scan campaign(s)\n", recoveredCampaigns)
+	}
+	if refreshedDefaultCycles > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "refreshed %d running default scan cycle(s)\n", refreshedDefaultCycles)
 	}
 	return nil
 }

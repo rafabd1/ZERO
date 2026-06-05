@@ -140,6 +140,37 @@ func (r *Repository) RefreshDefaultScanCycle(ctx context.Context, id string) err
 	return nil
 }
 
+func (r *Repository) RefreshRunningDefaultScanCycles(ctx context.Context) (int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text
+		FROM zero_default_scan_cycles
+		WHERE status = 'running'
+		ORDER BY started_at ASC
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("list running default scan cycles: %w", err)
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := r.RefreshDefaultScanCycle(ctx, id); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
+}
+
 func (r *Repository) RecoverRunningScanRuns(ctx context.Context) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE zero_scan_runs
