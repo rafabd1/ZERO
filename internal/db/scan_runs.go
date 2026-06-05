@@ -178,21 +178,41 @@ func (r *Repository) RefreshRunningDefaultScanCycles(ctx context.Context) (int, 
 }
 
 func (r *Repository) RecoverRunningScanRuns(ctx context.Context) (int, error) {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE zero_scan_runs
-		SET status = 'failed',
-			finished_at = now(),
-			error = CASE
-				WHEN error = '' THEN 'recovered on worker startup after interrupted execution'
-				ELSE error
-			END,
-			stats = stats || jsonb_build_object('recovered_on_startup', true)
-		WHERE status = 'running'
-	`)
+	var recovered int
+	err := r.pool.QueryRow(ctx, `
+		WITH recovered AS (
+			UPDATE zero_scan_runs
+			SET status = 'failed',
+				finished_at = now(),
+				error = CASE
+					WHEN error = '' THEN 'recovered on worker startup after interrupted execution'
+					ELSE error
+				END,
+				stats = stats || jsonb_build_object('recovered_on_startup', true)
+			WHERE status = 'running'
+			RETURNING id, program_id, run_type, error
+		), recovered_programs AS (
+			UPDATE zero_programs p
+			SET last_scan_finished_at = now(),
+				metadata = metadata || jsonb_build_object(
+					'last_scan_status', 'failed',
+					'last_scan_error', 'recovered on worker startup after interrupted execution',
+					'last_scan_finished_at', now()
+				)
+			WHERE EXISTS (
+				SELECT 1
+				FROM recovered r
+				WHERE r.program_id = p.id
+				  AND r.run_type = 'full'
+			)
+			RETURNING p.id
+		)
+		SELECT count(*)::int FROM recovered
+	`).Scan(&recovered)
 	if err != nil {
 		return 0, fmt.Errorf("recover running scan runs: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	return recovered, nil
 }
 
 func (r *Repository) LastSuccessfulScopeSync(ctx context.Context) (*time.Time, error) {

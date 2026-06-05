@@ -87,11 +87,6 @@ func newWorkerCommand() *cobra.Command {
 			}); err != nil {
 				return err
 			}
-			if err := addJob("due-retry", "0 */10 * * * *", func() {
-				runDueJob("due retry", cfg.TargetParallelism)
-			}); err != nil {
-				return err
-			}
 			if err := addJob("scan-requests", "*/30 * * * * *", func() {
 				if cleanupRunning.Load() {
 					fmt.Fprintln(cmd.OutOrStdout(), "scan request processing skipped: cleanup is running")

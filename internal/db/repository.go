@@ -114,7 +114,8 @@ func (r *Repository) ListProgramsForCampaign(ctx context.Context, dueOnly bool, 
 func (r *Repository) MarkProgramScanStarted(ctx context.Context, programID string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE zero_programs
-		SET last_scan_started_at = now()
+		SET last_scan_started_at = now(),
+			metadata = metadata || jsonb_build_object('last_scan_status', 'running', 'last_scan_error', '')
 		WHERE id = $1::uuid
 	`, programID)
 	if err != nil {
@@ -123,12 +124,28 @@ func (r *Repository) MarkProgramScanStarted(ctx context.Context, programID strin
 	return nil
 }
 
-func (r *Repository) MarkProgramScanFinished(ctx context.Context, programID string) error {
+func (r *Repository) MarkProgramScanFinished(ctx context.Context, programID, status string, runErr error) error {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "succeeded"
+	}
+	errorText := ""
+	if runErr != nil {
+		errorText = runErr.Error()
+		if len(errorText) > 2000 {
+			errorText = errorText[:2000]
+		}
+	}
 	_, err := r.pool.Exec(ctx, `
 		UPDATE zero_programs
-		SET last_scan_finished_at = now()
+		SET last_scan_finished_at = now(),
+			metadata = metadata || jsonb_build_object(
+				'last_scan_status', $2,
+				'last_scan_error', $3,
+				'last_scan_finished_at', now()
+			)
 		WHERE id = $1::uuid
-	`, programID)
+	`, programID, status, errorText)
 	if err != nil {
 		return fmt.Errorf("mark program scan finished: %w", err)
 	}

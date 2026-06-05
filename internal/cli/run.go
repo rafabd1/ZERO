@@ -300,6 +300,12 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 		if err := repo.FinishScanRun(ctx, scanID, status, inputCount, insertedCount, stats, runErr); err != nil {
 			return err
 		}
+		if err := repo.MarkProgramScanFinished(ctx, program.ID, status, runErr); err != nil {
+			if runErr != nil {
+				return fmt.Errorf("%w; mark program scan finished: %v", runErr, err)
+			}
+			return err
+		}
 		scanFinalized = true
 		return runErr
 	}
@@ -348,9 +354,6 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 	}
 	stale, err := repo.MarkStaleEntities(ctx, program.ID, cfg.Data.StaleAfterHours)
 	if err != nil {
-		return finalizeScan(err, 0, 0, nil)
-	}
-	if err := repo.MarkProgramScanFinished(ctx, program.ID); err != nil {
 		return finalizeScan(err, 0, 0, nil)
 	}
 	if err := finalizeScan(nil, len(steps), 0, map[string]any{
