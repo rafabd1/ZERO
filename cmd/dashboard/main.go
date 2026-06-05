@@ -32,7 +32,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: dashboardAPITimeout()}
 	mux := http.NewServeMux()
 	mux.Handle("/", noStore(http.FileServer(http.FS(staticRoot))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -113,4 +113,16 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func dashboardAPITimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ZERO_DASHBOARD_API_TIMEOUT"))
+	if raw == "" {
+		return 60 * time.Second
+	}
+	timeout, err := time.ParseDuration(raw)
+	if err != nil || timeout <= 0 {
+		return 60 * time.Second
+	}
+	return timeout
 }

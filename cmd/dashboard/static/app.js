@@ -44,20 +44,29 @@ async function loadAll(showLoading = true) {
     setStatus("Refreshing...");
   }
   try {
-    const [stats, programs, defaultScans, scans, campaigns, findings] = await Promise.all([
+    const results = await Promise.allSettled([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/programs"),
       getJSON("/api/v1/default-scans?limit=100"),
-      getJSON("/api/v1/scans/latest?run_type=full&limit=250"),
+      getJSON("/api/v1/scans/latest?run_type=full&limit=100"),
       getJSON("/api/v1/scan-campaigns"),
       getJSON("/api/v1/findings?limit=100"),
     ]);
-    state.stats = stats;
-    state.programs = Array.isArray(programs) ? programs : [];
-    state.defaultScans = Array.isArray(defaultScans) ? defaultScans : [];
-    state.scans = Array.isArray(scans) ? scans : [];
-    state.campaigns = Array.isArray(campaigns) ? campaigns : [];
-    state.findings = Array.isArray(findings) ? findings : [];
+    const errors = [];
+    const valueAt = (index, fallback, label) => {
+      const result = results[index];
+      if (result.status === "fulfilled") {
+        return result.value;
+      }
+      errors.push(`${label}: ${result.reason.message}`);
+      return fallback;
+    };
+    state.stats = valueAt(0, state.stats, "stats");
+    state.programs = normalizeArray(valueAt(1, state.programs, "programs"));
+    state.defaultScans = normalizeArray(valueAt(2, state.defaultScans, "default scans"));
+    state.scans = normalizeArray(valueAt(3, state.scans, "latest scans"));
+    state.campaigns = normalizeArray(valueAt(4, state.campaigns, "campaigns"));
+    state.findings = normalizeArray(valueAt(5, state.findings, "findings"));
     renderGlobalStats();
     renderPrograms();
     renderScans();
@@ -86,10 +95,18 @@ async function loadAll(showLoading = true) {
         clearFindingDetail();
       }
     }
-    setStatus(`Updated ${new Date().toLocaleTimeString()}`);
+    if (errors.length > 0) {
+      setStatus(`Partial update ${new Date().toLocaleTimeString()}: ${errors.join("; ")}`);
+    } else {
+      setStatus(`Updated ${new Date().toLocaleTimeString()}`);
+    }
   } catch (error) {
     setStatus(`Error: ${error.message}`);
   }
+}
+
+function normalizeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 async function getJSON(path) {
