@@ -123,9 +123,6 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 	if err != nil {
 		return HTTPXResult{}, err
 	}
-	if r.limit > 0 && len(targets) > r.limit {
-		targets = targets[:r.limit]
-	}
 
 	byHost := make(map[string][]db.ProbeTarget, len(targets))
 	hosts := make([]string, 0, len(targets))
@@ -146,6 +143,10 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 		Cap:      r.patternCap,
 	})
 	hosts = budgeted.Hosts
+	if r.limit > 0 && len(hosts) > r.limit {
+		budgeted.Skipped += len(hosts) - r.limit
+		hosts = hosts[:r.limit]
+	}
 	result := HTTPXResult{
 		Hosts:            len(hosts),
 		SkippedByPattern: budgeted.Skipped,

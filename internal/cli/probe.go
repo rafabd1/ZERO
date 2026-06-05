@@ -89,7 +89,7 @@ func newProbeCommand() *cobra.Command {
 			runner := probe.NewHTTPXRunner(repo, cfg.Tools.HTTPXBin).
 				WithScanRunID(scanID).
 				WithProgramID(programID).
-				WithLimit(httpxLimit).
+				WithLimit(firstPositive(httpxLimit, cfg.Tools.HTTPXMaxHosts)).
 				WithRequestPolicy(firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout), firstPositive(httpxThreads, cfg.Tools.HTTPXThreads)).
 				WithBatchSize(firstPositive(httpxBatchSize, cfg.Tools.HTTPXBatchSize)).
 				WithBatchTimeout(firstDuration(httpxBatchTimeout, cfg.Tools.HTTPXBatchTimeout)).

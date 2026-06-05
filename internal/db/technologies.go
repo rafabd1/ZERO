@@ -196,6 +196,9 @@ func (r *Repository) UpsertTechnologyObservation(ctx context.Context, obs Techno
 	if obs.Name == "" || obs.ProgramID == "" || obs.HTTPServiceID == "" {
 		return "", false, nil
 	}
+	if shouldSkipTechnologyObservation(obs) {
+		return "", false, nil
+	}
 	evidence, _ := json.Marshal(emptyMap(obs.Evidence))
 	var id string
 	var inserted bool
@@ -237,6 +240,39 @@ func (r *Repository) UpsertTechnologyObservation(ctx context.Context, obs Techno
 		}
 	}
 	return id, inserted, nil
+}
+
+func shouldSkipTechnologyObservation(obs TechnologyObservation) bool {
+	if strings.TrimSpace(obs.Version) != "" {
+		return false
+	}
+	source := strings.ToLower(strings.TrimSpace(obs.Source))
+	if source != "httpx" && source != "webanalyze" {
+		return false
+	}
+	_, skip := genericUnversionedTechnologies()[normalizeTechnologyName(obs.Name)]
+	return skip
+}
+
+func normalizeTechnologyName(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
+}
+
+func genericUnversionedTechnologies() map[string]struct{} {
+	return map[string]struct{}{
+		"amazon cloudfront":   {},
+		"amazon elb":          {},
+		"amazon s3":           {},
+		"amazon web services": {},
+		"cart functionality":  {},
+		"cloudflare":          {},
+		"google font api":     {},
+		"google tag manager":  {},
+		"hsts":                {},
+		"http/3":              {},
+		"jquery cdn":          {},
+		"youtube":             {},
+	}
 }
 
 func (r *Repository) MarkMissingTechnologyObservationsInactive(ctx context.Context, programID, scanRunID, source string, httpServiceIDs []string) (int, error) {

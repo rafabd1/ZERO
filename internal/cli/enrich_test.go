@@ -40,3 +40,18 @@ func TestWebanalyzeEffectiveBatchTimeoutFallsBackToDedicatedDefault(t *testing.T
 		t.Fatalf("fallback batch timeout = %s; want 10m", got)
 	}
 }
+
+func TestWebanalyzeEffectiveLimitUsesConfiguredOnlyForAuthoritativeRuns(t *testing.T) {
+	if got := webanalyzeEffectiveLimit(0, 1500, true); got != 1500 {
+		t.Fatalf("authoritative limit = %d; want 1500", got)
+	}
+	if got := webanalyzeEffectiveLimit(0, 1500, false); got != 0 {
+		t.Fatalf("custom limit = %d; want unlimited", got)
+	}
+}
+
+func TestWebanalyzeEffectiveLimitKeepsExplicitValue(t *testing.T) {
+	if got := webanalyzeEffectiveLimit(250, 1500, true); got != 250 {
+		t.Fatalf("explicit limit = %d; want 250", got)
+	}
+}

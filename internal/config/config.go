@@ -79,11 +79,13 @@ type ToolConfig struct {
 	HTTPXBatchTimeout        time.Duration
 	HTTPXPatternMinGroup     int
 	HTTPXPatternCap          int
+	HTTPXMaxHosts            int
 	HTTPXTLSProbe            bool
 	WebanalyzeBin            string
 	WebanalyzeApps           string
 	WebanalyzeWorkers        int
 	WebanalyzeCrawl          int
+	WebanalyzeMaxServices    int
 	WebanalyzeBatchSize      int
 	WebanalyzeBatchTimeout   time.Duration
 	NucleiBin                string
@@ -192,11 +194,13 @@ func Load() (Config, error) {
 	v.SetDefault("tools.httpx_batch_timeout", "5m")
 	v.SetDefault("tools.httpx_pattern_min_group", 200)
 	v.SetDefault("tools.httpx_pattern_cap", 120)
+	v.SetDefault("tools.httpx_max_hosts", 1500)
 	v.SetDefault("tools.httpx_tls_probe", false)
 	v.SetDefault("tools.webanalyze_bin", "webanalyze")
 	v.SetDefault("tools.webanalyze_apps", "")
 	v.SetDefault("tools.webanalyze_workers", 4)
 	v.SetDefault("tools.webanalyze_crawl", 0)
+	v.SetDefault("tools.webanalyze_max_services", 1500)
 	v.SetDefault("tools.webanalyze_batch_size", 50)
 	v.SetDefault("tools.webanalyze_batch_timeout", "10m")
 	v.SetDefault("tools.nuclei_bin", "nuclei")
@@ -294,11 +298,13 @@ func Load() (Config, error) {
 	_ = v.BindEnv("tools.httpx_batch_timeout", "ZERO_HTTPX_BATCH_TIMEOUT")
 	_ = v.BindEnv("tools.httpx_pattern_min_group", "ZERO_HTTPX_PATTERN_MIN_GROUP")
 	_ = v.BindEnv("tools.httpx_pattern_cap", "ZERO_HTTPX_PATTERN_CAP")
+	_ = v.BindEnv("tools.httpx_max_hosts", "ZERO_HTTPX_MAX_HOSTS")
 	_ = v.BindEnv("tools.httpx_tls_probe", "ZERO_HTTPX_TLS_PROBE")
 	_ = v.BindEnv("tools.webanalyze_bin", "ZERO_WEBANALYZE_BIN")
 	_ = v.BindEnv("tools.webanalyze_apps", "ZERO_WEBANALYZE_APPS")
 	_ = v.BindEnv("tools.webanalyze_workers", "ZERO_WEBANALYZE_WORKERS")
 	_ = v.BindEnv("tools.webanalyze_crawl", "ZERO_WEBANALYZE_CRAWL")
+	_ = v.BindEnv("tools.webanalyze_max_services", "ZERO_WEBANALYZE_MAX_SERVICES")
 	_ = v.BindEnv("tools.webanalyze_batch_size", "ZERO_WEBANALYZE_BATCH_SIZE")
 	_ = v.BindEnv("tools.webanalyze_batch_timeout", "ZERO_WEBANALYZE_BATCH_TIMEOUT")
 	_ = v.BindEnv("tools.nuclei_bin", "ZERO_NUCLEI_BIN")
@@ -411,11 +417,13 @@ func Load() (Config, error) {
 			HTTPXBatchTimeout:        v.GetDuration("tools.httpx_batch_timeout"),
 			HTTPXPatternMinGroup:     clampInt(v.GetInt("tools.httpx_pattern_min_group"), 0, 100000),
 			HTTPXPatternCap:          clampInt(v.GetInt("tools.httpx_pattern_cap"), 0, 100000),
+			HTTPXMaxHosts:            clampInt(v.GetInt("tools.httpx_max_hosts"), 0, 100000),
 			HTTPXTLSProbe:            v.GetBool("tools.httpx_tls_probe"),
 			WebanalyzeBin:            v.GetString("tools.webanalyze_bin"),
 			WebanalyzeApps:           v.GetString("tools.webanalyze_apps"),
 			WebanalyzeWorkers:        v.GetInt("tools.webanalyze_workers"),
 			WebanalyzeCrawl:          v.GetInt("tools.webanalyze_crawl"),
+			WebanalyzeMaxServices:    clampInt(v.GetInt("tools.webanalyze_max_services"), 0, 100000),
 			WebanalyzeBatchSize:      clampInt(v.GetInt("tools.webanalyze_batch_size"), 50, 5000),
 			WebanalyzeBatchTimeout:   v.GetDuration("tools.webanalyze_batch_timeout"),
 			NucleiBin:                v.GetString("tools.nuclei_bin"),

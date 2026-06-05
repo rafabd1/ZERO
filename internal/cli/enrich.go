@@ -56,6 +56,7 @@ func newEnrichCommand() *cobra.Command {
 			}
 			effectiveBatchSize := webanalyzeEffectiveBatchSize(batchSize, cfg.Tools.WebanalyzeBatchSize)
 			effectiveBatchTimeout := webanalyzeEffectiveBatchTimeout(batchTimeout, cfg.Tools.WebanalyzeBatchTimeout)
+			effectiveLimit := webanalyzeEffectiveLimit(limit, cfg.Tools.WebanalyzeMaxServices, authoritative)
 			runner := enrich.NewWebanalyzeRunner(repo, cfg.Tools.WebanalyzeBin).
 				WithScanRunID(scanID).
 				WithProgramID(programID).
@@ -64,7 +65,7 @@ func newEnrichCommand() *cobra.Command {
 				WithAuthoritative(authoritative).
 				WithWorkers(workerCount).
 				WithCrawl(crawlDepth).
-				WithLimit(limit).
+				WithLimit(effectiveLimit).
 				WithBatchSize(effectiveBatchSize).
 				WithTimeout(effectiveBatchTimeout)
 			if strings.TrimSpace(scanRequestID) != "" {
@@ -113,6 +114,7 @@ func newEnrichCommand() *cobra.Command {
 					"crawl":          crawlDepth,
 					"batch_size":     effectiveBatchSize,
 					"batch_timeout":  effectiveBatchTimeout.String(),
+					"limit":          effectiveLimit,
 				})
 			}
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Targets, result.Inserted, map[string]any{
@@ -131,6 +133,7 @@ func newEnrichCommand() *cobra.Command {
 				"crawl":          crawlDepth,
 				"batch_size":     effectiveBatchSize,
 				"batch_timeout":  effectiveBatchTimeout.String(),
+				"limit":          effectiveLimit,
 			}); err != nil {
 				return err
 			}
@@ -170,4 +173,14 @@ func webanalyzeEffectiveBatchTimeout(requested, configured time.Duration) time.D
 		return configured
 	}
 	return 10 * time.Minute
+}
+
+func webanalyzeEffectiveLimit(requested, configured int, authoritative bool) int {
+	if requested > 0 {
+		return requested
+	}
+	if authoritative && configured > 0 {
+		return configured
+	}
+	return 0
 }

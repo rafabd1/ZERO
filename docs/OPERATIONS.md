@@ -167,7 +167,10 @@ Broad scopes can contain many near-identical tenant, CDN, or default-page hosts.
 - `ZERO_HTTPX_BATCH_TIMEOUT=5m`
 - `ZERO_HTTPX_PATTERN_MIN_GROUP=200`
 - `ZERO_HTTPX_PATTERN_CAP=120`
+- `ZERO_HTTPX_MAX_HOSTS=1500`
 - `ZERO_HTTPX_TLS_PROBE=false`
+
+`ZERO_HTTPX_MAX_HOSTS` is applied after scope validation and repeated-pattern budgeting, so broad programs still get prioritization before the final host cap.
 
 For DNS resolution:
 
@@ -178,10 +181,11 @@ For DNS resolution:
 For Webanalyze and custom path probes:
 
 - `ZERO_WEBANALYZE_WORKERS=4`
+- `ZERO_WEBANALYZE_MAX_SERVICES=1500`
 - `ZERO_WEBANALYZE_BATCH_SIZE=50`
 - `ZERO_WEBANALYZE_BATCH_TIMEOUT=10m`
 
-Webanalyze batches count expanded URLs, not base services. A service plus four probe paths becomes five Webanalyze URLs.
+`ZERO_WEBANALYZE_MAX_SERVICES` applies to normal authoritative Webanalyze scans. Custom campaigns remain uncapped unless `--webanalyze-limit` is provided. Webanalyze batches count expanded URLs, not base services. A service plus four probe paths becomes five Webanalyze URLs.
 
 For Nuclei:
 
