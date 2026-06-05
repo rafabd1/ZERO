@@ -69,6 +69,7 @@ func newAnalyzeCommand() *cobra.Command {
 				WithLimit(cvesLimit).
 				WithMinYear(cfg.Intel.CVEMinYear).
 				WithRetry(cfg.Intel.NVDRetries, cfg.Intel.NVDRetryWait).
+				WithToolTimeout(cfg.Tools.ToolTimeout).
 				Run(ctx)
 			if err != nil {
 				return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)

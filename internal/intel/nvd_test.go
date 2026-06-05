@@ -52,29 +52,29 @@ func TestParseRetryAfterSeconds(t *testing.T) {
 func TestMatchConfidenceUsesCPERanges(t *testing.T) {
 	tech := db.VersionedTechnology{
 		ProgramID: "program-1",
-		Name:      "Apache HTTP Server",
-		Version:   "2.4.49",
+		Name:      "OpenSSH",
+		Version:   "8.8",
 		Source:    "webanalyze",
 	}
 	cve := nvdCVE{
-		ID: "CVE-2021-41773",
+		ID: "CVE-2021-41617",
 		Descriptions: []nvdDescription{{
 			Lang:  "en",
-			Value: "A path traversal and file disclosure vulnerability exists in Apache HTTP Server 2.4.49.",
+			Value: "OpenSSH contains an authorization issue in affected 8.x releases.",
 		}},
 		Configurations: []nvdConfiguration{{
 			Nodes: []nvdNode{{
 				CPEMatch: []nvdCPEMatch{{
 					Vulnerable:            true,
-					Criteria:              "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*",
-					VersionStartIncluding: "2.4.49",
-					VersionEndExcluding:   "2.4.50",
+					Criteria:              "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+					VersionStartIncluding: "8.0",
+					VersionEndExcluding:   "8.9",
 				}},
 			}},
 		}},
 	}
 
-	confidence, evidence := matchConfidence(tech, cve, "Apache HTTP Server 2.4.49", DefaultTechnologyAliases())
+	confidence, evidence := matchConfidence(tech, cve, "OpenSSH 8.8", DefaultTechnologyAliases())
 	if confidence < 90 {
 		t.Fatalf("expected strong CPE confidence, got %d with evidence %#v", confidence, evidence)
 	}
@@ -147,8 +147,62 @@ func TestConditionalApacheCPEDowngradesPassiveConfidence(t *testing.T) {
 	if confidence >= 80 {
 		t.Fatalf("conditional Apache passive match should not be report-grade, got %d with evidence %#v", confidence, evidence)
 	}
-	if evidence["passive_gate"] != "conditional_configuration_or_module" {
-		t.Fatalf("expected conditional passive gate, got %#v", evidence)
+	if evidence["passive_gate"] != "apache_http_server_requires_active_module_or_packaging_validation" {
+		t.Fatalf("expected Apache passive gate, got %#v", evidence)
+	}
+}
+
+func TestApacheBannerOnlyCPEDowngradesPassiveConfidence(t *testing.T) {
+	tech := db.VersionedTechnology{Name: "Apache HTTP Server", Version: "2.4.37"}
+	cve := nvdCVE{
+		ID: "CVE-2019-0190",
+		Descriptions: []nvdDescription{{
+			Lang:  "en",
+			Value: "Apache HTTP Server 2.4.37 contains an issue in mod_ssl.",
+		}},
+		Configurations: []nvdConfiguration{{
+			Nodes: []nvdNode{{
+				CPEMatch: []nvdCPEMatch{{
+					Vulnerable: true,
+					Criteria:   "cpe:2.3:a:apache:http_server:2.4.37:*:*:*:*:*:*:*",
+				}},
+			}},
+		}},
+	}
+
+	confidence, evidence := matchConfidence(tech, cve, "Apache HTTP Server 2.4.37", DefaultTechnologyAliases())
+	if confidence >= 80 {
+		t.Fatalf("Apache banner-only passive match should not be report-grade, got %d with evidence %#v", confidence, evidence)
+	}
+	if evidence["passive_gate"] != "apache_http_server_requires_active_module_or_packaging_validation" {
+		t.Fatalf("expected Apache passive gate, got %#v", evidence)
+	}
+}
+
+func TestDiscourseFeatureSpecificCPEDowngradesPassiveConfidence(t *testing.T) {
+	tech := db.VersionedTechnology{Name: "Discourse", Version: "2026.5.0"}
+	cve := nvdCVE{
+		ID: "CVE-2026-32244",
+		Descriptions: []nvdDescription{{
+			Lang:  "en",
+			Value: "Discourse AI summaries may expose stale content when a setting is enabled.",
+		}},
+		Configurations: []nvdConfiguration{{
+			Nodes: []nvdNode{{
+				CPEMatch: []nvdCPEMatch{{
+					Vulnerable: true,
+					Criteria:   "cpe:2.3:a:discourse:discourse:2026.5.0:*:*:*:*:*:*:*",
+				}},
+			}},
+		}},
+	}
+
+	confidence, evidence := matchConfidence(tech, cve, "Discourse 2026.5.0", DefaultTechnologyAliases())
+	if confidence >= 80 {
+		t.Fatalf("Discourse feature-specific passive match should not be report-grade, got %d with evidence %#v", confidence, evidence)
+	}
+	if evidence["passive_gate"] != "discourse_feature_or_setting_validation_required" {
+		t.Fatalf("expected Discourse passive gate, got %#v", evidence)
 	}
 }
 

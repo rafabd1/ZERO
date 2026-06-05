@@ -126,6 +126,14 @@ func (r *Repository) UpsertUnconfirmedPassiveFindings(ctx context.Context, progr
 			  AND m.confidence >= 80
 			  AND m.evidence->>'strategy' = 'nvd-cpe'
 			  AND lower(v.severity) IN ('medium', 'high', 'critical')
+			  AND NOT (
+				lower(m.technology_name) IN ('apache http server', 'apache httpd', 'apache')
+				AND m.evidence->>'strategy' = 'nvd-cpe'
+			  )
+			  AND NOT (
+				lower(m.technology_name) = 'discourse'
+				AND v.summary ~* '(ai[ -]?summar|summarization|summary|persona|form template|template|setting|configured|enabled|required|requires)'
+			  )
 			  AND (
 				$4 <= 0
 				OR CASE

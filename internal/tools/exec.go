@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -73,28 +74,41 @@ func RunLinesWithTimeout(ctx context.Context, timeout time.Duration, bin string,
 		return err
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	stdoutErr := make(chan error, 1)
+	stderrErr := make(chan error, 1)
+	var errBuf bytes.Buffer
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			if err := onLine(line); err != nil {
+				_ = cmd.Process.Kill()
+				stdoutErr <- err
+				return
+			}
 		}
-		if err := onLine(line); err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			return err
-		}
-	}
-	scanErr := scanner.Err()
-	errBytes, _ := io.ReadAll(stderr)
+		stdoutErr <- scanner.Err()
+	}()
+	go func() {
+		_, err := io.Copy(&errBuf, stderr)
+		stderrErr <- err
+	}()
+	scanErr := <-stdoutErr
+	errReadErr := <-stderrErr
 	waitErr := cmd.Wait()
 
 	if scanErr != nil {
 		return scanErr
 	}
+	if errReadErr != nil {
+		return errReadErr
+	}
 	if waitErr != nil {
-		msg := strings.TrimSpace(string(errBytes))
+		msg := strings.TrimSpace(errBuf.String())
 		if msg == "" {
 			msg = waitErr.Error()
 		}

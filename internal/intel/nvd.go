@@ -3,6 +3,7 @@ package intel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
+	"github.com/rafabd1/ZERO/internal/tools"
 )
 
 type NVDRunner struct {
@@ -27,6 +29,7 @@ type NVDRunner struct {
 	minYear   int
 	retries   int
 	retryWait time.Duration
+	timeout   time.Duration
 	client    *http.Client
 }
 
@@ -101,28 +104,51 @@ func (r *NVDRunner) WithRetry(retries int, wait time.Duration) *NVDRunner {
 	return r
 }
 
+func (r *NVDRunner) WithToolTimeout(timeout time.Duration) *NVDRunner {
+	if timeout > 0 {
+		r.timeout = timeout
+	}
+	return r
+}
+
 func (r *NVDRunner) Run(ctx context.Context) (NVDResult, error) {
-	techs, err := r.repo.ListVersionedTechnologies(ctx, r.programID, r.limit)
+	runCtx := ctx
+	cancel := func() {}
+	if r.timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, r.timeout)
+	}
+	defer cancel()
+
+	techs, err := r.repo.ListVersionedTechnologies(runCtx, r.programID, r.limit)
 	if err != nil {
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return NVDResult{}, tools.TimeoutError{Bin: "nvd", Args: []string{"list-versioned-technologies"}, Timeout: r.timeout}
+		}
 		return NVDResult{}, err
 	}
 	result := NVDResult{Technologies: len(techs)}
 	for i, tech := range techs {
 		query := tech.Name + " " + tech.Version
-		candidates, err := r.search(ctx, tech, query)
+		candidates, err := r.search(runCtx, tech, query)
 		if err != nil {
+			if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+				return result, tools.TimeoutError{Bin: "nvd", Args: []string{"keywordSearch"}, Timeout: r.timeout}
+			}
 			return result, err
 		}
 		for _, candidate := range candidates {
-			vulnerabilityID, inserted, err := r.repo.UpsertVulnerabilityRecord(ctx, candidate.Record)
+			vulnerabilityID, inserted, err := r.repo.UpsertVulnerabilityRecord(runCtx, candidate.Record)
 			if err != nil {
+				if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+					return result, tools.TimeoutError{Bin: "nvd", Args: []string{"upsert-vulnerability"}, Timeout: r.timeout}
+				}
 				return result, err
 			}
 			result.CVEs++
 			if inserted {
 				result.Inserted++
 			}
-			_, matchInserted, err := r.repo.UpsertTechnologyVulnerabilityMatch(ctx, db.TechnologyVulnerabilityMatch{
+			_, matchInserted, err := r.repo.UpsertTechnologyVulnerabilityMatch(runCtx, db.TechnologyVulnerabilityMatch{
 				ProgramID:         tech.ProgramID,
 				HTTPServiceID:     tech.HTTPServiceID,
 				VulnerabilityID:   vulnerabilityID,
@@ -135,6 +161,9 @@ func (r *NVDRunner) Run(ctx context.Context) (NVDResult, error) {
 				Evidence:          candidate.Evidence,
 			})
 			if err != nil {
+				if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+					return result, tools.TimeoutError{Bin: "nvd", Args: []string{"upsert-tech-cve-match"}, Timeout: r.timeout}
+				}
 				return result, err
 			}
 			result.Matches++
@@ -148,8 +177,11 @@ func (r *NVDRunner) Run(ctx context.Context) (NVDResult, error) {
 		if r.apiKey == "" && i+1 < len(techs) {
 			select {
 			case <-time.After(6 * time.Second):
-			case <-ctx.Done():
-				return result, ctx.Err()
+			case <-runCtx.Done():
+				if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+					return result, tools.TimeoutError{Bin: "nvd", Args: []string{"rate-limit-wait"}, Timeout: r.timeout}
+				}
+				return result, runCtx.Err()
 			}
 		}
 	}
@@ -565,7 +597,16 @@ func applyPassiveCPEGates(tech db.VersionedTechnology, cve nvdCVE, score int, ev
 	if score < 80 {
 		return score
 	}
-	if conditionalCVEText(firstEnglishDescription(cve.Descriptions)) {
+	summary := firstEnglishDescription(cve.Descriptions)
+	if apacheHTTPServerProduct(tech.Name) {
+		evidence["passive_gate"] = "apache_http_server_requires_active_module_or_packaging_validation"
+		return minInt(score, 75)
+	}
+	if discourseFeatureOrSettingCVE(tech.Name, summary) {
+		evidence["passive_gate"] = "discourse_feature_or_setting_validation_required"
+		return minInt(score, 75)
+	}
+	if conditionalCVEText(summary) {
 		evidence["passive_gate"] = "conditional_configuration_or_module"
 		return minInt(score, 75)
 	}
@@ -577,6 +618,16 @@ func applyPassiveCPEGates(tech db.VersionedTechnology, cve nvdCVE, score int, ev
 }
 
 var conditionalCVERE = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(if|when|requires|required|configuration|configured|enabled|module|mod_|cgi|ssi|suexec|vcl|proxy protocol|tls termination|http/2)([^[:alnum:]_]|$)|built with`)
+var discourseConditionalRE = regexp.MustCompile(`(?i)(ai[ -]?summar|summarization|summary|persona|form template|template|setting|configured|enabled|required|requires)`)
+
+func apacheHTTPServerProduct(name string) bool {
+	text := normalizeText(name)
+	return text == "apache http server" || text == "apache httpd" || text == "apache"
+}
+
+func discourseFeatureOrSettingCVE(name, summary string) bool {
+	return normalizeText(name) == "discourse" && discourseConditionalRE.MatchString(summary)
+}
 
 func conditionalCVEText(summary string) bool {
 	return conditionalCVERE.MatchString(summary)
