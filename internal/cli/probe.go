@@ -100,6 +100,7 @@ func newProbeCommand() *cobra.Command {
 				return finishScanRun(ctx, repo, scanID, err, result.Hosts, result.Services, map[string]any{
 					"hosts":              result.Hosts,
 					"services":           result.Services,
+					"deactivated":        result.Deactivated,
 					"tool":               "httpx",
 					"timeout":            firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout),
 					"threads":            firstPositive(httpxThreads, cfg.Tools.HTTPXThreads),
@@ -117,6 +118,7 @@ func newProbeCommand() *cobra.Command {
 			if err := finishScanRun(ctx, repo, scanID, nil, result.Hosts, result.Services, map[string]any{
 				"hosts":              result.Hosts,
 				"services":           result.Services,
+				"deactivated":        result.Deactivated,
 				"tool":               "httpx",
 				"timeout":            firstPositive(httpxTimeout, cfg.Tools.HTTPXTimeout),
 				"threads":            firstPositive(httpxThreads, cfg.Tools.HTTPXThreads),
@@ -132,7 +134,7 @@ func newProbeCommand() *cobra.Command {
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "probed %d hosts and upserted %d HTTP services (%d hosts skipped by pattern budget)\n", result.Hosts, result.Services, result.SkippedByPattern)
+			fmt.Fprintf(cmd.OutOrStdout(), "probed %d hosts, upserted %d HTTP services, and deactivated %d stale service(s) (%d hosts skipped by pattern budget)\n", result.Hosts, result.Services, result.Deactivated, result.SkippedByPattern)
 			return nil
 		},
 	}

@@ -74,6 +74,9 @@ type CleanupResult struct {
 	HTTPServices                int `json:"http_services"`
 	TechnologyObservations      int `json:"technology_observations"`
 	TechnologyVulnerabilityRows int `json:"technology_vulnerability_rows"`
+	ChangeEvents                int `json:"change_events"`
+	ScanRequests                int `json:"scan_requests"`
+	ScanRuns                    int `json:"scan_runs"`
 }
 
 type DomainRoot struct {

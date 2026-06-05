@@ -597,9 +597,13 @@ func (r *Repository) UpdateSubdomainResolution(ctx context.Context, programID st
 		batch.Queue(`
 			UPDATE zero_subdomains
 			SET resolves = $3,
+				active = $3,
 				last_scan_run_id = COALESCE(NULLIF($4, '')::uuid, last_scan_run_id),
 				last_seen_at = CASE WHEN $3 THEN now() ELSE last_seen_at END,
-				metadata = metadata || jsonb_build_object('last_dns_validation_at', now())
+				metadata = metadata || jsonb_build_object(
+					'last_dns_validation_at', now(),
+					'deactivated_reason', CASE WHEN $3 THEN NULL ELSE 'dnsx_unresolved' END
+				)
 			WHERE program_id = $1::uuid
 			  AND fqdn = $2
 		`, programID, fqdn, ok, scanRunID)
@@ -617,6 +621,53 @@ func (r *Repository) UpdateSubdomainResolution(ctx context.Context, programID st
 		return updated, fmt.Errorf("update subdomain resolution: %w", err)
 	}
 	return updated, nil
+}
+
+func (r *Repository) MarkMissingHTTPServicesInactiveForHosts(ctx context.Context, programID, scanRunID string, hosts []string) (int, error) {
+	programID = strings.TrimSpace(programID)
+	scanRunID = strings.TrimSpace(scanRunID)
+	if programID == "" || scanRunID == "" || len(hosts) == 0 {
+		return 0, nil
+	}
+	cleanHosts := make([]string, 0, len(hosts))
+	seen := map[string]struct{}{}
+	for _, host := range hosts {
+		host, ok := sanitize.CanonicalDomain(host)
+		if !ok {
+			continue
+		}
+		if _, ok := seen[host]; ok {
+			continue
+		}
+		seen[host] = struct{}{}
+		cleanHosts = append(cleanHosts, host)
+	}
+	if len(cleanHosts) == 0 {
+		return 0, nil
+	}
+	var count int
+	if err := r.pool.QueryRow(ctx, `
+		WITH stale AS (
+			UPDATE zero_http_services s
+			SET active = false,
+				raw = raw || jsonb_build_object(
+					'deactivated_at', now(),
+					'deactivation_reason', 'missing_from_authoritative_httpx_probe',
+					'superseded_by_scan_run_id', $2::text
+				)
+			WHERE s.program_id = $1::uuid
+			  AND s.active = true
+			  AND s.host = ANY($3::text[])
+			  AND COALESCE(s.last_scan_run_id::text, '') <> $2
+			  AND NOT EXISTS (SELECT 1 FROM zero_nuclei_results n WHERE n.http_service_id = s.id)
+			  AND NOT EXISTS (SELECT 1 FROM zero_candidate_findings f WHERE f.http_service_id = s.id)
+			RETURNING s.id
+		)
+		SELECT count(*) FROM stale
+	`, programID, scanRunID, cleanHosts).Scan(&count); err != nil {
+		return 0, fmt.Errorf("mark missing http services inactive: %w", err)
+	}
+	return count, nil
 }
 
 func (r *Repository) ListSubdomains(ctx context.Context) ([]Subdomain, error) {

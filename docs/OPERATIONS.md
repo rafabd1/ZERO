@@ -139,15 +139,23 @@ The API exposes the same operation through `POST /v1/scan-requests/{id}/cancel` 
 
 ## Cleanup
 
-The worker schedules inactive-inventory cleanup with `ZERO_SCHEDULE_CLEANUP`. By default it removes inactive scope assets, subdomains, HTTP services, technology observations, and passive technology-CVE rows after 72 hours or after they have been absent from the last two successful full scans for the program.
+The worker schedules operational cleanup with `ZERO_SCHEDULE_CLEANUP`. By default it runs every 12 hours, skips while scans are running, and deletes inactive inventory immediately. This keeps the database focused on current alive/reusable assets plus finding evidence.
 
 Manual cleanup:
 
 ```bash
-docker compose run --rm zero run cleanup --retention-hours 72 --retention-scans 2
+docker compose run --rm zero run cleanup
 ```
 
-HTTP services linked to Nuclei results or candidate findings are preserved for evidence integrity.
+HTTP services linked to Nuclei results or candidate findings are preserved for evidence integrity. Cleanup deletes in bounded batches controlled by `ZERO_CLEANUP_BATCH_SIZE`.
+
+For a database that already accumulated inventory change history, run a manual compaction during a quiet maintenance window:
+
+```bash
+docker compose run --rm zero run cleanup --compact-change-events
+```
+
+This rewrites `zero_change_events` after pruning disallowed event types, so avoid running it during broad campaigns.
 
 ## Tuning
 

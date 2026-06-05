@@ -165,7 +165,7 @@ zero report generate          generate deduplicated reports
 zero notify discord           send new report notifications
 zero run schedule             queue durable custom campaigns
 zero run cancel               cancel queued or running work
-zero run cleanup              prune stale inactive inventory
+zero run cleanup              prune operational state and stale inventory
 zero worker                   run the continuous scheduler/worker
 zero api                      run the authenticated API
 ```

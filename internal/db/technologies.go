@@ -277,16 +277,6 @@ func (r *Repository) MarkMissingTechnologyObservationsInactive(ctx context.Conte
 			  AND o.http_service_id::text = ANY($4::text[])
 			  AND COALESCE(o.last_scan_run_id::text, '') <> $2
 			RETURNING o.id, o.program_id, o.http_service_id, o.name, o.version, o.source
-		), events AS (
-			INSERT INTO zero_change_events(program_id, scan_run_id, entity_type, entity_id, entity_key, change_type, old_value, new_value, evidence_hash)
-			SELECT program_id, NULLIF($2, '')::uuid, 'technology', id,
-				http_service_id::text || ':' || lower(name) || ':' || version || ':' || source,
-				'removed',
-				jsonb_build_object('active', true),
-				jsonb_build_object('active', false, 'source', source, 'reason', 'missing_from_authoritative_fingerprint'),
-				encode(digest('fingerprint-superseded:technology:' || id::text || ':' || $2::text, 'sha256'), 'hex')
-			FROM stale
-			ON CONFLICT(evidence_hash) DO NOTHING
 		)
 		SELECT count(*) FROM stale
 	`, strings.TrimSpace(programID), scanRunID, source, cleanIDs).Scan(&count); err != nil {

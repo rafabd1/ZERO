@@ -87,13 +87,15 @@ func addCancelRunCommand(parent *cobra.Command) {
 func addCleanupRunCommand(parent *cobra.Command) {
 	var retentionHours int
 	var retentionScans int
+	var keepInactive bool
+	var compactChangeEvents bool
 	cmd := &cobra.Command{
 		Use:   "cleanup",
-		Short: "Delete inactive inventory rows outside the configured retention window.",
+		Short: "Delete stale operational state and prune non-essential history.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext()
 			cfg := loadConfig()
-			if retentionHours <= 0 {
+			if retentionHours < 0 {
 				retentionHours = cfg.Data.InactiveRetentionHours
 			}
 			if retentionScans < 0 {
@@ -104,24 +106,44 @@ func addCleanupRunCommand(parent *cobra.Command) {
 				return err
 			}
 			defer repo.Close()
-			result, err := repo.CleanupInactiveEntities(ctx, retentionHours, retentionScans)
+			result, err := repo.CleanupOperationalData(ctx, db.CleanupOptions{
+				DeleteInactiveInventory:   cfg.Data.DeleteInactiveInventory && !keepInactive,
+				InactiveRetentionHours:    retentionHours,
+				InactiveRetentionScans:    retentionScans,
+				ChangeEventRetentionHours: cfg.Data.ChangeEventRetentionHours,
+				ScanRequestRetentionHours: cfg.Data.ScanRequestRetentionHours,
+				BatchSize:                 cfg.Data.CleanupBatchSize,
+			})
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "cleanup deleted inactive rows: scope_assets=%d subdomains=%d http_services=%d technologies=%d technology_vulnerability_matches=%d retention_hours=%d retention_scans=%d\n",
+			if compactChangeEvents {
+				compacted, err := repo.CompactChangeEvents(ctx)
+				if err != nil {
+					return err
+				}
+				result.ChangeEvents += compacted
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "cleanup deleted rows: scope_assets=%d subdomains=%d http_services=%d technologies=%d technology_vulnerability_matches=%d change_events=%d scan_requests=%d retention_hours=%d retention_scans=%d delete_inactive=%t compact_change_events=%t\n",
 				result.ScopeAssets,
 				result.Subdomains,
 				result.HTTPServices,
 				result.TechnologyObservations,
 				result.TechnologyVulnerabilityRows,
+				result.ChangeEvents,
+				result.ScanRequests,
 				retentionHours,
 				retentionScans,
+				cfg.Data.DeleteInactiveInventory && !keepInactive,
+				compactChangeEvents,
 			)
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&retentionHours, "retention-hours", 0, "delete inactive rows older than this many hours; defaults to ZERO_INACTIVE_RETENTION_HOURS")
+	cmd.Flags().IntVar(&retentionHours, "retention-hours", -1, "delete inactive rows older than this many hours; defaults to ZERO_INACTIVE_RETENTION_HOURS; 0 deletes inactive rows immediately")
 	cmd.Flags().IntVar(&retentionScans, "retention-scans", -1, "delete inactive rows not seen in the latest N successful full scans; defaults to ZERO_INACTIVE_RETENTION_SCANS")
+	cmd.Flags().BoolVar(&keepInactive, "keep-inactive", false, "do not delete inactive inventory rows even if ZERO_DELETE_INACTIVE_INVENTORY is enabled")
+	cmd.Flags().BoolVar(&compactChangeEvents, "compact-change-events", false, "rewrite zero_change_events to physically reclaim storage after pruning disallowed event types")
 	parent.AddCommand(cmd)
 }
 
@@ -233,6 +255,28 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	wg.Wait()
 	if err := repo.RefreshDefaultScanCycle(ctx, cycleID); err != nil && firstErr == nil {
 		firstErr = err
+	}
+	if cfg.Data.DeleteInactiveInventory {
+		cleanup, err := repo.CleanupOperationalData(ctx, db.CleanupOptions{
+			DeleteInactiveInventory:   true,
+			InactiveRetentionHours:    cfg.Data.InactiveRetentionHours,
+			InactiveRetentionScans:    cfg.Data.InactiveRetentionScans,
+			ChangeEventRetentionHours: cfg.Data.ChangeEventRetentionHours,
+			ScanRequestRetentionHours: cfg.Data.ScanRequestRetentionHours,
+			BatchSize:                 cfg.Data.CleanupBatchSize,
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		} else if err == nil {
+			fmt.Fprintf(parent.OutOrStdout(), "post-cycle cleanup deleted rows: scope_assets=%d subdomains=%d http_services=%d technologies=%d change_events=%d scan_requests=%d\n",
+				cleanup.ScopeAssets,
+				cleanup.Subdomains,
+				cleanup.HTTPServices,
+				cleanup.TechnologyObservations,
+				cleanup.ChangeEvents,
+				cleanup.ScanRequests,
+			)
+		}
 	}
 	return firstErr
 }

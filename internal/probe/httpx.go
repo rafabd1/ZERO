@@ -34,6 +34,7 @@ type HTTPXRunner struct {
 type HTTPXResult struct {
 	Hosts            int
 	Services         int
+	Deactivated      int
 	SkippedByPattern int
 	PriorityKept     int
 	BudgetedRoots    int
@@ -169,7 +170,42 @@ func (r *HTTPXRunner) Run(ctx context.Context) (HTTPXResult, error) {
 			return result, err
 		}
 	}
+	if r.scanRunID != "" && r.limit <= 0 {
+		deactivated, err := r.deactivateMissingServices(ctx, hosts, byHost)
+		if err != nil {
+			return result, err
+		}
+		result.Deactivated = deactivated
+	}
 	return result, nil
+}
+
+func (r *HTTPXRunner) deactivateMissingServices(ctx context.Context, hosts []string, byHost map[string][]db.ProbeTarget) (int, error) {
+	hostsByProgram := map[string]map[string]struct{}{}
+	for _, host := range hosts {
+		for _, target := range byHost[host] {
+			if target.ProgramID == "" {
+				continue
+			}
+			if _, ok := hostsByProgram[target.ProgramID]; !ok {
+				hostsByProgram[target.ProgramID] = map[string]struct{}{}
+			}
+			hostsByProgram[target.ProgramID][host] = struct{}{}
+		}
+	}
+	total := 0
+	for programID, hostSet := range hostsByProgram {
+		programHosts := make([]string, 0, len(hostSet))
+		for host := range hostSet {
+			programHosts = append(programHosts, host)
+		}
+		count, err := r.repo.MarkMissingHTTPServicesInactiveForHosts(ctx, programID, r.scanRunID, programHosts)
+		if err != nil {
+			return total, err
+		}
+		total += count
+	}
+	return total, nil
 }
 
 func (r *HTTPXRunner) runBatch(ctx context.Context, timeout time.Duration, args []string, hosts []string, byHost map[string][]db.ProbeTarget, result *HTTPXResult) error {

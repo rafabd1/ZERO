@@ -247,12 +247,14 @@ zero worker
 ```bash
 zero run cancel --request-id <scan-request-id>
 zero run cancel --campaign-id <scan-campaign-id>
-zero run cleanup --retention-hours 72 --retention-scans 2
+zero run cleanup
+zero run cleanup --keep-inactive --retention-hours 72 --retention-scans 2
+zero run cleanup --compact-change-events
 ```
 
 Canceling a campaign marks queued and running child requests canceled. A tool already running may finish its current process, but the request cannot be marked succeeded afterward.
 
-Cleanup removes stale inactive inventory while preserving services linked to findings or Nuclei evidence.
+Cleanup removes inactive operational inventory by default, prunes non-essential change history, and preserves services linked to findings or Nuclei evidence. Use `--keep-inactive` when you intentionally want old inactive rows retained for debugging.
 
 ## Reports And Notifications
 

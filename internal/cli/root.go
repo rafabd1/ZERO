@@ -169,5 +169,6 @@ func openRepositoryOnce(ctx context.Context, cfg config.Config) (*db.Repository,
 	if err != nil {
 		return nil, err
 	}
+	repo.SetChangeEventEntities(cfg.Data.ChangeEventEntities)
 	return repo, nil
 }

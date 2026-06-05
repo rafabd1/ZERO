@@ -13,7 +13,8 @@ import (
 var migrationFiles embed.FS
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool              *pgxpool.Pool
+	changeEventPolicy changeEventPolicy
 }
 
 func Open(ctx context.Context, databaseURL string) (*Repository, error) {
@@ -36,7 +37,7 @@ func OpenWithMaxConns(ctx context.Context, databaseURL string, maxConns int) (*R
 		pool.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	return &Repository{pool: pool}, nil
+	return &Repository{pool: pool, changeEventPolicy: parseChangeEventPolicy("")}, nil
 }
 
 func (r *Repository) Close() {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,6 +27,9 @@ func (r *Repository) RecordChangeEvent(ctx context.Context, event ChangeEvent) e
 	if event.ProgramID == "" || event.EntityType == "" || event.EntityKey == "" || event.ChangeType == "" {
 		return nil
 	}
+	if !r.ChangeEventAllowed(event.EntityType) {
+		return nil
+	}
 	args := changeEventArgs(event)
 	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
 		_, err := r.pool.Exec(ctx, changeEventInsertSQL, args...)
@@ -41,6 +45,9 @@ func (r *Repository) RecordChangeEvents(ctx context.Context, events []ChangeEven
 	validEvents := make([]ChangeEvent, 0, len(events))
 	for _, event := range events {
 		if event.ProgramID == "" || event.EntityType == "" || event.EntityKey == "" || event.ChangeType == "" {
+			continue
+		}
+		if !r.ChangeEventAllowed(event.EntityType) {
 			continue
 		}
 		validEvents = append(validEvents, event)
@@ -76,6 +83,73 @@ const changeEventInsertSQL = `
 	VALUES ($1::uuid,NULLIF($2, '')::uuid,$3,NULLIF($4, '')::uuid,$5,$6,$7::jsonb,$8::jsonb,$9)
 	ON CONFLICT(evidence_hash) DO NOTHING
 `
+
+type changeEventPolicy struct {
+	allowAll bool
+	allowed  map[string]struct{}
+}
+
+const defaultChangeEventEntities = "candidate_finding,nuclei_result"
+
+func (r *Repository) SetChangeEventEntities(value string) {
+	if r == nil {
+		return
+	}
+	r.changeEventPolicy = parseChangeEventPolicy(value)
+}
+
+func (r *Repository) ChangeEventAllowed(entityType string) bool {
+	policy := parseChangeEventPolicy(defaultChangeEventEntities)
+	if r != nil && (r.changeEventPolicy.allowAll || r.changeEventPolicy.allowed != nil) {
+		policy = r.changeEventPolicy
+	}
+	entityType = strings.TrimSpace(strings.ToLower(entityType))
+	if entityType == "" {
+		return false
+	}
+	if policy.allowAll {
+		return true
+	}
+	_, ok := policy.allowed[entityType]
+	return ok
+}
+
+func (r *Repository) allowedChangeEventEntities() []string {
+	policy := parseChangeEventPolicy(defaultChangeEventEntities)
+	if r != nil && (r.changeEventPolicy.allowAll || r.changeEventPolicy.allowed != nil) {
+		policy = r.changeEventPolicy
+	}
+	if policy.allowAll {
+		return []string{"scope_asset", "subdomain", "http_service", "technology", "nuclei_result", "candidate_finding"}
+	}
+	entities := make([]string, 0, len(policy.allowed))
+	for entityType := range policy.allowed {
+		entities = append(entities, entityType)
+	}
+	return entities
+}
+
+func parseChangeEventPolicy(value string) changeEventPolicy {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" || value == "default" || value == "security" {
+		value = defaultChangeEventEntities
+	}
+	if value == "all" {
+		return changeEventPolicy{allowAll: true}
+	}
+	if value == "none" || value == "off" || value == "false" {
+		return changeEventPolicy{allowed: map[string]struct{}{}}
+	}
+	allowed := map[string]struct{}{}
+	for _, part := range strings.Split(value, ",") {
+		entityType := strings.TrimSpace(part)
+		if entityType == "" {
+			continue
+		}
+		allowed[entityType] = struct{}{}
+	}
+	return changeEventPolicy{allowed: allowed}
+}
 
 func changeEventArgs(event ChangeEvent) []any {
 	oldValue, _ := json.Marshal(emptyMap(event.OldValue))
