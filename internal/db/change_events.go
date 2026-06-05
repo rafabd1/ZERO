@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -26,7 +27,10 @@ func (r *Repository) RecordChangeEvent(ctx context.Context, event ChangeEvent) e
 		return nil
 	}
 	args := changeEventArgs(event)
-	_, err := r.pool.Exec(ctx, changeEventInsertSQL, args...)
+	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+		_, err := r.pool.Exec(ctx, changeEventInsertSQL, args...)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("record change event: %w", err)
 	}
@@ -34,24 +38,32 @@ func (r *Repository) RecordChangeEvent(ctx context.Context, event ChangeEvent) e
 }
 
 func (r *Repository) RecordChangeEvents(ctx context.Context, events []ChangeEvent) error {
-	batch := &pgx.Batch{}
-	queued := 0
+	validEvents := make([]ChangeEvent, 0, len(events))
 	for _, event := range events {
 		if event.ProgramID == "" || event.EntityType == "" || event.EntityKey == "" || event.ChangeType == "" {
 			continue
 		}
-		batch.Queue(changeEventInsertSQL, changeEventArgs(event)...)
-		queued++
+		validEvents = append(validEvents, event)
 	}
-	if queued == 0 {
+	if len(validEvents) == 0 {
 		return nil
 	}
-	results := r.pool.SendBatch(ctx, batch)
-	defer results.Close()
-	for i := 0; i < queued; i++ {
-		if _, err := results.Exec(); err != nil {
-			return fmt.Errorf("record change events: %w", err)
+	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+		batch := &pgx.Batch{}
+		for _, event := range validEvents {
+			batch.Queue(changeEventInsertSQL, changeEventArgs(event)...)
 		}
+		results := r.pool.SendBatch(ctx, batch)
+		defer results.Close()
+		for i := 0; i < len(validEvents); i++ {
+			if _, err := results.Exec(); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("record change events: %w", err)
 	}
 	return nil
 }

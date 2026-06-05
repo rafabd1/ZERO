@@ -775,7 +775,11 @@ func (s *Server) defaultScans(w http.ResponseWriter, r *http.Request) {
 				COALESCE(stats.input_count, 0)::int AS input_count,
 				COALESCE(stats.inserted_count, 0)::int AS inserted_count,
 				COALESCE(stats.updated_count, 0)::int AS updated_count,
-				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count
+				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count,
+				GREATEST(
+					c.total_programs - c.running_programs - c.succeeded_programs - c.failed_programs - c.canceled_programs,
+					0
+				)::int AS queued_programs
 			FROM zero_default_scan_cycles c
 			LEFT JOIN LATERAL (
 				SELECT
@@ -794,7 +798,7 @@ func (s *Server) defaultScans(w http.ResponseWriter, r *http.Request) {
 			'status', status,
 			'parallelism', parallelism,
 			'total_requests', total_programs,
-			'queued_requests', 0,
+			'queued_requests', queued_programs,
 			'running_requests', running_programs,
 			'succeeded_requests', succeeded_programs,
 			'failed_requests', failed_programs,
@@ -839,7 +843,11 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 				COALESCE(stats.input_count, 0)::int AS input_count,
 				COALESCE(stats.inserted_count, 0)::int AS inserted_count,
 				COALESCE(stats.updated_count, 0)::int AS updated_count,
-				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count
+				COALESCE(stats.unchanged_count, 0)::int AS unchanged_count,
+				GREATEST(
+					c.total_programs - c.running_programs - c.succeeded_programs - c.failed_programs - c.canceled_programs,
+					0
+				)::int AS queued_programs
 			FROM zero_default_scan_cycles c
 			LEFT JOIN LATERAL (
 				SELECT
@@ -878,7 +886,7 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 					'status', c.status,
 					'parallelism', c.parallelism,
 					'total_requests', c.total_programs,
-					'queued_requests', 0,
+					'queued_requests', c.queued_programs,
 					'running_requests', c.running_programs,
 					'succeeded_requests', c.succeeded_programs,
 					'failed_requests', c.failed_programs,
@@ -903,6 +911,7 @@ func (s *Server) defaultScanDetail(w http.ResponseWriter, r *http.Request) {
 			),
 			'request_counts', jsonb_build_object(
 				'running', COALESCE((SELECT running_programs FROM cycle), 0),
+				'queued', COALESCE((SELECT queued_programs FROM cycle), 0),
 				'succeeded', COALESCE((SELECT succeeded_programs FROM cycle), 0),
 				'failed', COALESCE((SELECT failed_programs FROM cycle), 0),
 				'canceled', COALESCE((SELECT canceled_programs FROM cycle), 0)

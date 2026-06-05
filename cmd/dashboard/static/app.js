@@ -315,7 +315,7 @@ function renderDefaultScanDetail(detail) {
   $("defaultScanDetailBody").innerHTML = `
     <div class="drawer-grid">
       ${detailCard("Status", scanStatusPill(scan.status), scan.error || "")}
-      ${detailCard("Program Scans", `${fmt(scan.succeeded_requests)} succeeded`, `${fmt(scan.running_requests)} running, ${fmt(scan.failed_requests)} failed`)}
+      ${detailCard("Program Scans", `${fmt(scan.succeeded_requests)} succeeded`, `${fmt(scan.running_requests)} running, ${fmt(scan.queued_requests)} queued, ${fmt(scan.failed_requests)} failed`)}
       ${detailCard("Parallelism", escapeHTML(defaultScanParallelism(scan)), "default scheduler")}
       ${detailCard("Findings", fmt(findingCounts.total), `${fmt(findingCounts.nuclei_confirmed)} confirmed, ${fmt(findingCounts.passive_unconfirmed)} passive`)}
       ${detailCard("Nuclei", fmt(nuclei.length), "recent validation results")}
@@ -738,8 +738,14 @@ function campaignProgress(campaign) {
   const failed = Number(campaign.failed_requests || 0);
   const running = Number(campaign.running_requests || 0);
   const queued = Number(campaign.queued_requests || 0);
+  const canceled = Number(campaign.canceled_requests || 0);
   if (total <= 0) return "no programs";
-  return `${fmt(succeeded + failed)}/${fmt(total)} done, ${fmt(running)} running, ${fmt(queued)} queued`;
+  const final = succeeded + failed + canceled;
+  const issues = [];
+  if (failed > 0) issues.push(`${fmt(failed)} failed`);
+  if (canceled > 0) issues.push(`${fmt(canceled)} canceled`);
+  const issueText = issues.length > 0 ? ` (${issues.join(", ")})` : "";
+  return `${fmt(final)}/${fmt(total)} finished${issueText}, ${fmt(running)} running, ${fmt(queued)} queued`;
 }
 
 function defaultScanParallelism(scan) {

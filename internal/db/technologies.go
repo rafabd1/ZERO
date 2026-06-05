@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (r *Repository) ListWebTechTargets(ctx context.Context, programID string, limit int) ([]WebTechTarget, error) {
@@ -198,7 +199,8 @@ func (r *Repository) UpsertTechnologyObservation(ctx context.Context, obs Techno
 	evidence, _ := json.Marshal(emptyMap(obs.Evidence))
 	var id string
 	var inserted bool
-	err := r.pool.QueryRow(ctx, `
+	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+		return r.pool.QueryRow(ctx, `
 		INSERT INTO zero_technology_observations(
 			program_id, http_service_id, last_scan_run_id, name, version, source, confidence, evidence
 		)
@@ -211,6 +213,7 @@ func (r *Repository) UpsertTechnologyObservation(ctx context.Context, obs Techno
 			evidence = zero_technology_observations.evidence || excluded.evidence
 		RETURNING id::text, (xmax = 0) AS inserted
 	`, obs.ProgramID, obs.HTTPServiceID, obs.LastScanRunID, obs.Name, obs.Version, obs.Source, obs.Confidence, string(evidence)).Scan(&id, &inserted)
+	})
 	if err != nil {
 		return "", false, fmt.Errorf("upsert technology observation: %w", err)
 	}

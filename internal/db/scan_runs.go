@@ -53,7 +53,8 @@ func (r *Repository) FinishScanRun(ctx context.Context, id, status string, input
 		errorText = runErr.Error()
 	}
 	rawStats, _ := json.Marshal(stats)
-	_, err := r.pool.Exec(ctx, `
+	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+		_, err := r.pool.Exec(ctx, `
 		UPDATE zero_scan_runs
 		SET status = $2,
 			finished_at = now(),
@@ -63,6 +64,8 @@ func (r *Repository) FinishScanRun(ctx context.Context, id, status string, input
 			stats = $6::jsonb
 		WHERE id = $1::uuid
 	`, id, status, inputCount, insertedCount, errorText, string(rawStats))
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("finish scan run: %w", err)
 	}
@@ -96,7 +99,8 @@ func (r *Repository) RefreshDefaultScanCycle(ctx context.Context, id string) err
 	if id == "" {
 		return nil
 	}
-	_, err := r.pool.Exec(ctx, `
+	err := withRetryableDB(ctx, 5, 150*time.Millisecond, func() error {
+		_, err := r.pool.Exec(ctx, `
 		WITH counts AS (
 			SELECT
 				count(*) FILTER (WHERE status = 'running')::int AS running,
@@ -134,6 +138,8 @@ func (r *Repository) RefreshDefaultScanCycle(ctx context.Context, id string) err
 		FROM counts
 		WHERE c.id = $1::uuid
 	`, id)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("refresh default scan cycle: %w", err)
 	}

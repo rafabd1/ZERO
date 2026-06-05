@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -236,7 +237,7 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	return firstErr
 }
 
-func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program, cfg config.Config, cycleID string) error {
+func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Repository, program db.Program, cfg config.Config, cycleID string) (retErr error) {
 	fmt.Fprintf(parent.OutOrStdout(), "zero program pipeline starting: %s/%s %s\n", program.Platform, program.Handle, program.ID)
 	if err := repo.MarkProgramScanStarted(ctx, program.ID); err != nil {
 		return err
@@ -246,6 +247,39 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 	if err != nil {
 		return err
 	}
+	scanFinalized := false
+	finalizeScan := func(runErr error, inputCount, insertedCount int, stats map[string]any) error {
+		status := "succeeded"
+		if runErr != nil {
+			status = "failed"
+		}
+		if err := repo.FinishScanRun(ctx, scanID, status, inputCount, insertedCount, stats, runErr); err != nil {
+			return err
+		}
+		scanFinalized = true
+		return runErr
+	}
+	defer func() {
+		if scanFinalized {
+			return
+		}
+		err := retErr
+		if err == nil {
+			err = fmt.Errorf("program pipeline exited before scan run was finalized")
+		}
+		finishErr := finalizeScan(err, 0, 0, map[string]any{
+			"program_id": program.ID,
+			"handle":     program.Handle,
+			"recovered":  "finalized_by_pipeline_defer",
+		})
+		if retErr == nil {
+			retErr = finishErr
+			return
+		}
+		if finishErr != nil && !errors.Is(finishErr, retErr) {
+			retErr = fmt.Errorf("%w; finalize scan run: %v", retErr, finishErr)
+		}
+	}()
 	correlation.ParentScanRunID = scanID
 	steps := [][]string{
 		{"enum", "subfinder", "--program-id", program.ID},
@@ -261,7 +295,7 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 		fmt.Fprintf(parent.OutOrStdout(), "zero program step %s/%s: %v\n", program.Platform, program.Handle, step)
 		if err := runChildEWithCorrelation(parent, correlation, step...); err != nil {
 			alertOnTimeout(ctx, parent, cfg, program.ID, program.Handle, step, err)
-			return finishScanRun(ctx, repo, scanID, err, 0, 0, map[string]any{
+			return finalizeScan(err, 0, 0, map[string]any{
 				"program_id": program.ID,
 				"handle":     program.Handle,
 				"step":       step,
@@ -270,12 +304,12 @@ func runProgramPipeline(ctx context.Context, parent *cobra.Command, repo *db.Rep
 	}
 	stale, err := repo.MarkStaleEntities(ctx, program.ID, cfg.Data.StaleAfterHours)
 	if err != nil {
-		return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+		return finalizeScan(err, 0, 0, nil)
 	}
 	if err := repo.MarkProgramScanFinished(ctx, program.ID); err != nil {
-		return finishScanRun(ctx, repo, scanID, err, 0, 0, nil)
+		return finalizeScan(err, 0, 0, nil)
 	}
-	if err := finishScanRun(ctx, repo, scanID, nil, len(steps), 0, map[string]any{
+	if err := finalizeScan(nil, len(steps), 0, map[string]any{
 		"program_id":          program.ID,
 		"handle":              program.Handle,
 		"steps":               len(steps),
