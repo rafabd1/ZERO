@@ -232,6 +232,13 @@ document.addEventListener("DOMContentLoaded", () => {
       hideExplorerProgramSuggestions();
     }
   });
+  $("explorerProgramCombo").addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!$("explorerProgramCombo").contains(document.activeElement)) {
+        hideExplorerProgramSuggestions();
+      }
+    }, 0);
+  });
   document.addEventListener("click", (event) => {
     if (!$("explorerProgramCombo").contains(event.target)) {
       hideExplorerProgramSuggestions();
