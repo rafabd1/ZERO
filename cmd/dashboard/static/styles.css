@@ -815,6 +815,10 @@ dd {
   color: var(--muted);
 }
 
+.hidden {
+  display: none !important;
+}
+
 @media (max-width: 1180px) {
   .metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
