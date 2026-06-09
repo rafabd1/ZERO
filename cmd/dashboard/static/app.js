@@ -11,6 +11,7 @@ const state = {
     rows: [],
     offset: 0,
     limit: 50,
+    programID: "",
     selected: null,
   },
   selectedProgramId: "",
@@ -30,7 +31,6 @@ const explorerTabs = {
     label: "Programs",
     endpoint: "/api/v1/programs",
     active: true,
-    programFilter: false,
     columns: [
       ["Program", (row) => stacked(row.handle || "unknown", `${row.platform || ""} ${row.program_url || ""}`)],
       ["State", (row) => statusPill(row)],
@@ -209,11 +209,34 @@ document.addEventListener("DOMContentLoaded", () => {
       loadExplorerData(true);
     }, 300);
   });
-  $("explorerProgram").addEventListener("change", () => {
-    state.explorer.offset = 0;
-    loadExplorerData(true);
+  $("explorerProgramInput").addEventListener("input", () => {
+    if (!$("explorerProgramInput").value.trim()) {
+      state.explorer.programID = "";
+      state.explorer.offset = 0;
+      loadExplorerData(true);
+    } else {
+      state.explorer.programID = "";
+    }
+    renderExplorerProgramSuggestions(true);
   });
-  $("explorerProgramSearch").addEventListener("input", () => renderExplorerProgramOptions());
+  $("explorerProgramInput").addEventListener("focus", () => renderExplorerProgramSuggestions(true));
+  $("explorerProgramInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      const first = $("explorerProgramSuggestions").querySelector("[data-program-id]");
+      if (first) {
+        event.preventDefault();
+        selectExplorerProgram(first.getAttribute("data-program-id"));
+      }
+    }
+    if (event.key === "Escape") {
+      hideExplorerProgramSuggestions();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (!$("explorerProgramCombo").contains(event.target)) {
+      hideExplorerProgramSuggestions();
+    }
+  });
   $("explorerPlatform").addEventListener("change", () => {
     state.explorer.offset = 0;
     loadExplorerData(true);
@@ -282,7 +305,7 @@ async function loadAll(showLoading = true) {
     state.findings = normalizeArray(valueAt(6, state.findings, "findings"));
     renderGlobalStats();
     renderInventoryOverview();
-    renderExplorerProgramOptions();
+    renderExplorerProgramSuggestions(false);
     renderPrograms();
     renderScans();
     renderDefaultScanProgress();
@@ -430,27 +453,77 @@ function renderExplorerTabs() {
   }
 }
 
-function renderExplorerProgramOptions() {
-  const select = $("explorerProgram");
-  const selected = select.value;
-  const query = $("explorerProgramSearch").value.trim().toLowerCase();
+function renderExplorerProgramSuggestions(open = false) {
+  const input = $("explorerProgramInput");
+  const list = $("explorerProgramSuggestions");
+  const query = input.value.trim().toLowerCase();
   const matches = state.programs
     .slice()
-    .filter((program) => {
-      if (!query) return true;
-      const haystack = `${program.handle || ""} ${program.platform || ""} ${program.program_url || ""}`.toLowerCase();
-      return haystack.includes(query);
-    })
-    .sort((a, b) => String(a.handle || "").localeCompare(String(b.handle || "")));
-  const options = [`<option value="">All programs</option>`].concat(
-    matches.map((program) => `<option value="${escapeHTML(program.id)}">${escapeHTML(program.handle || shortID(program.id))} (${escapeHTML(program.platform || "source")})</option>`)
-  );
-  const selectedProgram = state.programs.find((program) => program.id === selected);
-  if (selected && selectedProgram && !matches.some((program) => program.id === selected)) {
-    options.splice(1, 0, `<option value="${escapeHTML(selectedProgram.id)}">${escapeHTML(selectedProgram.handle || shortID(selectedProgram.id))} (${escapeHTML(selectedProgram.platform || "source")})</option>`);
+    .filter((program) => programMatchesPrefix(program, query))
+    .sort(compareProgramsForQuery(query))
+    .slice(0, 40);
+  if (!open) {
+    hideExplorerProgramSuggestions();
+    return;
   }
-  select.innerHTML = options.join("");
-  select.value = state.programs.some((program) => program.id === selected) ? selected : "";
+  const allRow = `
+    <button class="combo-option" type="button" data-program-id="">
+      <strong>All programs</strong>
+      <small>clear program filter</small>
+    </button>
+  `;
+  const rows = matches.map((program) => `
+    <button class="combo-option" type="button" data-program-id="${escapeHTML(program.id)}">
+      <strong>${escapeHTML(program.handle || shortID(program.id))}</strong>
+      <small>${escapeHTML(program.platform || "source")} ${escapeHTML(program.program_url || "")}</small>
+    </button>
+  `);
+  list.innerHTML = [allRow, ...rows].join("");
+  for (const option of list.querySelectorAll("[data-program-id]")) {
+    option.addEventListener("click", () => selectExplorerProgram(option.getAttribute("data-program-id")));
+  }
+  list.classList.remove("hidden");
+}
+
+function hideExplorerProgramSuggestions() {
+  $("explorerProgramSuggestions").classList.add("hidden");
+}
+
+function selectExplorerProgram(programID) {
+  const program = state.programs.find((item) => item.id === programID);
+  state.explorer.programID = program ? program.id : "";
+  $("explorerProgramInput").value = program ? `${program.handle || shortID(program.id)} (${program.platform || "source"})` : "";
+  hideExplorerProgramSuggestions();
+  state.explorer.offset = 0;
+  loadExplorerData(true);
+}
+
+function programMatchesPrefix(program, query) {
+  if (!query) return true;
+  return programSearchKeys(program).some((key) => key.startsWith(query));
+}
+
+function programSearchKeys(program) {
+  const keys = [program.handle || ""];
+  try {
+    const url = new URL(program.program_url || "http://invalid.local");
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length > 0) keys.push(parts[parts.length - 1]);
+  } catch {
+    // Keep suggestions resilient when a stored URL is malformed.
+  }
+  return keys.map((key) => String(key).toLowerCase()).filter(Boolean);
+}
+
+function compareProgramsForQuery(query) {
+  return (a, b) => {
+    const ah = String(a.handle || "").toLowerCase();
+    const bh = String(b.handle || "").toLowerCase();
+    const ap = query && ah.startsWith(query) ? 0 : 1;
+    const bp = query && bh.startsWith(query) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return ah.localeCompare(bh);
+  };
 }
 
 async function loadExplorerData(showLoading = true) {
@@ -465,14 +538,13 @@ async function loadExplorerData(showLoading = true) {
     params.set("offset", String(state.explorer.offset));
     const query = $("explorerSearch").value.trim();
     if (query) params.set("q", query);
-    const programID = $("explorerProgram").value;
+    const programID = state.explorer.programID;
     if (programID && tab.programFilter !== false) params.set("program_id", programID);
     const platform = $("explorerPlatform").value;
     if (platform && tab.platformFilter !== false) params.set("platform", platform);
     const active = $("explorerActive").value;
     if (tab.active && active !== "all") params.set("active", active);
-    $("explorerProgram").disabled = tab.programFilter === false;
-    $("explorerProgramSearch").disabled = tab.programFilter === false;
+    $("explorerProgramInput").disabled = tab.programFilter === false;
     $("explorerPlatform").disabled = tab.platformFilter === false;
     $("explorerActive").disabled = !tab.active;
     const rows = normalizeArray(await getJSON(`${tab.endpoint}?${params.toString()}`));

@@ -176,6 +176,7 @@ func (s *Server) programs(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
 	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
+	programID := strings.TrimSpace(r.URL.Query().Get("program_id"))
 	rows, err := s.repo.QueryJSONRows(r.Context(), `
 		SELECT jsonb_build_object(
 			'id', p.id,
@@ -239,9 +240,10 @@ func (s *Server) programs(w http.ResponseWriter, r *http.Request) {
 		WHERE ($1 = '' OR p.handle ILIKE '%' || $1 || '%' OR p.platform ILIKE '%' || $1 || '%' OR p.program_url ILIKE '%' || $1 || '%')
 		  AND ($2 = '' OR $2 = 'all' OR ($2 IN ('true','active','1') AND p.active) OR ($2 IN ('false','inactive','0') AND NOT p.active))
 		  AND ($3 = '' OR p.platform = $3)
+		  AND ($4 = '' OR p.id::text = $4)
 		ORDER BY p.platform, p.handle
-		LIMIT $4 OFFSET $5
-	`, q, active, platform, p.Limit, p.Offset)
+		LIMIT $5 OFFSET $6
+	`, q, active, platform, programID, p.Limit, p.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

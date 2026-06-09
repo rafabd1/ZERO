@@ -324,9 +324,68 @@ dt {
 
 .explorer-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) minmax(130px, 170px) minmax(160px, 220px) minmax(180px, 240px) 130px 110px auto;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(130px, 170px) minmax(220px, 300px) 130px 110px auto;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.combo {
+  position: relative;
+  min-width: 0;
+}
+
+.combo input {
+  width: 100%;
+}
+
+.combo-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  overflow: auto;
+  max-height: 280px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0e;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+}
+
+.combo-option {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.combo-option:last-child {
+  border-bottom: 0;
+}
+
+.combo-option:hover,
+.combo-option:focus {
+  background: var(--surface-3);
+}
+
+.combo-option strong,
+.combo-option small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combo-option small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .explorer-table {

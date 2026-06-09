@@ -81,10 +81,10 @@
             <option value="bugcrowd">Bugcrowd</option>
             <option value="intigriti">Intigriti</option>
           </select>
-          <input id="explorerProgramSearch" type="search" placeholder="Filter programs">
-          <select id="explorerProgram" aria-label="Filter explorer by program">
-            <option value="">All programs</option>
-          </select>
+          <div id="explorerProgramCombo" class="combo">
+            <input id="explorerProgramInput" type="search" placeholder="All programs" autocomplete="off" aria-label="Filter explorer by program">
+            <div id="explorerProgramSuggestions" class="combo-list hidden" role="listbox" aria-label="Program suggestions"></div>
+          </div>
           <select id="explorerActive" aria-label="Filter active state">
             <option value="true">Active</option>
             <option value="all">All states</option>
