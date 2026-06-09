@@ -47,72 +47,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
-	s.mux.HandleFunc("GET /v1/programs", s.query(`
-		SELECT jsonb_build_object(
-			'id', id,
-			'platform', platform,
-			'handle', handle,
-			'program_url', program_url,
-			'active', active,
-			'scan_interval_hours', scan_interval_hours,
-			'max_parallel_tasks', max_parallel_tasks,
-			'parallelism_scope', 'reserved; current scheduler uses ZERO_TARGET_PARALLELISM globally',
-			'last_scan_started_at', last_scan_started_at,
-			'last_scan_finished_at', last_scan_finished_at,
-			'is_running', EXISTS (
-				SELECT 1
-				FROM zero_scan_runs sr
-				WHERE sr.program_id = zero_programs.id
-				  AND sr.run_type = 'full'
-				  AND sr.status = 'running'
-			),
-			'running_scan_started_at', (
-				SELECT sr.started_at
-				FROM zero_scan_runs sr
-				WHERE sr.program_id = zero_programs.id
-				  AND sr.run_type = 'full'
-				  AND sr.status = 'running'
-				ORDER BY sr.started_at DESC
-				LIMIT 1
-			),
-			'latest_scan_status', (
-				SELECT sr.status
-				FROM zero_scan_runs sr
-				WHERE sr.program_id = zero_programs.id
-				  AND sr.run_type = 'full'
-				ORDER BY sr.started_at DESC
-				LIMIT 1
-			),
-			'first_seen_at', first_seen_at,
-			'last_seen_at', last_seen_at
-		)
-		FROM zero_programs
-		ORDER BY platform, handle
-	`))
-	s.mux.HandleFunc("GET /v1/assets", s.query(`
-		SELECT jsonb_build_object(
-			'id', a.id,
-			'program_id', a.program_id,
-			'last_scan_run_id', a.last_scan_run_id,
-			'asset_type', a.asset_type,
-			'target_normalized', a.target_normalized,
-			'in_scope', a.in_scope,
-			'eligible_for_bounty', a.eligible_for_bounty,
-			'active', a.active,
-			'first_seen_at', a.first_seen_at,
-			'last_seen_at', a.last_seen_at
-		)
-		FROM zero_scope_assets a
-		WHERE a.active = true
-		ORDER BY a.last_seen_at DESC
-		LIMIT 500
-	`))
+	s.mux.HandleFunc("GET /v1/programs", s.programs)
+	s.mux.HandleFunc("GET /v1/assets", s.scopeAssets(""))
+	s.mux.HandleFunc("GET /v1/scope-assets", s.scopeAssets(""))
+	s.mux.HandleFunc("GET /v1/subdomains", s.subdomains(""))
 	s.mux.HandleFunc("GET /v1/services", s.services(""))
 	s.mux.HandleFunc("GET /v1/technologies", s.technologies(""))
 	s.mux.HandleFunc("GET /v1/technology-vulnerabilities", s.technologyVulnerabilities(""))
+	s.mux.HandleFunc("GET /v1/vulnerabilities", s.vulnerabilityRecords)
 	s.mux.HandleFunc("GET /v1/nuclei-results", s.nucleiResults(""))
 	s.mux.HandleFunc("GET /v1/findings", s.findings(""))
 	s.mux.HandleFunc("GET /v1/reports", s.reports(""))
+	s.mux.HandleFunc("GET /v1/scan-runs", s.scanRuns)
+	s.mux.HandleFunc("GET /v1/inventory/overview", s.inventoryOverview)
 	s.mux.HandleFunc("GET /v1/stats", s.globalStats)
 	s.mux.HandleFunc("GET /v1/reports/latest", s.query(`
 		SELECT jsonb_build_object(
@@ -137,31 +84,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/scans/latest", s.latestScans)
 	s.mux.HandleFunc("GET /v1/scans/{scan_id}", s.scanDetail)
 	s.mux.HandleFunc("GET /v1/scan-requests", s.scanRequests)
-	s.mux.HandleFunc("GET /v1/scan-campaigns", s.query(`
-		SELECT jsonb_build_object(
-			'id', c.id,
-			'name', c.name,
-			'status', c.status,
-			'requested_by', c.requested_by,
-			'run_after', c.run_after,
-			'parallelism', c.parallelism,
-			'total_requests', c.total_requests,
-			'queued_requests', c.queued_requests,
-			'running_requests', c.running_requests,
-			'succeeded_requests', c.succeeded_requests,
-			'failed_requests', c.failed_requests,
-			'params', c.params,
-			'program_filter', c.program_filter,
-			'started_at', c.started_at,
-			'finished_at', c.finished_at,
-			'error', c.error,
-			'created_at', c.created_at,
-			'updated_at', c.updated_at
-		)
-		FROM zero_scan_campaigns c
-		ORDER BY c.created_at DESC
-		LIMIT 100
-	`))
+	s.mux.HandleFunc("GET /v1/scan-campaigns", s.scanCampaigns)
 	s.mux.HandleFunc("GET /v1/scan-campaigns/{campaign_id}", s.scanCampaignDetail)
 	s.mux.HandleFunc("POST /v1/scan-requests", s.createScanRequest)
 	s.mux.HandleFunc("POST /v1/scan-requests/{request_id}/cancel", s.cancelScanRequest)
@@ -223,30 +146,10 @@ func (s *Server) routes() {
 		s.changes(r.PathValue("program_id"))(w, r)
 	})
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/assets", func(w http.ResponseWriter, r *http.Request) {
-		programID := r.PathValue("program_id")
-		rows, err := s.repo.QueryJSONRows(r.Context(), `
-			SELECT jsonb_build_object(
-				'id', a.id,
-				'program_id', a.program_id,
-				'last_scan_run_id', a.last_scan_run_id,
-				'asset_type', a.asset_type,
-				'target_normalized', a.target_normalized,
-				'in_scope', a.in_scope,
-				'eligible_for_bounty', a.eligible_for_bounty,
-				'active', a.active,
-				'first_seen_at', a.first_seen_at,
-				'last_seen_at', a.last_seen_at
-			)
-			FROM zero_scope_assets a
-			WHERE a.program_id = $1::uuid
-			ORDER BY a.last_seen_at DESC
-			LIMIT 500
-		`, programID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeRawJSONArray(w, rows)
+		s.scopeAssets(r.PathValue("program_id"))(w, r)
+	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/subdomains", func(w http.ResponseWriter, r *http.Request) {
+		s.subdomains(r.PathValue("program_id"))(w, r)
 	})
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/services", func(w http.ResponseWriter, r *http.Request) {
 		s.services(r.PathValue("program_id"))(w, r)
@@ -263,6 +166,152 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/programs/{program_id}/findings", func(w http.ResponseWriter, r *http.Request) {
 		s.findings(r.PathValue("program_id"))(w, r)
 	})
+	s.mux.HandleFunc("GET /v1/programs/{program_id}/reports", func(w http.ResponseWriter, r *http.Request) {
+		s.reports(r.PathValue("program_id"))(w, r)
+	})
+}
+
+func (s *Server) programs(w http.ResponseWriter, r *http.Request) {
+	p := listParamsFromRequest(r, 500)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'id', p.id,
+			'platform', p.platform,
+			'handle', p.handle,
+			'program_url', p.program_url,
+			'active', p.active,
+			'scan_interval_hours', p.scan_interval_hours,
+			'max_parallel_tasks', p.max_parallel_tasks,
+			'parallelism_scope', 'reserved; current scheduler uses ZERO_TARGET_PARALLELISM globally',
+			'last_scan_started_at', p.last_scan_started_at,
+			'last_scan_finished_at', p.last_scan_finished_at,
+			'is_running', COALESCE(run_state.is_running, false),
+			'running_scan_started_at', run_state.running_scan_started_at,
+			'latest_scan_status', latest.status,
+			'latest_scan_id', latest.id,
+			'first_seen_at', p.first_seen_at,
+			'last_seen_at', p.last_seen_at,
+			'metadata', p.metadata,
+			'counts', jsonb_build_object(
+				'scope_assets', COALESCE(counts.scope_assets, 0),
+				'in_scope_assets', COALESCE(counts.in_scope_assets, 0),
+				'bounty_assets', COALESCE(counts.bounty_assets, 0),
+				'subdomains', COALESCE(counts.subdomains, 0),
+				'http_services', COALESCE(counts.http_services, 0),
+				'technologies', COALESCE(counts.technologies, 0),
+				'findings', COALESCE(counts.findings, 0),
+				'nuclei_results', COALESCE(counts.nuclei_results, 0),
+				'reports', COALESCE(counts.reports, 0)
+			)
+		)
+		FROM zero_programs p
+		LEFT JOIN LATERAL (
+			SELECT
+				bool_or(sr.status = 'running') AS is_running,
+				max(sr.started_at) FILTER (WHERE sr.status = 'running') AS running_scan_started_at
+			FROM zero_scan_runs sr
+			WHERE sr.program_id = p.id
+			  AND sr.run_type = 'full'
+		) run_state ON true
+		LEFT JOIN LATERAL (
+			SELECT sr.id, sr.status
+			FROM zero_scan_runs sr
+			WHERE sr.program_id = p.id
+			  AND sr.run_type = 'full'
+			ORDER BY sr.started_at DESC
+			LIMIT 1
+		) latest ON true
+		LEFT JOIN LATERAL (
+			SELECT
+				(SELECT count(*) FROM zero_scope_assets a WHERE a.program_id = p.id AND a.active) AS scope_assets,
+				(SELECT count(*) FROM zero_scope_assets a WHERE a.program_id = p.id AND a.active AND a.in_scope) AS in_scope_assets,
+				(SELECT count(*) FROM zero_scope_assets a WHERE a.program_id = p.id AND a.active AND a.eligible_for_bounty) AS bounty_assets,
+				(SELECT count(*) FROM zero_subdomains sd WHERE sd.program_id = p.id AND sd.active) AS subdomains,
+				(SELECT count(*) FROM zero_http_services hs WHERE hs.program_id = p.id AND hs.active) AS http_services,
+				(SELECT count(*) FROM zero_technology_observations t WHERE t.program_id = p.id AND t.active) AS technologies,
+				(SELECT count(*) FROM zero_candidate_findings f WHERE f.program_id = p.id) AS findings,
+				(SELECT count(*) FROM zero_nuclei_results n WHERE n.program_id = p.id) AS nuclei_results,
+				(SELECT count(*) FROM zero_reports rp WHERE rp.program_id = p.id) AS reports
+		) counts ON true
+		WHERE ($1 = '' OR p.handle ILIKE '%' || $1 || '%' OR p.platform ILIKE '%' || $1 || '%' OR p.program_url ILIKE '%' || $1 || '%')
+		  AND ($2 = '' OR $2 = 'all' OR ($2 IN ('true','active','1') AND p.active) OR ($2 IN ('false','inactive','0') AND NOT p.active))
+		ORDER BY p.platform, p.handle
+		LIMIT $3 OFFSET $4
+	`, q, active, p.Limit, p.Offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeRawJSONArray(w, rows)
+}
+
+func (s *Server) inventoryOverview(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'generated_at', now(),
+			'tables', jsonb_build_object(
+				'programs', (SELECT count(*) FROM zero_programs),
+				'scope_assets', (SELECT count(*) FROM zero_scope_assets),
+				'subdomains', (SELECT count(*) FROM zero_subdomains),
+				'http_services', (SELECT count(*) FROM zero_http_services),
+				'technology_observations', (SELECT count(*) FROM zero_technology_observations),
+				'vulnerability_records', (SELECT count(*) FROM zero_vulnerability_records),
+				'technology_vulnerability_matches', (SELECT count(*) FROM zero_technology_vulnerability_matches),
+				'nuclei_results', (SELECT count(*) FROM zero_nuclei_results),
+				'candidate_findings', (SELECT count(*) FROM zero_candidate_findings),
+				'reports', (SELECT count(*) FROM zero_reports),
+				'scan_runs', (SELECT count(*) FROM zero_scan_runs),
+				'scan_requests', (SELECT count(*) FROM zero_scan_requests),
+				'scan_campaigns', (SELECT count(*) FROM zero_scan_campaigns),
+				'change_events', (SELECT count(*) FROM zero_change_events),
+				'discord_notifications', (SELECT count(*) FROM zero_discord_notifications)
+			),
+			'active_inventory', jsonb_build_object(
+				'programs', (SELECT count(*) FROM zero_programs WHERE active),
+				'scope_assets', (SELECT count(*) FROM zero_scope_assets WHERE active),
+				'in_scope_assets', (SELECT count(*) FROM zero_scope_assets WHERE active AND in_scope),
+				'bounty_assets', (SELECT count(*) FROM zero_scope_assets WHERE active AND eligible_for_bounty),
+				'subdomains', (SELECT count(*) FROM zero_subdomains WHERE active),
+				'resolved_subdomains', (SELECT count(*) FROM zero_subdomains WHERE active AND COALESCE(resolves, true)),
+				'http_services', (SELECT count(*) FROM zero_http_services WHERE active),
+				'technologies', (SELECT count(*) FROM zero_technology_observations WHERE active)
+			),
+			'top_programs_by_services', COALESCE((
+				SELECT jsonb_agg(row ORDER BY total DESC)
+				FROM (
+					SELECT jsonb_build_object('program_id', p.id, 'platform', p.platform, 'handle', p.handle, 'total', count(*)::int) AS row, count(*) AS total
+					FROM zero_http_services h
+					JOIN zero_programs p ON p.id = h.program_id
+					WHERE h.active
+					GROUP BY p.id, p.platform, p.handle
+					ORDER BY count(*) DESC
+					LIMIT 10
+				) x
+			), '[]'::jsonb),
+			'top_technologies', COALESCE((
+				SELECT jsonb_agg(row ORDER BY total DESC)
+				FROM (
+					SELECT jsonb_build_object('name', name, 'source', source, 'total', count(*)::int) AS row, count(*) AS total
+					FROM zero_technology_observations
+					WHERE active
+					GROUP BY name, source
+					ORDER BY count(*) DESC
+					LIMIT 20
+				) x
+			), '[]'::jsonb)
+		)
+	`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusNotFound, "inventory overview not found")
+		return
+	}
+	writeRawJSON(w, rows[0])
 }
 
 func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
@@ -484,6 +533,7 @@ func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 	p := listParamsFromRequest(r, 100)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	campaignID := strings.TrimSpace(r.URL.Query().Get("campaign_id"))
 	programID := strings.TrimSpace(r.URL.Query().Get("program_id"))
@@ -491,6 +541,8 @@ func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 		SELECT jsonb_build_object(
 			'id', r.id,
 			'program_id', r.program_id,
+			'program_handle', COALESCE(p.handle, ''),
+			'program_platform', COALESCE(p.platform, ''),
 			'campaign_id', r.campaign_id,
 			'name', r.name,
 			'status', r.status,
@@ -512,13 +564,55 @@ func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 			'updated_at', r.updated_at
 		)
 		FROM zero_scan_requests r
+		LEFT JOIN zero_programs p ON p.id = r.program_id
 		WHERE ($1 = '' OR r.status = $1)
 		  AND ($2 = '' OR r.campaign_id::text = $2)
 		  AND ($3 = '' OR r.program_id::text = $3)
-		  AND (NULLIF($4, '') IS NULL OR r.created_at > NULLIF($4, '')::timestamptz)
+		  AND ($4 = '' OR r.name ILIKE '%' || $4 || '%' OR r.status ILIKE '%' || $4 || '%' OR r.error ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%')
+		  AND (NULLIF($5, '') IS NULL OR r.created_at > NULLIF($5, '')::timestamptz)
 		ORDER BY r.created_at DESC
-		LIMIT $5 OFFSET $6
-	`, status, campaignID, programID, p.Since, p.Limit, p.Offset)
+		LIMIT $6 OFFSET $7
+	`, status, campaignID, programID, q, p.Since, p.Limit, p.Offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeRawJSONArray(w, rows)
+}
+
+func (s *Server) scanCampaigns(w http.ResponseWriter, r *http.Request) {
+	p := listParamsFromRequest(r, 100)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'id', c.id,
+			'name', c.name,
+			'status', c.status,
+			'requested_by', c.requested_by,
+			'run_after', c.run_after,
+			'parallelism', c.parallelism,
+			'total_requests', c.total_requests,
+			'queued_requests', c.queued_requests,
+			'running_requests', c.running_requests,
+			'succeeded_requests', c.succeeded_requests,
+			'failed_requests', c.failed_requests,
+			'canceled_requests', c.canceled_requests,
+			'params', c.params,
+			'program_filter', c.program_filter,
+			'started_at', c.started_at,
+			'finished_at', c.finished_at,
+			'error', c.error,
+			'created_at', c.created_at,
+			'updated_at', c.updated_at
+		)
+		FROM zero_scan_campaigns c
+		WHERE ($1 = '' OR c.status = $1)
+		  AND ($2 = '' OR c.name ILIKE '%' || $2 || '%' OR c.requested_by ILIKE '%' || $2 || '%' OR c.error ILIKE '%' || $2 || '%')
+		  AND (NULLIF($3, '') IS NULL OR c.created_at > NULLIF($3, '')::timestamptz)
+		ORDER BY c.created_at DESC
+		LIMIT $4 OFFSET $5
+	`, status, q, p.Since, p.Limit, p.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1419,31 +1513,145 @@ func (s *Server) scanDetail(w http.ResponseWriter, r *http.Request) {
 	writeRawJSON(w, rows[0])
 }
 
-func (s *Server) services(programID string) http.HandlerFunc {
+func (s *Server) scopeAssets(programID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
 		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
+		inScope := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("in_scope")))
+		bounty := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("eligible_for_bounty")))
+		assetType := strings.TrimSpace(r.URL.Query().Get("asset_type"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
-				'id', s.id,
-				'program_id', s.program_id,
-				'last_scan_run_id', s.last_scan_run_id,
-				'url', s.url,
-				'host', s.host,
-				'status_code', s.status_code,
-				'title', s.title,
-				'webserver', s.webserver,
-				'technologies', s.technologies,
-				'first_seen_at', s.first_seen_at,
-				'last_seen_at', s.last_seen_at
+				'id', a.id,
+				'program_id', a.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
+				'last_scan_run_id', a.last_scan_run_id,
+				'platform', a.platform,
+				'handle', a.handle,
+				'asset_type', a.asset_type,
+				'target_raw', a.target_raw,
+				'target_normalized', a.target_normalized,
+				'description', a.description,
+				'in_scope', a.in_scope,
+				'eligible_for_bounty', a.eligible_for_bounty,
+				'active', a.active,
+				'source', a.source,
+				'metadata', a.metadata,
+				'first_seen_at', a.first_seen_at,
+				'last_seen_at', a.last_seen_at
 			)
-			FROM zero_http_services s
-			WHERE s.active = true
-			  AND ($1 = '' OR s.program_id::text = $1)
-			  AND ($2 = '' OR s.host ILIKE '%' || $2 || '%' OR s.url ILIKE '%' || $2 || '%')
-			  AND (NULLIF($3, '') IS NULL OR s.last_seen_at > NULLIF($3, '')::timestamptz)
-			ORDER BY s.last_seen_at DESC
-			LIMIT $4 OFFSET $5
-		`, programID, strings.TrimSpace(r.URL.Query().Get("q")), p.Since, p.Limit, p.Offset)
+			FROM zero_scope_assets a
+			LEFT JOIN zero_programs p ON p.id = a.program_id
+			WHERE ($1 = '' OR a.program_id::text = $1)
+			  AND ($2 = '' OR a.target_normalized ILIKE '%' || $2 || '%' OR a.target_raw ILIKE '%' || $2 || '%' OR a.description ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
+			  AND ($3 = '' OR $3 = 'all' OR ($3 IN ('true','active','1') AND a.active) OR ($3 IN ('false','inactive','0') AND NOT a.active))
+			  AND ($4 = '' OR $4 = 'all' OR ($4 IN ('true','1') AND a.in_scope) OR ($4 IN ('false','0') AND NOT a.in_scope))
+			  AND ($5 = '' OR $5 = 'all' OR ($5 IN ('true','1') AND a.eligible_for_bounty) OR ($5 IN ('false','0') AND NOT a.eligible_for_bounty))
+			  AND ($6 = '' OR a.asset_type = $6)
+			  AND (NULLIF($7, '') IS NULL OR a.last_seen_at > NULLIF($7, '')::timestamptz)
+			ORDER BY a.last_seen_at DESC
+			LIMIT $8 OFFSET $9
+		`, programID, q, active, inScope, bounty, assetType, p.Since, p.Limit, p.Offset)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	}
+}
+
+func (s *Server) subdomains(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
+		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
+		resolves := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("resolves")))
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', sd.id,
+				'program_id', sd.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
+				'scope_asset_id', sd.scope_asset_id,
+				'last_scan_run_id', sd.last_scan_run_id,
+				'root_domain', sd.root_domain,
+				'fqdn', sd.fqdn,
+				'source', sd.source,
+				'resolves', sd.resolves,
+				'active', sd.active,
+				'metadata', sd.metadata,
+				'first_seen_at', sd.first_seen_at,
+				'last_seen_at', sd.last_seen_at,
+				'service_count', COALESCE(hs.service_count, 0)
+			)
+			FROM zero_subdomains sd
+			LEFT JOIN zero_programs p ON p.id = sd.program_id
+			LEFT JOIN LATERAL (
+				SELECT count(*)::int AS service_count
+				FROM zero_http_services h
+				WHERE h.subdomain_id = sd.id
+				  AND h.active
+			) hs ON true
+			WHERE ($1 = '' OR sd.program_id::text = $1)
+			  AND ($2 = '' OR sd.fqdn ILIKE '%' || $2 || '%' OR sd.root_domain ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
+			  AND ($3 = '' OR $3 = 'all' OR ($3 IN ('true','active','1') AND sd.active) OR ($3 IN ('false','inactive','0') AND NOT sd.active))
+			  AND ($4 = '' OR $4 = 'all' OR ($4 IN ('true','1') AND sd.resolves IS TRUE) OR ($4 IN ('false','0') AND sd.resolves IS FALSE) OR ($4 = 'unknown' AND sd.resolves IS NULL))
+			  AND (NULLIF($5, '') IS NULL OR sd.last_seen_at > NULLIF($5, '')::timestamptz)
+			ORDER BY sd.last_seen_at DESC
+			LIMIT $6 OFFSET $7
+		`, programID, q, active, resolves, p.Since, p.Limit, p.Offset)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+	}
+}
+
+func (s *Server) services(programID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
+		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
+		statusCode := queryInt(r, "status_code", 0)
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			SELECT jsonb_build_object(
+				'id', h.id,
+				'program_id', h.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
+				'subdomain_id', h.subdomain_id,
+				'last_scan_run_id', h.last_scan_run_id,
+				'url', h.url,
+				'scheme', h.scheme,
+				'host', h.host,
+				'port', h.port,
+				'status_code', h.status_code,
+				'title', h.title,
+				'webserver', h.webserver,
+				'technologies', h.technologies,
+				'favicon_hash', h.favicon_hash,
+				'tls', h.tls,
+				'raw', h.raw,
+				'active', h.active,
+				'first_seen_at', h.first_seen_at,
+				'last_seen_at', h.last_seen_at
+			)
+			FROM zero_http_services h
+			LEFT JOIN zero_programs p ON p.id = h.program_id
+			WHERE ($1 = '' OR h.program_id::text = $1)
+			  AND ($2 = '' OR h.host ILIKE '%' || $2 || '%' OR h.url ILIKE '%' || $2 || '%' OR h.title ILIKE '%' || $2 || '%' OR h.webserver ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
+			  AND ($3 = '' OR $3 = 'all' OR ($3 IN ('true','active','1') AND h.active) OR ($3 IN ('false','inactive','0') AND NOT h.active))
+			  AND ($4 = 0 OR h.status_code = $4)
+			  AND (NULLIF($5, '') IS NULL OR h.last_seen_at > NULLIF($5, '')::timestamptz)
+			ORDER BY h.last_seen_at DESC
+			LIMIT $6 OFFSET $7
+		`, programID, q, active, statusCode, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1454,31 +1662,45 @@ func (s *Server) services(programID string) http.HandlerFunc {
 
 func (s *Server) nucleiResults(programID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
 		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', n.id,
 				'program_id', n.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
 				'scan_run_id', n.scan_run_id,
 				'http_service_id', n.http_service_id,
+				'service_url', COALESCE(h.url, ''),
+				'service_host', COALESCE(h.host, ''),
 				'template_id', n.template_id,
+				'template_path', n.template_path,
 				'target_source', n.target_source,
 				'target_id', n.target_id,
 				'matched_at', n.matched_at,
 				'severity', n.severity,
 				'cves', n.cves,
 				'tags', n.tags,
+				'type', n.type,
+				'extractor_name', n.extractor_name,
+				'evidence_hash', n.evidence_hash,
+				'raw', n.raw,
 				'first_seen_at', n.first_seen_at,
 				'last_seen_at', n.last_seen_at
 			)
 			FROM zero_nuclei_results n
+			LEFT JOIN zero_programs p ON p.id = n.program_id
+			LEFT JOIN zero_http_services h ON h.id = n.http_service_id
 			WHERE ($1 = '' OR n.program_id::text = $1)
 			  AND ($2 = '' OR n.severity = $2)
 			  AND ($3 = '' OR n.template_id = $3)
-			  AND (NULLIF($4, '') IS NULL OR n.first_seen_at > NULLIF($4, '')::timestamptz)
+			  AND ($4 = '' OR n.template_id ILIKE '%' || $4 || '%' OR n.matched_at ILIKE '%' || $4 || '%' OR n.template_path ILIKE '%' || $4 || '%' OR h.url ILIKE '%' || $4 || '%' OR h.host ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%' OR $4 = ANY(n.cves) OR $4 = ANY(n.tags))
+			  AND (NULLIF($5, '') IS NULL OR n.first_seen_at > NULLIF($5, '')::timestamptz)
 			ORDER BY n.first_seen_at DESC
-			LIMIT $5 OFFSET $6
-		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), strings.TrimSpace(r.URL.Query().Get("template_id")), p.Since, p.Limit, p.Offset)
+			LIMIT $6 OFFSET $7
+		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), strings.TrimSpace(r.URL.Query().Get("template_id")), q, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1489,11 +1711,15 @@ func (s *Server) nucleiResults(programID string) http.HandlerFunc {
 
 func (s *Server) findings(programID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
 		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', f.id,
 				'program_id', f.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
 				'http_service_id', f.http_service_id,
 				'service_url', COALESCE(s.url, ''),
 				'service_host', COALESCE(s.host, ''),
@@ -1501,9 +1727,13 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 				'service_title', COALESCE(s.title, ''),
 				'service_webserver', COALESCE(s.webserver, ''),
 				'nuclei_result_id', f.nuclei_result_id,
+				'vulnerability_id', COALESCE(v.vuln_id, ''),
+				'technology_name', f.technology_name,
+				'technology_version', f.technology_version,
 				'severity', f.severity,
 				'confidence', f.confidence,
 				'status', f.status,
+				'evidence_hash', f.evidence_hash,
 				'evidence', f.evidence,
 				'report_id', f.report_id,
 				'first_seen_at', f.first_seen_at,
@@ -1511,14 +1741,17 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 			)
 			FROM zero_candidate_findings f
 			LEFT JOIN zero_http_services s ON s.id = f.http_service_id
+			LEFT JOIN zero_programs p ON p.id = f.program_id
+			LEFT JOIN zero_vulnerability_records v ON v.id = f.vulnerability_id
 			WHERE ($1 = '' OR f.program_id::text = $1)
 			  AND ($2 = '' OR f.status = $2)
 			  AND ($3 = '' OR f.severity = $3)
 			  AND ($4 = 0 OR f.confidence >= $4)
-			  AND (NULLIF($5, '') IS NULL OR f.first_seen_at > NULLIF($5, '')::timestamptz)
+			  AND ($5 = '' OR f.technology_name ILIKE '%' || $5 || '%' OR f.technology_version ILIKE '%' || $5 || '%' OR f.severity ILIKE '%' || $5 || '%' OR s.url ILIKE '%' || $5 || '%' OR s.host ILIKE '%' || $5 || '%' OR p.handle ILIKE '%' || $5 || '%' OR v.vuln_id ILIKE '%' || $5 || '%')
+			  AND (NULLIF($6, '') IS NULL OR f.first_seen_at > NULLIF($6, '')::timestamptz)
 			ORDER BY f.first_seen_at DESC
-			LIMIT $6 OFFSET $7
-		`, programID, strings.TrimSpace(r.URL.Query().Get("status")), strings.TrimSpace(r.URL.Query().Get("severity")), queryInt(r, "min_confidence", 0), p.Since, p.Limit, p.Offset)
+			LIMIT $7 OFFSET $8
+		`, programID, strings.TrimSpace(r.URL.Query().Get("status")), strings.TrimSpace(r.URL.Query().Get("severity")), queryInt(r, "min_confidence", 0), q, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1529,27 +1762,34 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 
 func (s *Server) reports(programID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
 		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', r.id,
 				'program_id', r.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
 				'scan_run_id', r.scan_run_id,
 				'report_key', r.report_key,
 				'title', r.title,
 				'severity', r.severity,
 				'confidence', r.confidence,
+				'body_markdown', CASE WHEN $3 THEN r.body_markdown ELSE '' END,
 				'finding_ids', r.finding_ids,
 				'created_at', r.created_at,
 				'metadata', r.metadata
 			)
 			FROM zero_reports r
+			LEFT JOIN zero_programs p ON p.id = r.program_id
 			WHERE ($1 = '' OR r.program_id::text = $1)
 			  AND ($2 = '' OR r.severity = $2)
-			  AND (NULLIF($3, '') IS NULL OR r.created_at > NULLIF($3, '')::timestamptz)
+			  AND ($4 = '' OR r.report_key ILIKE '%' || $4 || '%' OR r.title ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%')
+			  AND (NULLIF($5, '') IS NULL OR r.created_at > NULLIF($5, '')::timestamptz)
 			ORDER BY r.created_at DESC
-			LIMIT $4 OFFSET $5
-		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), p.Since, p.Limit, p.Offset)
+			LIMIT $6 OFFSET $7
+		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), queryBool(r, "include_body", false), q, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1558,13 +1798,68 @@ func (s *Server) reports(programID string) http.HandlerFunc {
 	}
 }
 
+func (s *Server) scanRuns(w http.ResponseWriter, r *http.Request) {
+	p := listParamsFromRequest(r, 500)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	runType := strings.TrimSpace(r.URL.Query().Get("run_type"))
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	programID := strings.TrimSpace(r.URL.Query().Get("program_id"))
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'id', sr.id,
+			'program_id', sr.program_id,
+			'program_handle', COALESCE(p.handle, ''),
+			'program_platform', COALESCE(p.platform, ''),
+			'default_scan_cycle_id', sr.default_scan_cycle_id,
+			'parent_scan_run_id', sr.parent_scan_run_id,
+			'scan_request_id', sr.scan_request_id,
+			'scan_campaign_id', sr.scan_campaign_id,
+			'run_type', sr.run_type,
+			'status', sr.status,
+			'started_at', sr.started_at,
+			'finished_at', sr.finished_at,
+			'worker_id', sr.worker_id,
+			'input_count', sr.input_count,
+			'inserted_count', sr.inserted_count,
+			'updated_count', sr.updated_count,
+			'unchanged_count', sr.unchanged_count,
+			'error', sr.error,
+			'stats', sr.stats
+		)
+		FROM zero_scan_runs sr
+		LEFT JOIN zero_programs p ON p.id = sr.program_id
+		WHERE ($1 = '' OR sr.program_id::text = $1)
+		  AND ($2 = '' OR sr.run_type = $2)
+		  AND ($3 = '' OR sr.status = $3)
+		  AND ($4 = '' OR p.handle ILIKE '%' || $4 || '%' OR sr.run_type ILIKE '%' || $4 || '%' OR sr.status ILIKE '%' || $4 || '%' OR sr.error ILIKE '%' || $4 || '%')
+		  AND (NULLIF($5, '') IS NULL OR sr.started_at > NULLIF($5, '')::timestamptz)
+		ORDER BY sr.started_at DESC
+		LIMIT $6 OFFSET $7
+	`, programID, runType, status, q, p.Since, p.Limit, p.Offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeRawJSONArray(w, rows)
+}
+
 func (s *Server) technologies(programID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
+		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
+		source := strings.TrimSpace(r.URL.Query().Get("source"))
+		versioned := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("versioned")))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', t.id,
 				'program_id', t.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
 				'http_service_id', t.http_service_id,
+				'service_url', COALESCE(h.url, ''),
+				'service_host', COALESCE(h.host, ''),
 				'last_scan_run_id', t.last_scan_run_id,
 				'name', t.name,
 				'version', t.version,
@@ -1576,11 +1871,17 @@ func (s *Server) technologies(programID string) http.HandlerFunc {
 				'last_seen_at', t.last_seen_at
 			)
 			FROM zero_technology_observations t
+			LEFT JOIN zero_programs p ON p.id = t.program_id
+			LEFT JOIN zero_http_services h ON h.id = t.http_service_id
 			WHERE ($1 = '' OR t.program_id::text = $1)
-			  AND t.active = true
+			  AND ($2 = '' OR t.name ILIKE '%' || $2 || '%' OR t.version ILIKE '%' || $2 || '%' OR t.source ILIKE '%' || $2 || '%' OR h.url ILIKE '%' || $2 || '%' OR h.host ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
+			  AND ($3 = '' OR $3 = 'all' OR ($3 IN ('true','active','1') AND t.active) OR ($3 IN ('false','inactive','0') AND NOT t.active))
+			  AND ($4 = '' OR t.source = $4)
+			  AND ($5 = '' OR $5 = 'all' OR ($5 IN ('true','1') AND t.version <> '') OR ($5 IN ('false','0') AND t.version = ''))
+			  AND (NULLIF($6, '') IS NULL OR t.last_seen_at > NULLIF($6, '')::timestamptz)
 			ORDER BY t.last_seen_at DESC
-			LIMIT 500
-		`, programID)
+			LIMIT $7 OFFSET $8
+		`, programID, q, active, source, versioned, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1591,10 +1892,20 @@ func (s *Server) technologies(programID string) http.HandlerFunc {
 
 func (s *Server) technologyVulnerabilities(programID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		programID = effectiveProgramID(programID, r)
+		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		severity := strings.TrimSpace(r.URL.Query().Get("severity"))
+		minConfidence := queryInt(r, "min_confidence", 0)
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', m.id,
 				'program_id', m.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
+				'http_service_id', m.http_service_id,
+				'service_url', COALESCE(h.url, ''),
+				'service_host', COALESCE(h.host, ''),
 				'vulnerability_id', v.vuln_id,
 				'technology_name', m.technology_name,
 				'technology_version', m.technology_version,
@@ -1611,16 +1922,67 @@ func (s *Server) technologyVulnerabilities(programID string) http.HandlerFunc {
 			)
 			FROM zero_technology_vulnerability_matches m
 			JOIN zero_vulnerability_records v ON v.id = m.vulnerability_id
+			LEFT JOIN zero_programs p ON p.id = m.program_id
+			LEFT JOIN zero_http_services h ON h.id = m.http_service_id
 			WHERE ($1 = '' OR m.program_id::text = $1)
+			  AND ($2 = '' OR m.technology_name ILIKE '%' || $2 || '%' OR m.technology_version ILIKE '%' || $2 || '%' OR v.vuln_id ILIKE '%' || $2 || '%' OR v.summary ILIKE '%' || $2 || '%' OR h.url ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
+			  AND ($3 = '' OR v.severity = $3)
+			  AND ($4 = 0 OR m.confidence >= $4)
+			  AND (NULLIF($5, '') IS NULL OR m.last_seen_at > NULLIF($5, '')::timestamptz)
 			ORDER BY m.last_seen_at DESC, m.confidence DESC
-			LIMIT 500
-		`, programID)
+			LIMIT $6 OFFSET $7
+		`, programID, q, severity, minConfidence, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeRawJSONArray(w, rows)
 	}
+}
+
+func (s *Server) vulnerabilityRecords(w http.ResponseWriter, r *http.Request) {
+	p := listParamsFromRequest(r, 500)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	severity := strings.TrimSpace(r.URL.Query().Get("severity"))
+	rows, err := s.repo.QueryJSONRows(r.Context(), `
+		SELECT jsonb_build_object(
+			'id', v.id,
+			'vuln_id', v.vuln_id,
+			'source', v.source,
+			'summary', v.summary,
+			'severity', v.severity,
+			'cvss_score', v.cvss_score,
+			'published_at', v.published_at,
+			'modified_at', v.modified_at,
+			'references', v.references_json,
+			'raw', v.raw,
+			'first_seen_at', v.first_seen_at,
+			'last_seen_at', v.last_seen_at,
+			'match_count', COALESCE(matches.match_count, 0),
+			'finding_count', COALESCE(findings.finding_count, 0)
+		)
+		FROM zero_vulnerability_records v
+		LEFT JOIN LATERAL (
+			SELECT count(*)::int AS match_count
+			FROM zero_technology_vulnerability_matches m
+			WHERE m.vulnerability_id = v.id
+		) matches ON true
+		LEFT JOIN LATERAL (
+			SELECT count(*)::int AS finding_count
+			FROM zero_candidate_findings f
+			WHERE f.vulnerability_id = v.id
+		) findings ON true
+		WHERE ($1 = '' OR v.vuln_id ILIKE '%' || $1 || '%' OR v.summary ILIKE '%' || $1 || '%' OR v.source ILIKE '%' || $1 || '%')
+		  AND ($2 = '' OR v.severity = $2)
+		  AND (NULLIF($3, '') IS NULL OR v.last_seen_at > NULLIF($3, '')::timestamptz)
+		ORDER BY v.last_seen_at DESC
+		LIMIT $4 OFFSET $5
+	`, q, severity, p.Since, p.Limit, p.Offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeRawJSONArray(w, rows)
 }
 
 type listParams struct {
@@ -1648,6 +2010,13 @@ func listParamsFromRequest(r *http.Request, defaultLimit int) listParams {
 	}
 }
 
+func effectiveProgramID(pathProgramID string, r *http.Request) string {
+	if strings.TrimSpace(pathProgramID) != "" {
+		return strings.TrimSpace(pathProgramID)
+	}
+	return strings.TrimSpace(r.URL.Query().Get("program_id"))
+}
+
 func queryInt(r *http.Request, name string, fallback int) int {
 	raw := strings.TrimSpace(r.URL.Query().Get(name))
 	if raw == "" {
@@ -1658,6 +2027,21 @@ func queryInt(r *http.Request, name string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func queryBool(r *http.Request, name string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(name)))
+	if raw == "" {
+		return fallback
+	}
+	switch raw {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func (s *Server) createScanRequest(w http.ResponseWriter, r *http.Request) {
@@ -1771,11 +2155,17 @@ func parseRunAfter(value string) (time.Time, error) {
 
 func (s *Server) changes(programID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		since := strings.TrimSpace(r.URL.Query().Get("since"))
+		programID = effectiveProgramID(programID, r)
+		p := listParamsFromRequest(r, 500)
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		entityType := strings.TrimSpace(r.URL.Query().Get("entity_type"))
+		changeType := strings.TrimSpace(r.URL.Query().Get("change_type"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', c.id,
 				'program_id', c.program_id,
+				'program_handle', COALESCE(p.handle, ''),
+				'program_platform', COALESCE(p.platform, ''),
 				'scan_run_id', c.scan_run_id,
 				'entity_type', c.entity_type,
 				'entity_id', c.entity_id,
@@ -1786,11 +2176,15 @@ func (s *Server) changes(programID string) http.HandlerFunc {
 				'occurred_at', c.occurred_at
 			)
 			FROM zero_change_events c
+			LEFT JOIN zero_programs p ON p.id = c.program_id
 			WHERE ($1 = '' OR c.program_id::text = $1)
-			  AND (NULLIF($2, '') IS NULL OR c.occurred_at > NULLIF($2, '')::timestamptz)
+			  AND ($2 = '' OR c.entity_type = $2)
+			  AND ($3 = '' OR c.change_type = $3)
+			  AND ($4 = '' OR c.entity_key ILIKE '%' || $4 || '%' OR c.entity_type ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%')
+			  AND (NULLIF($5, '') IS NULL OR c.occurred_at > NULLIF($5, '')::timestamptz)
 			ORDER BY c.occurred_at DESC
-			LIMIT 500
-		`, programID, since)
+			LIMIT $6 OFFSET $7
+		`, programID, entityType, changeType, q, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

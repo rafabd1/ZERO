@@ -1,10 +1,18 @@
 const state = {
   stats: null,
+  inventoryOverview: null,
   programs: [],
   defaultScans: [],
   scans: [],
   campaigns: [],
   findings: [],
+  explorer: {
+    tab: "programs",
+    rows: [],
+    offset: 0,
+    limit: 50,
+    selected: null,
+  },
   selectedProgramId: "",
   selectedDefaultScanId: "",
   selectedDefaultScanDetail: null,
@@ -15,6 +23,171 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
+let explorerSearchTimer = null;
+
+const explorerTabs = {
+  programs: {
+    label: "Programs",
+    endpoint: "/api/v1/programs",
+    active: true,
+    programFilter: false,
+    columns: [
+      ["Program", (row) => stacked(row.handle || "unknown", `${row.platform || ""} ${row.program_url || ""}`)],
+      ["State", (row) => statusPill(row)],
+      ["Inventory", (row) => `${fmt(row.active_http_services)} services, ${fmt(row.active_technologies)} tech`],
+      ["Findings", (row) => fmt(row.findings)],
+      ["Updated", (row) => timeAgo(row.updated_at || row.last_scan_finished_at)],
+    ],
+  },
+  scope: {
+    label: "Scopes",
+    endpoint: "/api/v1/scope-assets",
+    active: true,
+    columns: [
+      ["Target", (row) => stacked(row.target_normalized || row.target_raw || "-", row.description || row.asset_type || "")],
+      ["Program", (row) => stacked(row.program_handle || shortID(row.program_id), row.program_platform || "")],
+      ["Scope", (row) => `${row.in_scope ? "in" : "out"} scope, ${row.eligible_for_bounty ? "bounty" : "no bounty"}`],
+      ["Type", (row) => row.asset_type || "-"],
+      ["Updated", (row) => timeAgo(row.last_seen_at || row.updated_at)],
+    ],
+  },
+  subdomains: {
+    label: "Subdomains",
+    endpoint: "/api/v1/subdomains",
+    active: true,
+    columns: [
+      ["Host", (row) => stacked(row.fqdn || "-", row.root_domain || row.source || "")],
+      ["Program", (row) => stacked(row.program_handle || shortID(row.program_id), row.program_platform || "")],
+      ["DNS", (row) => row.resolves ? `<span class="pill good">resolves</span>` : `<span class="pill">no dns</span>`],
+      ["Services", (row) => fmt(row.service_count)],
+      ["Updated", (row) => timeAgo(row.last_seen_at || row.updated_at)],
+    ],
+  },
+  services: {
+    label: "Services",
+    endpoint: "/api/v1/services",
+    active: true,
+    columns: [
+      ["Service", (row) => stacked(row.url || "-", row.host || row.title || "")],
+      ["Program", (row) => stacked(row.program_handle || shortID(row.program_id), row.program_platform || "")],
+      ["HTTP", (row) => `${row.status_code || "-"} ${row.scheme || ""}`],
+      ["Server", (row) => row.webserver || "-"],
+      ["Tech", (row) => compactList(row.technologies)],
+    ],
+  },
+  technologies: {
+    label: "Technologies",
+    endpoint: "/api/v1/technologies",
+    active: true,
+    columns: [
+      ["Technology", (row) => stacked(row.name || "-", row.version || "")],
+      ["Program", (row) => stacked(row.program_handle || shortID(row.program_id), row.program_platform || "")],
+      ["Service", (row) => stacked(row.service_url || "-", row.service_host || "")],
+      ["Source", (row) => row.source || "-"],
+      ["Updated", (row) => timeAgo(row.last_seen_at || row.updated_at)],
+    ],
+  },
+  cves: {
+    label: "CVEs",
+    endpoint: "/api/v1/vulnerabilities",
+    columns: [
+      ["CVE", (row) => stacked(row.id || "-", row.source || "")],
+      ["Severity", (row) => severityPill(row.severity)],
+      ["CVSS", (row) => row.cvss_score || "-"],
+      ["Matches", (row) => `${fmt(row.match_count)} tech, ${fmt(row.finding_count)} findings`],
+      ["Updated", (row) => timeAgo(row.last_seen_at)],
+    ],
+  },
+  matches: {
+    label: "CVE Matches",
+    endpoint: "/api/v1/technology-vulnerabilities",
+    columns: [
+      ["CVE", (row) => stacked(row.vulnerability_id || "-", row.cve_summary || "")],
+      ["Technology", (row) => stacked(row.technology_name || "-", row.technology_version || "")],
+      ["Program", (row) => stacked(row.program_handle || shortID(row.program_id), row.service_url || "")],
+      ["Confidence", (row) => fmt(row.confidence)],
+      ["Severity", (row) => severityPill(row.severity)],
+    ],
+  },
+  nuclei: {
+    label: "Nuclei",
+    endpoint: "/api/v1/nuclei-results",
+    columns: [
+      ["Template", (row) => stacked(row.template_id || shortID(row.id), compactList(row.cves || row.tags))],
+      ["Severity", (row) => severityPill(row.severity)],
+      ["Target", (row) => stacked(row.matched_at || row.service_url || "-", row.service_host || "")],
+      ["Program", (row) => row.program_handle || shortID(row.program_id) || "-"],
+      ["Seen", (row) => timeAgo(row.first_seen_at)],
+    ],
+  },
+  findings: {
+    label: "Findings",
+    endpoint: "/api/v1/findings",
+    columns: [
+      ["Finding", (row) => stacked(row.vulnerability_id || shortID(row.id), row.technology_name || "")],
+      ["Severity", (row) => severityPill(row.severity)],
+      ["Target", (row) => stacked(row.service_url || "-", row.service_host || "")],
+      ["Program", (row) => row.program_handle || shortID(row.program_id) || "-"],
+      ["Confidence", (row) => fmt(row.confidence)],
+    ],
+  },
+  reports: {
+    label: "Reports",
+    endpoint: "/api/v1/reports",
+    columns: [
+      ["Report", (row) => stacked(row.title || shortID(row.id), row.status || "")],
+      ["Severity", (row) => severityPill(row.severity)],
+      ["Program", (row) => row.program_handle || shortID(row.program_id) || "-"],
+      ["Confidence", (row) => fmt(row.confidence)],
+      ["Created", (row) => timeAgo(row.created_at)],
+    ],
+  },
+  scans: {
+    label: "Scan Runs",
+    endpoint: "/api/v1/scan-runs",
+    columns: [
+      ["Program", (row) => stacked(row.program_handle || shortID(row.program_id) || "-", row.program_platform || row.run_type || "")],
+      ["Type", (row) => row.run_type || "-"],
+      ["Status", (row) => scanStatusPill(row.status)],
+      ["Stats", (row) => scanStatsSummary(row)],
+      ["Updated", (row) => timeAgo(row.finished_at || row.started_at)],
+    ],
+  },
+  campaigns: {
+    label: "Campaigns",
+    endpoint: "/api/v1/scan-campaigns",
+    programFilter: false,
+    columns: [
+      ["Campaign", (row) => stacked(row.name || shortID(row.id) || "-", row.requested_by || "")],
+      ["Status", (row) => scanStatusPill(row.status)],
+      ["Progress", (row) => campaignProgress(row)],
+      ["Parallelism", (row) => fmt(row.parallelism)],
+      ["Updated", (row) => timeAgo(row.updated_at || row.created_at)],
+    ],
+  },
+  requests: {
+    label: "Requests",
+    endpoint: "/api/v1/scan-requests",
+    columns: [
+      ["Request", (row) => stacked(row.name || shortID(row.id) || "-", row.program_handle || shortID(row.program_id) || "")],
+      ["Status", (row) => scanStatusPill(row.status)],
+      ["Progress", (row) => requestProgressSummary(row)],
+      ["Attempts", (row) => fmt(row.attempt_count)],
+      ["Updated", (row) => timeAgo(row.updated_at || row.created_at)],
+    ],
+  },
+  changes: {
+    label: "Changes",
+    endpoint: "/api/v1/changes",
+    columns: [
+      ["Change", (row) => stacked(row.entity_type || "-", row.entity_key || shortID(row.entity_id) || "")],
+      ["Type", (row) => row.change_type || "-"],
+      ["Program", (row) => row.program_handle || shortID(row.program_id) || "-"],
+      ["Scan", (row) => shortID(row.scan_run_id) || "-"],
+      ["Seen", (row) => timeAgo(row.created_at)],
+    ],
+  },
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   $("refreshButton").addEventListener("click", () => loadAll());
@@ -25,6 +198,37 @@ document.addEventListener("DOMContentLoaded", () => {
   $("closeCampaignDetail").addEventListener("click", () => clearCampaignDetail());
   $("cancelCampaignButton").addEventListener("click", () => cancelSelectedCampaign());
   $("closeFindingDetail").addEventListener("click", () => clearFindingDetail());
+  $("closeExplorerDetail").addEventListener("click", () => clearExplorerDetail());
+  $("explorerRefresh").addEventListener("click", () => loadExplorerData(true));
+  $("explorerSearch").addEventListener("input", () => {
+    clearTimeout(explorerSearchTimer);
+    explorerSearchTimer = setTimeout(() => {
+      state.explorer.offset = 0;
+      loadExplorerData(true);
+    }, 300);
+  });
+  $("explorerProgram").addEventListener("change", () => {
+    state.explorer.offset = 0;
+    loadExplorerData(true);
+  });
+  $("explorerActive").addEventListener("change", () => {
+    state.explorer.offset = 0;
+    loadExplorerData(true);
+  });
+  $("explorerLimit").addEventListener("change", () => {
+    state.explorer.limit = Number($("explorerLimit").value || 50);
+    state.explorer.offset = 0;
+    loadExplorerData(true);
+  });
+  $("explorerPrev").addEventListener("click", () => {
+    state.explorer.offset = Math.max(0, state.explorer.offset - state.explorer.limit);
+    loadExplorerData(true);
+  });
+  $("explorerNext").addEventListener("click", () => {
+    state.explorer.offset += state.explorer.limit;
+    loadExplorerData(true);
+  });
+  renderExplorerTabs();
   configureAutoRefresh();
   loadAll();
 });
@@ -46,6 +250,7 @@ async function loadAll(showLoading = true) {
   try {
     const results = await Promise.allSettled([
       getJSON("/api/v1/stats"),
+      getJSON("/api/v1/inventory/overview"),
       getJSON("/api/v1/programs"),
       getJSON("/api/v1/default-scans?limit=100"),
       getJSON("/api/v1/scans/latest?run_type=full&limit=100"),
@@ -62,17 +267,21 @@ async function loadAll(showLoading = true) {
       return fallback;
     };
     state.stats = valueAt(0, state.stats, "stats");
-    state.programs = normalizeArray(valueAt(1, state.programs, "programs"));
-    state.defaultScans = normalizeArray(valueAt(2, state.defaultScans, "default scans"));
-    state.scans = normalizeArray(valueAt(3, state.scans, "latest scans"));
-    state.campaigns = normalizeArray(valueAt(4, state.campaigns, "campaigns"));
-    state.findings = normalizeArray(valueAt(5, state.findings, "findings"));
+    state.inventoryOverview = valueAt(1, state.inventoryOverview, "inventory overview");
+    state.programs = normalizeArray(valueAt(2, state.programs, "programs"));
+    state.defaultScans = normalizeArray(valueAt(3, state.defaultScans, "default scans"));
+    state.scans = normalizeArray(valueAt(4, state.scans, "latest scans"));
+    state.campaigns = normalizeArray(valueAt(5, state.campaigns, "campaigns"));
+    state.findings = normalizeArray(valueAt(6, state.findings, "findings"));
     renderGlobalStats();
+    renderInventoryOverview();
+    renderExplorerProgramOptions();
     renderPrograms();
     renderScans();
     renderDefaultScanProgress();
     renderCampaigns();
     renderFindings();
+    await loadExplorerData(false);
     if (state.selectedDefaultScanId) {
       const scan = state.defaultScans.find((item) => item.id === state.selectedDefaultScanId);
       if (scan) {
@@ -163,6 +372,170 @@ function renderGlobalStats() {
   const coverage = active > 0 ? Math.round((scanned / active) * 100) : 0;
   $("coverageBar").style.width = `${Math.max(0, Math.min(coverage, 100))}%`;
   setText("coverageLabel", `${coverage}% of active programs scanned`);
+}
+
+function renderInventoryOverview() {
+  const overview = state.inventoryOverview || {};
+  const tables = overview.tables || {};
+  const active = overview.active_inventory || {};
+  const topPrograms = Array.isArray(overview.top_programs_by_services) ? overview.top_programs_by_services : [];
+  const topTech = Array.isArray(overview.top_technologies) ? overview.top_technologies : [];
+  const chips = [
+    ["Programs", tables.programs, `${fmt(active.programs)} active`],
+    ["Scope Assets", tables.scope_assets, `${fmt(active.scope_assets)} active`],
+    ["Subdomains", tables.subdomains, `${fmt(active.subdomains)} active`],
+    ["HTTP Services", tables.http_services, `${fmt(active.http_services)} active`],
+    ["Technologies", tables.technology_observations, `${fmt(active.technologies)} active`],
+    ["Findings", tables.candidate_findings, `${fmt(tables.reports)} reports`],
+    ["Nuclei", tables.nuclei_results, "validation rows"],
+    ["Scan Runs", tables.scan_runs, "pipeline history"],
+  ];
+  $("inventoryTables").innerHTML = chips.map(([label, value, note]) => `
+    <div class="inventory-chip">
+      <span>${escapeHTML(label)}</span>
+      <strong>${fmt(value)}</strong>
+      <small>${escapeHTML(note || "")}</small>
+    </div>
+  `).join("");
+  const hints = [
+    topPrograms.length ? `Top services: ${topPrograms.slice(0, 3).map((row) => `${row.handle || shortID(row.id)} ${fmt(row.total)}`).join(", ")}` : "",
+    topTech.length ? `Top tech: ${topTech.slice(0, 4).map((row) => `${row.name} ${fmt(row.total)}`).join(", ")}` : "",
+  ].filter(Boolean).join(" | ");
+  setText("explorerCount", hints || "Inventory snapshot");
+}
+
+function renderExplorerTabs() {
+  const container = $("explorerTabs");
+  container.innerHTML = Object.entries(explorerTabs).map(([key, tab]) => `
+    <button class="tab-button ${key === state.explorer.tab ? "active" : ""}" type="button" data-explorer-tab="${escapeHTML(key)}">
+      ${escapeHTML(tab.label)}
+    </button>
+  `).join("");
+  for (const button of container.querySelectorAll("[data-explorer-tab]")) {
+    button.addEventListener("click", () => {
+      state.explorer.tab = button.getAttribute("data-explorer-tab");
+      state.explorer.offset = 0;
+      state.explorer.rows = [];
+      clearExplorerDetail();
+      renderExplorerTabs();
+      loadExplorerData(true);
+    });
+  }
+}
+
+function renderExplorerProgramOptions() {
+  const select = $("explorerProgram");
+  const selected = select.value;
+  const options = [`<option value="">All programs</option>`].concat(
+    state.programs
+      .slice()
+      .sort((a, b) => String(a.handle || "").localeCompare(String(b.handle || "")))
+      .map((program) => `<option value="${escapeHTML(program.id)}">${escapeHTML(program.handle || shortID(program.id))}</option>`)
+  );
+  select.innerHTML = options.join("");
+  select.value = state.programs.some((program) => program.id === selected) ? selected : "";
+}
+
+async function loadExplorerData(showLoading = true) {
+  const tab = explorerTabs[state.explorer.tab] || explorerTabs.programs;
+  state.explorer.limit = Number($("explorerLimit").value || state.explorer.limit || 50);
+  if (showLoading) {
+    setText("explorerCount", "Loading data...");
+  }
+  try {
+    const params = new URLSearchParams();
+    params.set("limit", String(state.explorer.limit));
+    params.set("offset", String(state.explorer.offset));
+    const query = $("explorerSearch").value.trim();
+    if (query) params.set("q", query);
+    const programID = $("explorerProgram").value;
+    if (programID && tab.programFilter !== false) params.set("program_id", programID);
+    const active = $("explorerActive").value;
+    if (tab.active && active !== "all") params.set("active", active);
+    $("explorerProgram").disabled = tab.programFilter === false;
+    $("explorerActive").disabled = !tab.active;
+    const rows = normalizeArray(await getJSON(`${tab.endpoint}?${params.toString()}`));
+    state.explorer.rows = rows;
+    renderExplorer();
+    setText("explorerCount", `${fmt(rows.length)} rows loaded`);
+  } catch (error) {
+    state.explorer.rows = [];
+    renderExplorer();
+    setText("explorerCount", `Error: ${error.message}`);
+  }
+}
+
+function renderExplorer() {
+  const tab = explorerTabs[state.explorer.tab] || explorerTabs.programs;
+  $("explorerHead").innerHTML = tab.columns.map(([label]) => `<th>${escapeHTML(label)}</th>`).join("");
+  const tbody = $("explorerRows");
+  tbody.innerHTML = "";
+  for (const row of state.explorer.rows) {
+    const tr = document.createElement("tr");
+    if (state.explorer.selected && row.id === state.explorer.selected.id) {
+      tr.className = "selected";
+    }
+    tr.addEventListener("click", () => renderExplorerDetail(row));
+    tr.innerHTML = tab.columns.map(([, render]) => `<td>${render(row)}</td>`).join("");
+    tbody.appendChild(tr);
+  }
+  if (state.explorer.rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${tab.columns.length}" class="muted">No records match the current filters.</td></tr>`;
+  }
+  const page = Math.floor(state.explorer.offset / state.explorer.limit) + 1;
+  setText("explorerPage", `Page ${fmt(page)} | offset ${fmt(state.explorer.offset)}`);
+  $("explorerPrev").disabled = state.explorer.offset <= 0;
+  $("explorerNext").disabled = state.explorer.rows.length < state.explorer.limit;
+}
+
+function renderExplorerDetail(row) {
+  state.explorer.selected = row;
+  renderExplorer();
+  const tab = explorerTabs[state.explorer.tab] || explorerTabs.programs;
+  const title = explorerRecordTitle(row);
+  const summary = explorerRecordSummary(row);
+  $("explorerDetailPanel").classList.remove("hidden");
+  setText("explorerDetailTitle", title);
+  setText("explorerDetailMeta", `${tab.label} | ${shortID(row.id) || "record"} | ${timeAgo(row.updated_at || row.last_seen_at || row.created_at || row.first_seen_at)}`);
+  $("explorerDetailBody").innerHTML = `
+    <div class="record-summary">
+      ${summary.map(([label, value]) => detailCard(label, escapeHTML(value || "-"))).join("")}
+    </div>
+    <pre class="json-box">${escapeHTML(JSON.stringify(row, null, 2))}</pre>
+  `;
+}
+
+function clearExplorerDetail() {
+  state.explorer.selected = null;
+  $("explorerDetailPanel").classList.add("hidden");
+  if ($("explorerRows")) {
+    renderExplorer();
+  }
+}
+
+function explorerRecordTitle(row) {
+  return firstNonEmpty(
+    row.handle,
+    row.target_normalized,
+    row.fqdn,
+    row.url,
+    row.name,
+    row.vulnerability_id,
+    row.template_id,
+    row.title,
+    row.entity_key,
+    shortID(row.id),
+    "Record Detail"
+  );
+}
+
+function explorerRecordSummary(row) {
+  return [
+    ["Program", firstNonEmpty(row.program_handle, shortID(row.program_id), row.platform)],
+    ["Target", firstNonEmpty(row.url, row.service_url, row.matched_at, row.fqdn, row.target_normalized, row.host)],
+    ["State", firstNonEmpty(row.status, row.active === undefined ? "" : row.active ? "active" : "inactive", row.resolves === undefined ? "" : row.resolves ? "resolves" : "no dns")],
+    ["Updated", firstNonEmpty(row.updated_at, row.last_seen_at, row.created_at, row.first_seen_at)],
+  ];
 }
 
 function renderPrograms() {
@@ -840,6 +1213,18 @@ function detailCard(label, value, note = "") {
       <small>${escapeHTML(note || "")}</small>
     </div>
   `;
+}
+
+function stacked(primary, secondary = "") {
+  return `<strong>${escapeHTML(primary || "-")}</strong><small>${escapeHTML(secondary || "")}</small>`;
+}
+
+function compactList(value, max = 3) {
+  const items = asList(value);
+  if (items.length === 0) return "-";
+  const visible = items.slice(0, max).join(", ");
+  const suffix = items.length > max ? ` +${items.length - max}` : "";
+  return escapeHTML(`${visible}${suffix}`);
 }
 
 function renderCountPills(counts) {

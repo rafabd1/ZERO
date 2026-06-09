@@ -68,6 +68,55 @@
 
       <section class="band">
         <div class="section-title">
+          <h2>Data Explorer</h2>
+          <span id="explorerCount">-</span>
+        </div>
+        <div id="inventoryTables" class="inventory-strip"></div>
+        <div id="explorerTabs" class="tabs" role="tablist" aria-label="Stored data views"></div>
+        <div class="explorer-filters">
+          <input id="explorerSearch" type="search" placeholder="Search stored data">
+          <select id="explorerProgram" aria-label="Filter explorer by program">
+            <option value="">All programs</option>
+          </select>
+          <select id="explorerActive" aria-label="Filter active state">
+            <option value="true">Active</option>
+            <option value="all">All states</option>
+            <option value="false">Inactive</option>
+          </select>
+          <select id="explorerLimit" aria-label="Rows per page">
+            <option value="50">50 rows</option>
+            <option value="100">100 rows</option>
+            <option value="250">250 rows</option>
+          </select>
+          <button id="explorerRefresh" class="ghost-button" type="button">Load</button>
+        </div>
+        <div class="table-wrap explorer-table">
+          <table>
+            <thead>
+              <tr id="explorerHead"></tr>
+            </thead>
+            <tbody id="explorerRows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button id="explorerPrev" class="ghost-button" type="button">Prev</button>
+          <span id="explorerPage">Page 1</span>
+          <button id="explorerNext" class="ghost-button" type="button">Next</button>
+        </div>
+        <div id="explorerDetailPanel" class="detail-drawer hidden">
+          <div class="drawer-head">
+            <div>
+              <h3 id="explorerDetailTitle">Record Detail</h3>
+              <p id="explorerDetailMeta">Select a row.</p>
+            </div>
+            <button id="closeExplorerDetail" class="ghost-button" type="button">Close</button>
+          </div>
+          <div id="explorerDetailBody"></div>
+        </div>
+      </section>
+
+      <section class="band">
+        <div class="section-title">
           <h2>Default Scan Progress</h2>
           <span id="defaultScanCount">-</span>
         </div>

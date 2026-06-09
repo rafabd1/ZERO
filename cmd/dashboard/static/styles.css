@@ -271,6 +271,83 @@ dt {
   width: 154px;
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.tab-button {
+  height: 32px;
+  padding: 0 11px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tab-button.active {
+  border-color: rgba(78, 198, 154, 0.7);
+  background: #183d31;
+  color: #7ee5bc;
+}
+
+.inventory-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.inventory-chip {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-3);
+}
+
+.inventory-chip span {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 740;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.inventory-chip strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 18px;
+}
+
+.explorer-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) 130px 110px auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.explorer-table {
+  max-height: 520px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.pager span {
+  min-width: 86px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .table-wrap {
   overflow: auto;
   max-height: 620px;
@@ -645,6 +722,13 @@ dd {
   white-space: pre-wrap;
 }
 
+.record-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
 .compact-kv {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -680,6 +764,15 @@ dd {
   .layout,
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .inventory-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .explorer-filters,
+  .record-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -720,7 +813,10 @@ dd {
 
   .drawer-grid,
   .compact-kv,
-  .mini-row {
+  .mini-row,
+  .inventory-strip,
+  .explorer-filters,
+  .record-summary {
     grid-template-columns: 1fr;
   }
 
