@@ -25,6 +25,8 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 let explorerSearchTimer = null;
+const EXPLORER_SEARCH_DEBOUNCE_MS = 600;
+const EXPLORER_SEARCH_MIN_CHARS = 2;
 
 const explorerTabs = {
   programs: {
@@ -207,7 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
     explorerSearchTimer = setTimeout(() => {
       state.explorer.offset = 0;
       loadExplorerData(true);
-    }, 300);
+    }, EXPLORER_SEARCH_DEBOUNCE_MS);
   });
   $("explorerProgramInput").addEventListener("input", () => {
     if (!$("explorerProgramInput").value.trim()) {
@@ -288,7 +290,7 @@ async function loadAll(showLoading = true) {
     const results = await Promise.allSettled([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/inventory/overview"),
-      getJSON("/api/v1/programs?limit=1000"),
+      getJSON("/api/v1/programs?limit=1000&compact=true"),
       getJSON("/api/v1/default-scans?limit=100"),
       getJSON("/api/v1/scans/latest?run_type=full&limit=100"),
       getJSON("/api/v1/scan-campaigns"),
@@ -318,7 +320,7 @@ async function loadAll(showLoading = true) {
     renderDefaultScanProgress();
     renderCampaigns();
     renderFindings();
-    await loadExplorerData(false);
+    loadExplorerData(false);
     if (state.selectedDefaultScanId) {
       const scan = state.defaultScans.find((item) => item.id === state.selectedDefaultScanId);
       if (scan) {
@@ -543,7 +545,8 @@ async function loadExplorerData(showLoading = true) {
     const params = new URLSearchParams();
     params.set("limit", String(state.explorer.limit));
     params.set("offset", String(state.explorer.offset));
-    const query = $("explorerSearch").value.trim();
+    const rawQuery = $("explorerSearch").value.trim();
+    const query = rawQuery.length >= EXPLORER_SEARCH_MIN_CHARS ? rawQuery : "";
     if (query) params.set("q", query);
     const programID = state.explorer.programID;
     if (programID && tab.programFilter !== false) params.set("program_id", programID);
@@ -557,7 +560,8 @@ async function loadExplorerData(showLoading = true) {
     const rows = normalizeArray(await getJSON(`${tab.endpoint}?${params.toString()}`));
     state.explorer.rows = rows;
     renderExplorer();
-    setText("explorerCount", `${fmt(rows.length)} rows loaded`);
+    const hint = rawQuery && !query ? `; type ${EXPLORER_SEARCH_MIN_CHARS}+ chars to search` : "";
+    setText("explorerCount", `${fmt(rows.length)} rows loaded${hint}`);
   } catch (error) {
     state.explorer.rows = [];
     renderExplorer();

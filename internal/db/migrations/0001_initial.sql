@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS zero_programs (
 
 CREATE INDEX IF NOT EXISTS idx_zero_programs_due
 	ON zero_programs(active, last_scan_finished_at, scan_interval_hours);
+CREATE INDEX IF NOT EXISTS idx_zero_programs_platform_handle
+	ON zero_programs(platform, handle);
 CREATE INDEX IF NOT EXISTS idx_zero_programs_campaign_order
 	ON zero_programs(last_scan_finished_at ASC NULLS FIRST, last_seen_at DESC, platform, handle)
 	WHERE active = true;
@@ -250,6 +252,10 @@ CREATE INDEX IF NOT EXISTS idx_zero_scope_assets_program
 	ON zero_scope_assets(program_id, active, in_scope, asset_type);
 CREATE INDEX IF NOT EXISTS idx_zero_scope_assets_target
 	ON zero_scope_assets(target_normalized);
+CREATE INDEX IF NOT EXISTS idx_zero_scope_assets_active_seen
+	ON zero_scope_assets(active, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_scope_assets_platform_seen
+	ON zero_scope_assets(platform, active, last_seen_at DESC);
 
 CREATE TABLE IF NOT EXISTS zero_subdomains (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -271,6 +277,8 @@ CREATE INDEX IF NOT EXISTS idx_zero_subdomains_program_root
 	ON zero_subdomains(program_id, root_domain);
 CREATE INDEX IF NOT EXISTS idx_zero_subdomains_fqdn
 	ON zero_subdomains(fqdn);
+CREATE INDEX IF NOT EXISTS idx_zero_subdomains_active_seen
+	ON zero_subdomains(active, last_seen_at DESC);
 
 CREATE TABLE IF NOT EXISTS zero_http_services (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -298,6 +306,12 @@ CREATE INDEX IF NOT EXISTS idx_zero_http_services_program_host
 	ON zero_http_services(program_id, host);
 CREATE INDEX IF NOT EXISTS idx_zero_http_services_technologies
 	ON zero_http_services USING gin(technologies);
+CREATE INDEX IF NOT EXISTS idx_zero_http_services_active_seen
+	ON zero_http_services(active, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_http_services_program_active_seen
+	ON zero_http_services(program_id, active, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_http_services_subdomain_active
+	ON zero_http_services(subdomain_id, active);
 
 CREATE TABLE IF NOT EXISTS zero_technology_observations (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -318,6 +332,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_zero_technology_observations_unique
 	ON zero_technology_observations(http_service_id, lower(name), version, source);
 CREATE INDEX IF NOT EXISTS idx_zero_technology_observations_program
 	ON zero_technology_observations(program_id, lower(name), version);
+CREATE INDEX IF NOT EXISTS idx_zero_technology_observations_active_seen
+	ON zero_technology_observations(active, last_seen_at DESC);
 ALTER TABLE zero_technology_observations
 	ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;
 
@@ -416,6 +432,11 @@ CREATE TABLE IF NOT EXISTS zero_candidate_findings (
 
 CREATE INDEX IF NOT EXISTS idx_zero_candidate_findings_program_status
 	ON zero_candidate_findings(program_id, status, severity, confidence);
+CREATE INDEX IF NOT EXISTS idx_zero_candidate_findings_seen
+	ON zero_candidate_findings(first_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_candidate_findings_nuclei
+	ON zero_candidate_findings(nuclei_result_id)
+	WHERE nuclei_result_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS zero_change_events (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -450,6 +471,11 @@ CREATE TABLE IF NOT EXISTS zero_reports (
 	created_at timestamptz NOT NULL DEFAULT now(),
 	metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
+
+CREATE INDEX IF NOT EXISTS idx_zero_reports_program_created
+	ON zero_reports(program_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_reports_created
+	ON zero_reports(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS zero_discord_notifications (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

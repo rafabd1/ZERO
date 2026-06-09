@@ -7,15 +7,23 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rafabd1/ZERO/internal/db"
 )
 
 type Server struct {
-	repo  *db.Repository
-	token string
-	mux   *http.ServeMux
+	repo    *db.Repository
+	token   string
+	mux     *http.ServeMux
+	cacheMu sync.Mutex
+	cache   map[string]cachedJSON
+}
+
+type cachedJSON struct {
+	body    json.RawMessage
+	expires time.Time
 }
 
 func NewServer(repo *db.Repository, token string) *Server {
@@ -23,6 +31,7 @@ func NewServer(repo *db.Repository, token string) *Server {
 		repo:  repo,
 		token: token,
 		mux:   http.NewServeMux(),
+		cache: map[string]cachedJSON{},
 	}
 	s.routes()
 	s.recoverStagingScanCampaigns()
@@ -178,6 +187,98 @@ func (s *Server) programs(w http.ResponseWriter, r *http.Request) {
 	active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
 	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 	programID := strings.TrimSpace(r.URL.Query().Get("program_id"))
+	if queryBool(r, "compact", false) {
+		if q == "" && active == "" && platform == "" && programID == "" {
+			rows, err := s.repo.QueryJSONRows(r.Context(), `
+				WITH filtered AS MATERIALIZED (
+					SELECT p.*
+					FROM zero_programs p
+					ORDER BY p.platform, p.handle
+					LIMIT $1 OFFSET $2
+				), running_full AS (
+					SELECT
+						sr.program_id,
+						max(sr.started_at) AS running_scan_started_at
+					FROM zero_scan_runs sr
+					JOIN filtered p ON p.id = sr.program_id
+					WHERE sr.run_type = 'full'
+					  AND sr.status = 'running'
+					GROUP BY sr.program_id
+				)
+				SELECT jsonb_build_object(
+					'id', p.id,
+					'platform', p.platform,
+					'handle', p.handle,
+					'program_url', p.program_url,
+					'active', p.active,
+					'scan_interval_hours', p.scan_interval_hours,
+					'last_scan_started_at', p.last_scan_started_at,
+					'last_scan_finished_at', p.last_scan_finished_at,
+					'is_running', running_full.program_id IS NOT NULL,
+					'running_scan_started_at', running_full.running_scan_started_at,
+					'latest_scan_status', CASE WHEN running_full.program_id IS NOT NULL THEN 'running' ELSE '' END,
+					'latest_scan_id', '',
+					'first_seen_at', p.first_seen_at,
+					'last_seen_at', p.last_seen_at
+				)
+				FROM filtered p
+				LEFT JOIN running_full ON running_full.program_id = p.id
+				ORDER BY p.platform, p.handle
+			`, p.Limit, p.Offset)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeRawJSONArray(w, rows)
+			return
+		}
+		rows, err := s.repo.QueryJSONRows(r.Context(), `
+			WITH filtered AS MATERIALIZED (
+				SELECT p.*
+				FROM zero_programs p
+				WHERE ($1 = '' OR p.handle ILIKE '%' || $1 || '%' OR p.platform ILIKE '%' || $1 || '%' OR p.program_url ILIKE '%' || $1 || '%')
+				  AND ($2 = '' OR $2 = 'all' OR ($2 IN ('true','active','1') AND p.active) OR ($2 IN ('false','inactive','0') AND NOT p.active))
+				  AND ($3 = '' OR p.platform = $3)
+				  AND ($4 = '' OR p.id::text = $4)
+				ORDER BY p.platform, p.handle
+				LIMIT $5 OFFSET $6
+			), running_full AS (
+				SELECT
+					sr.program_id,
+					max(sr.started_at) AS running_scan_started_at
+				FROM zero_scan_runs sr
+				JOIN filtered p ON p.id = sr.program_id
+				WHERE sr.run_type = 'full'
+				  AND sr.status = 'running'
+				GROUP BY sr.program_id
+			)
+			SELECT jsonb_build_object(
+				'id', p.id,
+				'platform', p.platform,
+				'handle', p.handle,
+				'program_url', p.program_url,
+				'active', p.active,
+				'scan_interval_hours', p.scan_interval_hours,
+				'last_scan_started_at', p.last_scan_started_at,
+				'last_scan_finished_at', p.last_scan_finished_at,
+				'is_running', running_full.program_id IS NOT NULL,
+				'running_scan_started_at', running_full.running_scan_started_at,
+				'latest_scan_status', CASE WHEN running_full.program_id IS NOT NULL THEN 'running' ELSE '' END,
+				'latest_scan_id', '',
+				'first_seen_at', p.first_seen_at,
+				'last_seen_at', p.last_seen_at
+			)
+			FROM filtered p
+			LEFT JOIN running_full ON running_full.program_id = p.id
+			ORDER BY p.platform, p.handle
+		`, q, active, platform, programID, p.Limit, p.Offset)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeRawJSONArray(w, rows)
+		return
+	}
 	rows, err := s.repo.QueryJSONRows(r.Context(), `
 		SELECT jsonb_build_object(
 			'id', p.id,
@@ -253,7 +354,7 @@ func (s *Server) programs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) inventoryOverview(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.repo.QueryJSONRows(r.Context(), `
+	s.cachedJSONRow(w, r, "inventory-overview", 30*time.Second, `
 		SELECT jsonb_build_object(
 			'generated_at', now(),
 			'tables', jsonb_build_object(
@@ -308,19 +409,10 @@ func (s *Server) inventoryOverview(w http.ResponseWriter, r *http.Request) {
 			), '[]'::jsonb)
 		)
 	`)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if len(rows) == 0 {
-		writeError(w, http.StatusNotFound, "inventory overview not found")
-		return
-	}
-	writeRawJSON(w, rows[0])
 }
 
 func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.repo.QueryJSONRows(r.Context(), `
+	s.cachedJSONRow(w, r, "global-stats", 20*time.Second, `
 		SELECT jsonb_build_object(
 			'programs', jsonb_build_object(
 				'total', count(*),
@@ -395,15 +487,6 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 		)
 		FROM zero_programs
 	`)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if len(rows) == 0 {
-		writeError(w, http.StatusNotFound, "stats not found")
-		return
-	}
-	writeRawJSON(w, rows[0])
 }
 
 func (s *Server) programStats(w http.ResponseWriter, r *http.Request) {
@@ -1581,6 +1664,51 @@ func (s *Server) subdomains(programID string) http.HandlerFunc {
 		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
 		resolves := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("resolves")))
 		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
+		if q == "" && programID == "" && platform == "" && resolves == "" && p.Since == "" && isTruthyFilter(active) {
+			rows, err := s.repo.QueryJSONRows(r.Context(), `
+				WITH page AS MATERIALIZED (
+					SELECT *
+					FROM zero_subdomains
+					WHERE active
+					ORDER BY last_seen_at DESC
+					LIMIT $1 OFFSET $2
+				),
+				service_counts AS (
+					SELECT h.subdomain_id, count(*)::int AS service_count
+					FROM zero_http_services h
+					JOIN page sd ON sd.id = h.subdomain_id
+					WHERE h.active
+					GROUP BY h.subdomain_id
+				)
+				SELECT jsonb_build_object(
+					'id', sd.id,
+					'program_id', sd.program_id,
+					'program_handle', COALESCE(p.handle, ''),
+					'program_platform', COALESCE(p.platform, ''),
+					'scope_asset_id', sd.scope_asset_id,
+					'last_scan_run_id', sd.last_scan_run_id,
+					'root_domain', sd.root_domain,
+					'fqdn', sd.fqdn,
+					'source', sd.source,
+					'resolves', sd.resolves,
+					'active', sd.active,
+					'metadata', sd.metadata,
+					'first_seen_at', sd.first_seen_at,
+					'last_seen_at', sd.last_seen_at,
+					'service_count', COALESCE(hs.service_count, 0)
+				)
+				FROM page sd
+				LEFT JOIN zero_programs p ON p.id = sd.program_id
+				LEFT JOIN service_counts hs ON hs.subdomain_id = sd.id
+				ORDER BY sd.last_seen_at DESC
+			`, p.Limit, p.Offset)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeRawJSONArray(w, rows)
+			return
+		}
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', sd.id,
@@ -2043,6 +2171,15 @@ func effectiveProgramID(pathProgramID string, r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("program_id"))
 }
 
+func isTruthyFilter(value string) bool {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "true", "active", "1", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func queryInt(r *http.Request, name string, fallback int) int {
 	raw := strings.TrimSpace(r.URL.Query().Get(name))
 	if raw == "" {
@@ -2262,6 +2399,33 @@ func (s *Server) query(sql string) http.HandlerFunc {
 		}
 		writeRawJSONArray(w, rows)
 	}
+}
+
+func (s *Server) cachedJSONRow(w http.ResponseWriter, r *http.Request, key string, ttl time.Duration, sql string, args ...any) {
+	now := time.Now()
+	s.cacheMu.Lock()
+	if item, ok := s.cache[key]; ok && now.Before(item.expires) {
+		body := append(json.RawMessage(nil), item.body...)
+		s.cacheMu.Unlock()
+		writeRawJSON(w, body)
+		return
+	}
+	s.cacheMu.Unlock()
+
+	rows, err := s.repo.QueryJSONRows(r.Context(), sql, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusNotFound, "record not found")
+		return
+	}
+	body := append(json.RawMessage(nil), rows[0]...)
+	s.cacheMu.Lock()
+	s.cache[key] = cachedJSON{body: body, expires: now.Add(ttl)}
+	s.cacheMu.Unlock()
+	writeRawJSON(w, body)
 }
 
 func writeRawJSONArray(w http.ResponseWriter, rows []json.RawMessage) {
