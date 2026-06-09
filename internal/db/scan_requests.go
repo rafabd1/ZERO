@@ -44,9 +44,9 @@ func (r *Repository) CreateScanCampaign(ctx context.Context, name, requestedBy s
 	if parallelism > 32 {
 		parallelism = 32
 	}
-	programs, err := r.ListProgramsForCampaign(ctx, dueOnly, limit)
-	if err != nil {
-		return ScanCampaignCreateResult{}, err
+	queryLimit := limit
+	if queryLimit <= 0 {
+		queryLimit = 100000
 	}
 	raw, err := json.Marshal(params)
 	if err != nil {
@@ -60,62 +60,268 @@ func (r *Repository) CreateScanCampaign(ctx context.Context, name, requestedBy s
 		return ScanCampaignCreateResult{}, fmt.Errorf("marshal scan campaign filter: %w", err)
 	}
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return ScanCampaignCreateResult{}, fmt.Errorf("begin scan campaign: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
 	var id string
-	err = tx.QueryRow(ctx, `
-		INSERT INTO zero_scan_campaigns(
-			name, requested_by, run_after, parallelism, params, program_filter, total_requests, queued_requests
-		)
-		VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$7)
-		RETURNING id::text
-	`, name, requestedBy, runAfter, parallelism, string(raw), string(filterRaw), len(programs)).Scan(&id)
-	if err != nil {
-		return ScanCampaignCreateResult{}, fmt.Errorf("create scan campaign: %w", err)
-	}
-
-	for _, program := range programs {
-		childParams, err := scanCampaignChildParams(raw, program.ID)
-		if err != nil {
-			return ScanCampaignCreateResult{}, err
-		}
-		_, err = tx.Exec(ctx, `
+	var total, queued int
+	err = r.pool.QueryRow(ctx, `
+		WITH selected_programs AS MATERIALIZED (
+			SELECT id
+			FROM zero_programs
+			WHERE active = true
+			  AND (
+				$7 = false
+				OR last_scan_finished_at IS NULL
+				OR last_scan_finished_at <= now() - make_interval(hours => scan_interval_hours)
+			  )
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = zero_programs.id
+				  AND sr.run_type = 'full'
+				  AND sr.status = 'running'
+			  )
+			ORDER BY last_scan_finished_at NULLS FIRST, last_seen_at DESC, platform, handle
+			LIMIT $8
+		), program_count AS (
+			SELECT count(*)::int AS total
+			FROM selected_programs
+		), created_campaign AS (
+			INSERT INTO zero_scan_campaigns(
+				name, requested_by, run_after, parallelism, params, program_filter, total_requests, queued_requests
+			)
+			SELECT $1, $2, $3, $4, $5::jsonb, $6::jsonb, program_count.total, program_count.total
+			FROM program_count
+			RETURNING id
+		), inserted_requests AS (
 			INSERT INTO zero_scan_requests(program_id, campaign_id, name, requested_by, run_after, params)
-			VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6::jsonb)
-		`, program.ID, id, name, requestedBy, runAfter, string(childParams))
-		if err != nil {
-			return ScanCampaignCreateResult{}, fmt.Errorf("create scan campaign child request: %w", err)
-		}
-	}
-
-	if len(programs) == 0 {
-		_, err = tx.Exec(ctx, `
+			SELECT
+				selected_programs.id,
+				created_campaign.id,
+				$1,
+				$2,
+				$3,
+				jsonb_set(
+					COALESCE($5::jsonb, '{}'::jsonb) || '{"SkipSync":true}'::jsonb,
+					'{ProgramID}',
+					to_jsonb(selected_programs.id::text),
+					true
+				)
+			FROM selected_programs
+			CROSS JOIN created_campaign
+			RETURNING id
+		), finished_empty_campaign AS (
 			UPDATE zero_scan_campaigns
 			SET status = 'succeeded',
 				finished_at = now(),
 				updated_at = now()
-			WHERE id = $1::uuid
-		`, id)
-		if err != nil {
-			return ScanCampaignCreateResult{}, fmt.Errorf("finish empty scan campaign: %w", err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return ScanCampaignCreateResult{}, fmt.Errorf("commit scan campaign: %w", err)
+			WHERE id = (SELECT id FROM created_campaign)
+			  AND NOT EXISTS (SELECT 1 FROM inserted_requests)
+			RETURNING id
+		)
+		SELECT
+			(SELECT id::text FROM created_campaign),
+			(SELECT total FROM program_count),
+			(SELECT count(*)::int FROM inserted_requests)
+	`, name, requestedBy, runAfter, parallelism, string(raw), string(filterRaw), dueOnly, queryLimit).Scan(&id, &total, &queued)
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("create scan campaign: %w", err)
 	}
 	return ScanCampaignCreateResult{
 		ID:       id,
-		Total:    len(programs),
-		Queued:   len(programs),
+		Status:   "queued",
+		Total:    total,
+		Queued:   queued,
 		DueOnly:  dueOnly,
 		Limit:    limit,
 		Parallel: parallelism,
 	}, nil
+}
+
+func (r *Repository) CreateStagedScanCampaign(ctx context.Context, name, requestedBy string, runAfter time.Time, params any, dueOnly bool, limit, parallelism int) (ScanCampaignCreateResult, error) {
+	if requestedBy == "" {
+		requestedBy = "cli"
+	}
+	if runAfter.IsZero() {
+		runAfter = time.Now().UTC()
+	}
+	if parallelism <= 0 {
+		parallelism = 1
+	}
+	if parallelism > 32 {
+		parallelism = 32
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("marshal scan campaign params: %w", err)
+	}
+	filterRaw, err := json.Marshal(map[string]any{
+		"due_only": dueOnly,
+		"limit":    limit,
+	})
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("marshal scan campaign filter: %w", err)
+	}
+
+	var id string
+	err = r.pool.QueryRow(ctx, `
+		INSERT INTO zero_scan_campaigns(
+			name, status, requested_by, run_after, parallelism, params, program_filter, total_requests, queued_requests
+		)
+		VALUES ($1,'staging',$2,$3,$4,$5::jsonb,$6::jsonb,0,0)
+		RETURNING id::text
+	`, name, requestedBy, runAfter, parallelism, string(raw), string(filterRaw)).Scan(&id)
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("create staged scan campaign: %w", err)
+	}
+	return ScanCampaignCreateResult{
+		ID:       id,
+		Status:   "staging",
+		Total:    0,
+		Queued:   0,
+		DueOnly:  dueOnly,
+		Limit:    limit,
+		Parallel: parallelism,
+	}, nil
+}
+
+func (r *Repository) StageScanCampaignRequests(ctx context.Context, campaignID string) (ScanCampaignCreateResult, error) {
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" {
+		return ScanCampaignCreateResult{}, fmt.Errorf("campaign id is required")
+	}
+	var result ScanCampaignCreateResult
+	err := r.pool.QueryRow(ctx, `
+		WITH campaign AS MATERIALIZED (
+			SELECT
+				id,
+				name,
+				requested_by,
+				run_after,
+				parallelism,
+				params,
+				COALESCE((program_filter->>'due_only')::boolean, false) AS due_only,
+				COALESCE((program_filter->>'limit')::integer, 0) AS requested_limit
+			FROM zero_scan_campaigns
+			WHERE id = $1::uuid
+			  AND status = 'staging'
+			FOR UPDATE
+		), selected_programs AS MATERIALIZED (
+			SELECT zp.id
+			FROM zero_programs zp
+			CROSS JOIN campaign c
+			WHERE zp.active = true
+			  AND (
+				c.due_only = false
+				OR zp.last_scan_finished_at IS NULL
+				OR zp.last_scan_finished_at <= now() - make_interval(hours => zp.scan_interval_hours)
+			  )
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM zero_scan_runs sr
+				WHERE sr.program_id = zp.id
+				  AND sr.run_type = 'full'
+				  AND sr.status = 'running'
+			  )
+			ORDER BY zp.last_scan_finished_at NULLS FIRST, zp.last_seen_at DESC, zp.platform, zp.handle
+			LIMIT (SELECT CASE WHEN requested_limit <= 0 THEN 100000 ELSE requested_limit END FROM campaign)
+		), program_count AS (
+			SELECT count(*)::int AS total
+			FROM selected_programs
+		), inserted_requests AS (
+			INSERT INTO zero_scan_requests(program_id, campaign_id, name, requested_by, run_after, params)
+			SELECT
+				selected_programs.id,
+				campaign.id,
+				campaign.name,
+				campaign.requested_by,
+				campaign.run_after,
+				jsonb_set(
+					COALESCE(campaign.params, '{}'::jsonb) || '{"SkipSync":true}'::jsonb,
+					'{ProgramID}',
+					to_jsonb(selected_programs.id::text),
+					true
+				)
+			FROM selected_programs
+			CROSS JOIN campaign
+			RETURNING id
+		), updated_campaign AS (
+			UPDATE zero_scan_campaigns c
+			SET status = CASE WHEN program_count.total = 0 THEN 'succeeded' ELSE 'queued' END,
+				total_requests = program_count.total,
+				queued_requests = (SELECT count(*)::int FROM inserted_requests),
+				finished_at = CASE WHEN program_count.total = 0 THEN now() ELSE NULL END,
+				updated_at = now()
+			FROM campaign
+			CROSS JOIN program_count
+			WHERE c.id = campaign.id
+			  AND c.status = 'staging'
+			RETURNING c.id, c.status, c.total_requests, c.queued_requests, campaign.due_only, campaign.requested_limit, c.parallelism
+		)
+		SELECT
+			COALESCE((SELECT id::text FROM updated_campaign), ''),
+			COALESCE((SELECT status FROM updated_campaign), ''),
+			COALESCE((SELECT total_requests FROM updated_campaign), 0),
+			COALESCE((SELECT queued_requests FROM updated_campaign), 0),
+			COALESCE((SELECT due_only FROM updated_campaign), false),
+			COALESCE((SELECT requested_limit FROM updated_campaign), 0),
+			COALESCE((SELECT parallelism FROM updated_campaign), 0)
+	`, campaignID).Scan(&result.ID, &result.Status, &result.Total, &result.Queued, &result.DueOnly, &result.Limit, &result.Parallel)
+	if err != nil {
+		return ScanCampaignCreateResult{}, fmt.Errorf("stage scan campaign requests: %w", err)
+	}
+	if result.ID == "" {
+		return ScanCampaignCreateResult{}, nil
+	}
+	return result, nil
+}
+
+func (r *Repository) FailStagingScanCampaign(ctx context.Context, campaignID string, stageErr error) error {
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" {
+		return nil
+	}
+	msg := "scan campaign staging failed"
+	if stageErr != nil {
+		msg = msg + ": " + stageErr.Error()
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE zero_scan_campaigns
+		SET status = 'failed',
+			error = $2,
+			finished_at = now(),
+			updated_at = now()
+		WHERE id = $1::uuid
+		  AND status = 'staging'
+	`, campaignID, msg)
+	if err != nil {
+		return fmt.Errorf("fail staged scan campaign: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ListStagingScanCampaigns(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text
+		FROM zero_scan_campaigns
+		WHERE status = 'staging'
+		ORDER BY created_at
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list staged scan campaigns: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return ids, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func scanCampaignChildParams(raw []byte, programID string) ([]byte, error) {
@@ -778,6 +984,12 @@ func (r *Repository) RefreshScanCampaign(ctx context.Context, campaignID string)
 			failed_requests = counts.failed::int,
 			status = CASE
 				WHEN c.status = 'canceled' THEN 'canceled'
+				WHEN c.status = 'staging'
+					AND counts.queued = 0
+					AND counts.running = 0
+					AND counts.succeeded = 0
+					AND counts.failed = 0
+					AND counts.canceled = 0 THEN 'staging'
 				WHEN counts.running > 0 THEN 'running'
 				WHEN counts.queued > 0 THEN 'queued'
 				WHEN counts.failed > 0 AND counts.succeeded > 0 THEN 'partial'
@@ -786,6 +998,12 @@ func (r *Repository) RefreshScanCampaign(ctx context.Context, campaignID string)
 				ELSE 'succeeded'
 			END,
 			finished_at = CASE
+				WHEN c.status = 'staging'
+					AND counts.queued = 0
+					AND counts.running = 0
+					AND counts.succeeded = 0
+					AND counts.failed = 0
+					AND counts.canceled = 0 THEN NULL
 				WHEN counts.running = 0 AND counts.queued = 0 THEN COALESCE(c.finished_at, now())
 				ELSE NULL
 			END,

@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS zero_programs (
 
 CREATE INDEX IF NOT EXISTS idx_zero_programs_due
 	ON zero_programs(active, last_scan_finished_at, scan_interval_hours);
+CREATE INDEX IF NOT EXISTS idx_zero_programs_campaign_order
+	ON zero_programs(last_scan_finished_at ASC NULLS FIRST, last_seen_at DESC, platform, handle)
+	WHERE active = true;
 
 CREATE TABLE IF NOT EXISTS zero_default_scan_cycles (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,6 +106,9 @@ CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_program_started
 	ON zero_scan_runs(program_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_status
 	ON zero_scan_runs(status, run_type, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_running_full_program
+	ON zero_scan_runs(program_id)
+	WHERE run_type = 'full' AND status = 'running';
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_parent
 	ON zero_scan_runs(parent_scan_run_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_default_cycle
@@ -115,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_zero_scan_runs_campaign
 CREATE TABLE IF NOT EXISTS zero_scan_campaigns (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	name text NOT NULL DEFAULT '',
-	status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','partial','failed','canceled')),
+	status text NOT NULL DEFAULT 'queued' CHECK (status IN ('staging','queued','running','succeeded','partial','failed','canceled')),
 	requested_by text NOT NULL DEFAULT 'cli',
 	run_after timestamptz NOT NULL DEFAULT now(),
 	parallelism integer NOT NULL DEFAULT 1 CHECK (parallelism >= 1 AND parallelism <= 32),
@@ -149,7 +155,7 @@ BEGIN
 	END IF;
 	ALTER TABLE zero_scan_campaigns
 		ADD CONSTRAINT zero_scan_campaigns_status_check
-		CHECK (status IN ('queued','running','succeeded','partial','failed','canceled'));
+		CHECK (status IN ('staging','queued','running','succeeded','partial','failed','canceled'));
 END $$;
 
 UPDATE zero_scan_campaigns

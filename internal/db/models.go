@@ -52,6 +52,7 @@ type ScanRequestProgress struct {
 
 type ScanCampaignCreateResult struct {
 	ID       string
+	Status   string
 	Total    int
 	Queued   int
 	DueOnly  bool

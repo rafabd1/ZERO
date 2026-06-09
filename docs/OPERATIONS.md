@@ -13,6 +13,7 @@ cp .env.example .env
 Minimum required settings:
 
 - `ZERO_DATABASE_URL`: Supabase/Postgres connection string. Use `sslmode=require` for hosted Supabase.
+- `ZERO_API_DATABASE_URL`: optional API/control-plane connection string. Use it to keep dashboard/API calls off the worker's local dbpool path during heavy scans.
 - `ZERO_H1_USERNAME` and `ZERO_H1_TOKEN`: HackerOne API credentials when `ZERO_SCOPE_PROVIDERS=h1`.
 - `ZERO_API_TOKEN`: bearer token used by the API and dashboard proxy.
 

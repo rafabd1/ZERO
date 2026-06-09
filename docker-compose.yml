@@ -45,7 +45,9 @@ services:
       - 8.8.8.8
     environment:
       ZERO_API_ADDR: "0.0.0.0:8080"
-      ZERO_DATABASE_URL: "${ZERO_DATABASE_POOL_URL:-postgres://zero@dbpool:6432/postgres?sslmode=disable&default_query_exec_mode=simple_protocol}"
+      ZERO_DATABASE_URL: "${ZERO_API_DATABASE_URL:-${ZERO_DATABASE_URL}}"
+      ZERO_DATABASE_MAX_CONNS: "${ZERO_API_DATABASE_MAX_CONNS:-2}"
+      ZERO_AUTO_MIGRATE: "false"
     command: ["api"]
     volumes:
       - nuclei-templates:/home/zero/nuclei-templates

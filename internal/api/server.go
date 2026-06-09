@@ -25,6 +25,7 @@ func NewServer(repo *db.Repository, token string) *Server {
 		mux:   http.NewServeMux(),
 	}
 	s.routes()
+	s.recoverStagingScanCampaigns()
 	return s
 }
 
@@ -380,6 +381,7 @@ func (s *Server) globalStats(w http.ResponseWriter, r *http.Request) {
 				'passive_unconfirmed', (SELECT count(*) FROM zero_candidate_findings WHERE nuclei_result_id IS NULL)
 			),
 			'scan_campaigns', jsonb_build_object(
+				'staging', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'staging'),
 				'running', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'running'),
 				'queued', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'queued'),
 				'succeeded', (SELECT count(*) FROM zero_scan_campaigns WHERE status = 'succeeded'),
@@ -2097,14 +2099,16 @@ func (s *Server) createScanRequest(w http.ResponseWriter, r *http.Request) {
 		params = body.Params
 	}
 	if body.AllPrograms {
-		result, err := s.repo.CreateScanCampaign(r.Context(), strings.TrimSpace(body.Name), "api", runAfter, params, body.DueOnly, body.Limit, body.Parallelism)
+		result, err := s.repo.CreateStagedScanCampaign(r.Context(), strings.TrimSpace(body.Name), "api", runAfter, params, body.DueOnly, body.Limit, body.Parallelism)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.stageScanCampaign(result.ID)
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"id":          result.ID,
 			"type":        "scan_campaign",
+			"status":      result.Status,
 			"total":       result.Total,
 			"queued":      result.Queued,
 			"due_only":    result.DueOnly,
@@ -2160,6 +2164,36 @@ func (s *Server) cancelScanCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (s *Server) stageScanCampaign(campaignID string) {
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if _, err := s.repo.StageScanCampaignRequests(ctx, campaignID); err != nil {
+			failCtx, failCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer failCancel()
+			_ = s.repo.FailStagingScanCampaign(failCtx, campaignID, err)
+		}
+	}()
+}
+
+func (s *Server) recoverStagingScanCampaigns() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ids, err := s.repo.ListStagingScanCampaigns(ctx, 50)
+		cancel()
+		if err != nil {
+			return
+		}
+		for _, id := range ids {
+			s.stageScanCampaign(id)
+		}
+	}()
 }
 
 func parseRunAfter(value string) (time.Time, error) {
