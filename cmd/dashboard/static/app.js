@@ -90,6 +90,7 @@ const explorerTabs = {
   cves: {
     label: "CVEs",
     endpoint: "/api/v1/vulnerabilities",
+    platformFilter: false,
     columns: [
       ["CVE", (row) => stacked(row.id || "-", row.source || "")],
       ["Severity", (row) => severityPill(row.severity)],
@@ -157,6 +158,7 @@ const explorerTabs = {
     label: "Campaigns",
     endpoint: "/api/v1/scan-campaigns",
     programFilter: false,
+    platformFilter: false,
     columns: [
       ["Campaign", (row) => stacked(row.name || shortID(row.id) || "-", row.requested_by || "")],
       ["Status", (row) => scanStatusPill(row.status)],
@@ -211,6 +213,11 @@ document.addEventListener("DOMContentLoaded", () => {
     state.explorer.offset = 0;
     loadExplorerData(true);
   });
+  $("explorerProgramSearch").addEventListener("input", () => renderExplorerProgramOptions());
+  $("explorerPlatform").addEventListener("change", () => {
+    state.explorer.offset = 0;
+    loadExplorerData(true);
+  });
   $("explorerActive").addEventListener("change", () => {
     state.explorer.offset = 0;
     loadExplorerData(true);
@@ -251,7 +258,7 @@ async function loadAll(showLoading = true) {
     const results = await Promise.allSettled([
       getJSON("/api/v1/stats"),
       getJSON("/api/v1/inventory/overview"),
-      getJSON("/api/v1/programs"),
+      getJSON("/api/v1/programs?limit=1000"),
       getJSON("/api/v1/default-scans?limit=100"),
       getJSON("/api/v1/scans/latest?run_type=full&limit=100"),
       getJSON("/api/v1/scan-campaigns"),
@@ -426,12 +433,22 @@ function renderExplorerTabs() {
 function renderExplorerProgramOptions() {
   const select = $("explorerProgram");
   const selected = select.value;
+  const query = $("explorerProgramSearch").value.trim().toLowerCase();
+  const matches = state.programs
+    .slice()
+    .filter((program) => {
+      if (!query) return true;
+      const haystack = `${program.handle || ""} ${program.platform || ""} ${program.program_url || ""}`.toLowerCase();
+      return haystack.includes(query);
+    })
+    .sort((a, b) => String(a.handle || "").localeCompare(String(b.handle || "")));
   const options = [`<option value="">All programs</option>`].concat(
-    state.programs
-      .slice()
-      .sort((a, b) => String(a.handle || "").localeCompare(String(b.handle || "")))
-      .map((program) => `<option value="${escapeHTML(program.id)}">${escapeHTML(program.handle || shortID(program.id))}</option>`)
+    matches.map((program) => `<option value="${escapeHTML(program.id)}">${escapeHTML(program.handle || shortID(program.id))} (${escapeHTML(program.platform || "source")})</option>`)
   );
+  const selectedProgram = state.programs.find((program) => program.id === selected);
+  if (selected && selectedProgram && !matches.some((program) => program.id === selected)) {
+    options.splice(1, 0, `<option value="${escapeHTML(selectedProgram.id)}">${escapeHTML(selectedProgram.handle || shortID(selectedProgram.id))} (${escapeHTML(selectedProgram.platform || "source")})</option>`);
+  }
   select.innerHTML = options.join("");
   select.value = state.programs.some((program) => program.id === selected) ? selected : "";
 }
@@ -450,9 +467,13 @@ async function loadExplorerData(showLoading = true) {
     if (query) params.set("q", query);
     const programID = $("explorerProgram").value;
     if (programID && tab.programFilter !== false) params.set("program_id", programID);
+    const platform = $("explorerPlatform").value;
+    if (platform && tab.platformFilter !== false) params.set("platform", platform);
     const active = $("explorerActive").value;
     if (tab.active && active !== "all") params.set("active", active);
     $("explorerProgram").disabled = tab.programFilter === false;
+    $("explorerProgramSearch").disabled = tab.programFilter === false;
+    $("explorerPlatform").disabled = tab.platformFilter === false;
     $("explorerActive").disabled = !tab.active;
     const rows = normalizeArray(await getJSON(`${tab.endpoint}?${params.toString()}`));
     state.explorer.rows = rows;

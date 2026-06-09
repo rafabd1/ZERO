@@ -175,6 +175,7 @@ func (s *Server) programs(w http.ResponseWriter, r *http.Request) {
 	p := listParamsFromRequest(r, 500)
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
+	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 	rows, err := s.repo.QueryJSONRows(r.Context(), `
 		SELECT jsonb_build_object(
 			'id', p.id,
@@ -237,9 +238,10 @@ func (s *Server) programs(w http.ResponseWriter, r *http.Request) {
 		) counts ON true
 		WHERE ($1 = '' OR p.handle ILIKE '%' || $1 || '%' OR p.platform ILIKE '%' || $1 || '%' OR p.program_url ILIKE '%' || $1 || '%')
 		  AND ($2 = '' OR $2 = 'all' OR ($2 IN ('true','active','1') AND p.active) OR ($2 IN ('false','inactive','0') AND NOT p.active))
+		  AND ($3 = '' OR p.platform = $3)
 		ORDER BY p.platform, p.handle
-		LIMIT $3 OFFSET $4
-	`, q, active, p.Limit, p.Offset)
+		LIMIT $4 OFFSET $5
+	`, q, active, platform, p.Limit, p.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -537,6 +539,7 @@ func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	campaignID := strings.TrimSpace(r.URL.Query().Get("campaign_id"))
 	programID := strings.TrimSpace(r.URL.Query().Get("program_id"))
+	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 	rows, err := s.repo.QueryJSONRows(r.Context(), `
 		SELECT jsonb_build_object(
 			'id', r.id,
@@ -569,10 +572,11 @@ func (s *Server) scanRequests(w http.ResponseWriter, r *http.Request) {
 		  AND ($2 = '' OR r.campaign_id::text = $2)
 		  AND ($3 = '' OR r.program_id::text = $3)
 		  AND ($4 = '' OR r.name ILIKE '%' || $4 || '%' OR r.status ILIKE '%' || $4 || '%' OR r.error ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%')
-		  AND (NULLIF($5, '') IS NULL OR r.created_at > NULLIF($5, '')::timestamptz)
+		  AND ($5 = '' OR p.platform = $5)
+		  AND (NULLIF($6, '') IS NULL OR r.created_at > NULLIF($6, '')::timestamptz)
 		ORDER BY r.created_at DESC
-		LIMIT $6 OFFSET $7
-	`, status, campaignID, programID, q, p.Since, p.Limit, p.Offset)
+		LIMIT $7 OFFSET $8
+	`, status, campaignID, programID, q, platform, p.Since, p.Limit, p.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1522,6 +1526,7 @@ func (s *Server) scopeAssets(programID string) http.HandlerFunc {
 		inScope := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("in_scope")))
 		bounty := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("eligible_for_bounty")))
 		assetType := strings.TrimSpace(r.URL.Query().Get("asset_type"))
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', a.id,
@@ -1551,10 +1556,11 @@ func (s *Server) scopeAssets(programID string) http.HandlerFunc {
 			  AND ($4 = '' OR $4 = 'all' OR ($4 IN ('true','1') AND a.in_scope) OR ($4 IN ('false','0') AND NOT a.in_scope))
 			  AND ($5 = '' OR $5 = 'all' OR ($5 IN ('true','1') AND a.eligible_for_bounty) OR ($5 IN ('false','0') AND NOT a.eligible_for_bounty))
 			  AND ($6 = '' OR a.asset_type = $6)
-			  AND (NULLIF($7, '') IS NULL OR a.last_seen_at > NULLIF($7, '')::timestamptz)
+			  AND ($7 = '' OR p.platform = $7 OR a.platform = $7 OR a.source = $7)
+			  AND (NULLIF($8, '') IS NULL OR a.last_seen_at > NULLIF($8, '')::timestamptz)
 			ORDER BY a.last_seen_at DESC
-			LIMIT $8 OFFSET $9
-		`, programID, q, active, inScope, bounty, assetType, p.Since, p.Limit, p.Offset)
+			LIMIT $9 OFFSET $10
+		`, programID, q, active, inScope, bounty, assetType, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1570,6 +1576,7 @@ func (s *Server) subdomains(programID string) http.HandlerFunc {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
 		resolves := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("resolves")))
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', sd.id,
@@ -1600,10 +1607,11 @@ func (s *Server) subdomains(programID string) http.HandlerFunc {
 			  AND ($2 = '' OR sd.fqdn ILIKE '%' || $2 || '%' OR sd.root_domain ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
 			  AND ($3 = '' OR $3 = 'all' OR ($3 IN ('true','active','1') AND sd.active) OR ($3 IN ('false','inactive','0') AND NOT sd.active))
 			  AND ($4 = '' OR $4 = 'all' OR ($4 IN ('true','1') AND sd.resolves IS TRUE) OR ($4 IN ('false','0') AND sd.resolves IS FALSE) OR ($4 = 'unknown' AND sd.resolves IS NULL))
-			  AND (NULLIF($5, '') IS NULL OR sd.last_seen_at > NULLIF($5, '')::timestamptz)
+			  AND ($5 = '' OR p.platform = $5 OR sd.source = $5)
+			  AND (NULLIF($6, '') IS NULL OR sd.last_seen_at > NULLIF($6, '')::timestamptz)
 			ORDER BY sd.last_seen_at DESC
-			LIMIT $6 OFFSET $7
-		`, programID, q, active, resolves, p.Since, p.Limit, p.Offset)
+			LIMIT $7 OFFSET $8
+		`, programID, q, active, resolves, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1619,6 +1627,7 @@ func (s *Server) services(programID string) http.HandlerFunc {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
 		statusCode := queryInt(r, "status_code", 0)
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', h.id,
@@ -1648,10 +1657,11 @@ func (s *Server) services(programID string) http.HandlerFunc {
 			  AND ($2 = '' OR h.host ILIKE '%' || $2 || '%' OR h.url ILIKE '%' || $2 || '%' OR h.title ILIKE '%' || $2 || '%' OR h.webserver ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
 			  AND ($3 = '' OR $3 = 'all' OR ($3 IN ('true','active','1') AND h.active) OR ($3 IN ('false','inactive','0') AND NOT h.active))
 			  AND ($4 = 0 OR h.status_code = $4)
-			  AND (NULLIF($5, '') IS NULL OR h.last_seen_at > NULLIF($5, '')::timestamptz)
+			  AND ($5 = '' OR p.platform = $5)
+			  AND (NULLIF($6, '') IS NULL OR h.last_seen_at > NULLIF($6, '')::timestamptz)
 			ORDER BY h.last_seen_at DESC
-			LIMIT $6 OFFSET $7
-		`, programID, q, active, statusCode, p.Since, p.Limit, p.Offset)
+			LIMIT $7 OFFSET $8
+		`, programID, q, active, statusCode, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1665,6 +1675,7 @@ func (s *Server) nucleiResults(programID string) http.HandlerFunc {
 		programID = effectiveProgramID(programID, r)
 		p := listParamsFromRequest(r, 500)
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', n.id,
@@ -1697,10 +1708,11 @@ func (s *Server) nucleiResults(programID string) http.HandlerFunc {
 			  AND ($2 = '' OR n.severity = $2)
 			  AND ($3 = '' OR n.template_id = $3)
 			  AND ($4 = '' OR n.template_id ILIKE '%' || $4 || '%' OR n.matched_at ILIKE '%' || $4 || '%' OR n.template_path ILIKE '%' || $4 || '%' OR h.url ILIKE '%' || $4 || '%' OR h.host ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%' OR $4 = ANY(n.cves) OR $4 = ANY(n.tags))
-			  AND (NULLIF($5, '') IS NULL OR n.first_seen_at > NULLIF($5, '')::timestamptz)
+			  AND ($5 = '' OR p.platform = $5)
+			  AND (NULLIF($6, '') IS NULL OR n.first_seen_at > NULLIF($6, '')::timestamptz)
 			ORDER BY n.first_seen_at DESC
-			LIMIT $6 OFFSET $7
-		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), strings.TrimSpace(r.URL.Query().Get("template_id")), q, p.Since, p.Limit, p.Offset)
+			LIMIT $7 OFFSET $8
+		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), strings.TrimSpace(r.URL.Query().Get("template_id")), q, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1714,6 +1726,7 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 		programID = effectiveProgramID(programID, r)
 		p := listParamsFromRequest(r, 500)
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', f.id,
@@ -1748,10 +1761,11 @@ func (s *Server) findings(programID string) http.HandlerFunc {
 			  AND ($3 = '' OR f.severity = $3)
 			  AND ($4 = 0 OR f.confidence >= $4)
 			  AND ($5 = '' OR f.technology_name ILIKE '%' || $5 || '%' OR f.technology_version ILIKE '%' || $5 || '%' OR f.severity ILIKE '%' || $5 || '%' OR s.url ILIKE '%' || $5 || '%' OR s.host ILIKE '%' || $5 || '%' OR p.handle ILIKE '%' || $5 || '%' OR v.vuln_id ILIKE '%' || $5 || '%')
-			  AND (NULLIF($6, '') IS NULL OR f.first_seen_at > NULLIF($6, '')::timestamptz)
+			  AND ($6 = '' OR p.platform = $6)
+			  AND (NULLIF($7, '') IS NULL OR f.first_seen_at > NULLIF($7, '')::timestamptz)
 			ORDER BY f.first_seen_at DESC
-			LIMIT $7 OFFSET $8
-		`, programID, strings.TrimSpace(r.URL.Query().Get("status")), strings.TrimSpace(r.URL.Query().Get("severity")), queryInt(r, "min_confidence", 0), q, p.Since, p.Limit, p.Offset)
+			LIMIT $8 OFFSET $9
+		`, programID, strings.TrimSpace(r.URL.Query().Get("status")), strings.TrimSpace(r.URL.Query().Get("severity")), queryInt(r, "min_confidence", 0), q, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1765,6 +1779,7 @@ func (s *Server) reports(programID string) http.HandlerFunc {
 		programID = effectiveProgramID(programID, r)
 		p := listParamsFromRequest(r, 500)
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', r.id,
@@ -1786,10 +1801,11 @@ func (s *Server) reports(programID string) http.HandlerFunc {
 			WHERE ($1 = '' OR r.program_id::text = $1)
 			  AND ($2 = '' OR r.severity = $2)
 			  AND ($4 = '' OR r.report_key ILIKE '%' || $4 || '%' OR r.title ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%')
-			  AND (NULLIF($5, '') IS NULL OR r.created_at > NULLIF($5, '')::timestamptz)
+			  AND ($5 = '' OR p.platform = $5)
+			  AND (NULLIF($6, '') IS NULL OR r.created_at > NULLIF($6, '')::timestamptz)
 			ORDER BY r.created_at DESC
-			LIMIT $6 OFFSET $7
-		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), queryBool(r, "include_body", false), q, p.Since, p.Limit, p.Offset)
+			LIMIT $7 OFFSET $8
+		`, programID, strings.TrimSpace(r.URL.Query().Get("severity")), queryBool(r, "include_body", false), q, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1804,6 +1820,7 @@ func (s *Server) scanRuns(w http.ResponseWriter, r *http.Request) {
 	runType := strings.TrimSpace(r.URL.Query().Get("run_type"))
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	programID := strings.TrimSpace(r.URL.Query().Get("program_id"))
+	platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 	rows, err := s.repo.QueryJSONRows(r.Context(), `
 		SELECT jsonb_build_object(
 			'id', sr.id,
@@ -1832,10 +1849,11 @@ func (s *Server) scanRuns(w http.ResponseWriter, r *http.Request) {
 		  AND ($2 = '' OR sr.run_type = $2)
 		  AND ($3 = '' OR sr.status = $3)
 		  AND ($4 = '' OR p.handle ILIKE '%' || $4 || '%' OR sr.run_type ILIKE '%' || $4 || '%' OR sr.status ILIKE '%' || $4 || '%' OR sr.error ILIKE '%' || $4 || '%')
-		  AND (NULLIF($5, '') IS NULL OR sr.started_at > NULLIF($5, '')::timestamptz)
+		  AND ($5 = '' OR p.platform = $5)
+		  AND (NULLIF($6, '') IS NULL OR sr.started_at > NULLIF($6, '')::timestamptz)
 		ORDER BY sr.started_at DESC
-		LIMIT $6 OFFSET $7
-	`, programID, runType, status, q, p.Since, p.Limit, p.Offset)
+		LIMIT $7 OFFSET $8
+	`, programID, runType, status, q, platform, p.Since, p.Limit, p.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1851,6 +1869,7 @@ func (s *Server) technologies(programID string) http.HandlerFunc {
 		active := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("active")))
 		source := strings.TrimSpace(r.URL.Query().Get("source"))
 		versioned := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("versioned")))
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', t.id,
@@ -1878,10 +1897,11 @@ func (s *Server) technologies(programID string) http.HandlerFunc {
 			  AND ($3 = '' OR $3 = 'all' OR ($3 IN ('true','active','1') AND t.active) OR ($3 IN ('false','inactive','0') AND NOT t.active))
 			  AND ($4 = '' OR t.source = $4)
 			  AND ($5 = '' OR $5 = 'all' OR ($5 IN ('true','1') AND t.version <> '') OR ($5 IN ('false','0') AND t.version = ''))
-			  AND (NULLIF($6, '') IS NULL OR t.last_seen_at > NULLIF($6, '')::timestamptz)
+			  AND ($6 = '' OR p.platform = $6)
+			  AND (NULLIF($7, '') IS NULL OR t.last_seen_at > NULLIF($7, '')::timestamptz)
 			ORDER BY t.last_seen_at DESC
-			LIMIT $7 OFFSET $8
-		`, programID, q, active, source, versioned, p.Since, p.Limit, p.Offset)
+			LIMIT $8 OFFSET $9
+		`, programID, q, active, source, versioned, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1897,6 +1917,7 @@ func (s *Server) technologyVulnerabilities(programID string) http.HandlerFunc {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		severity := strings.TrimSpace(r.URL.Query().Get("severity"))
 		minConfidence := queryInt(r, "min_confidence", 0)
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', m.id,
@@ -1928,10 +1949,11 @@ func (s *Server) technologyVulnerabilities(programID string) http.HandlerFunc {
 			  AND ($2 = '' OR m.technology_name ILIKE '%' || $2 || '%' OR m.technology_version ILIKE '%' || $2 || '%' OR v.vuln_id ILIKE '%' || $2 || '%' OR v.summary ILIKE '%' || $2 || '%' OR h.url ILIKE '%' || $2 || '%' OR p.handle ILIKE '%' || $2 || '%')
 			  AND ($3 = '' OR v.severity = $3)
 			  AND ($4 = 0 OR m.confidence >= $4)
-			  AND (NULLIF($5, '') IS NULL OR m.last_seen_at > NULLIF($5, '')::timestamptz)
+			  AND ($5 = '' OR p.platform = $5)
+			  AND (NULLIF($6, '') IS NULL OR m.last_seen_at > NULLIF($6, '')::timestamptz)
 			ORDER BY m.last_seen_at DESC, m.confidence DESC
-			LIMIT $6 OFFSET $7
-		`, programID, q, severity, minConfidence, p.Since, p.Limit, p.Offset)
+			LIMIT $7 OFFSET $8
+		`, programID, q, severity, minConfidence, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -2160,6 +2182,7 @@ func (s *Server) changes(programID string) http.HandlerFunc {
 		q := strings.TrimSpace(r.URL.Query().Get("q"))
 		entityType := strings.TrimSpace(r.URL.Query().Get("entity_type"))
 		changeType := strings.TrimSpace(r.URL.Query().Get("change_type"))
+		platform := strings.TrimSpace(r.URL.Query().Get("platform"))
 		rows, err := s.repo.QueryJSONRows(r.Context(), `
 			SELECT jsonb_build_object(
 				'id', c.id,
@@ -2181,10 +2204,11 @@ func (s *Server) changes(programID string) http.HandlerFunc {
 			  AND ($2 = '' OR c.entity_type = $2)
 			  AND ($3 = '' OR c.change_type = $3)
 			  AND ($4 = '' OR c.entity_key ILIKE '%' || $4 || '%' OR c.entity_type ILIKE '%' || $4 || '%' OR p.handle ILIKE '%' || $4 || '%')
-			  AND (NULLIF($5, '') IS NULL OR c.occurred_at > NULLIF($5, '')::timestamptz)
+			  AND ($5 = '' OR p.platform = $5)
+			  AND (NULLIF($6, '') IS NULL OR c.occurred_at > NULLIF($6, '')::timestamptz)
 			ORDER BY c.occurred_at DESC
-			LIMIT $6 OFFSET $7
-		`, programID, entityType, changeType, q, p.Since, p.Limit, p.Offset)
+			LIMIT $7 OFFSET $8
+		`, programID, entityType, changeType, q, platform, p.Since, p.Limit, p.Offset)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

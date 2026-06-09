@@ -75,6 +75,13 @@
         <div id="explorerTabs" class="tabs" role="tablist" aria-label="Stored data views"></div>
         <div class="explorer-filters">
           <input id="explorerSearch" type="search" placeholder="Search stored data">
+          <select id="explorerPlatform" aria-label="Filter explorer by source">
+            <option value="">All sources</option>
+            <option value="h1">HackerOne</option>
+            <option value="bugcrowd">Bugcrowd</option>
+            <option value="intigriti">Intigriti</option>
+          </select>
+          <input id="explorerProgramSearch" type="search" placeholder="Filter programs">
           <select id="explorerProgram" aria-label="Filter explorer by program">
             <option value="">All programs</option>
           </select>

@@ -324,7 +324,7 @@ dt {
 
 .explorer-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) 130px 110px auto;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(130px, 170px) minmax(160px, 220px) minmax(180px, 240px) 130px 110px auto;
   gap: 10px;
   margin-bottom: 12px;
 }
