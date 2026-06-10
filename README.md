@@ -188,7 +188,7 @@ Zero is designed for authorized testing.
 - [Custom Campaigns](docs/CUSTOM_CAMPAIGNS.md): targeted scan recipes, custom Webanalyze files, path probes, and Nuclei templates.
 - [Architecture](docs/ARCHITECTURE.md): services, state model, recovery, and campaign execution.
 - [Operations](docs/OPERATIONS.md): setup, schedules, tuning, cleanup, and notifications.
-- [API](docs/API.md): read endpoints and scan orchestration examples.
+- [API](docs/API.md): endpoint map, query recipes, filters, pagination, and scan orchestration examples.
 - [Database](docs/DATABASE.md): state tables and deduplication rules.
 - [Nuclei](docs/NUCLEI.md): validation policy and template selection.
 - [Tools](docs/TOOLS.md): external tool roles and configuration notes.
