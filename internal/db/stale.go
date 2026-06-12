@@ -16,10 +16,13 @@ type StaleResult struct {
 
 type CleanupOptions struct {
 	DeleteInactiveInventory   bool
+	DeleteDNSOnlySubdomains   bool
+	DNSOnlyRetentionHours     int
 	InactiveRetentionHours    int
 	InactiveRetentionScans    int
 	ChangeEventRetentionHours int
 	ScanRequestRetentionHours int
+	ScanRunRetentionHours     int
 	BatchSize                 int
 }
 
@@ -112,6 +115,16 @@ func (r *Repository) CleanupOperationalData(ctx context.Context, opts CleanupOpt
 	}
 	if opts.ScanRequestRetentionHours > 0 {
 		if err := r.pruneOldScanRequests(ctx, conn, opts.ScanRequestRetentionHours, batchSize, &result); err != nil {
+			return result, err
+		}
+	}
+	if opts.ScanRunRetentionHours > 0 {
+		if err := r.pruneOldScanRuns(ctx, conn, opts.ScanRunRetentionHours, batchSize, &result); err != nil {
+			return result, err
+		}
+	}
+	if opts.DeleteDNSOnlySubdomains {
+		if err := r.pruneDNSOnlySubdomains(ctx, conn, opts.DNSOnlyRetentionHours, batchSize, &result); err != nil {
 			return result, err
 		}
 	}
@@ -312,6 +325,42 @@ func (r *Repository) pruneDisallowedChangeEvents(ctx context.Context, q cleanupD
 	return nil
 }
 
+func (r *Repository) pruneDNSOnlySubdomains(ctx context.Context, q cleanupDB, retentionHours, batchSize int, result *CleanupResult) error {
+	deleted, err := runBatchedCount(ctx, q, "cleanup dns-only subdomains", batchSize, `
+		WITH candidates AS (
+			SELECT s.id
+			FROM zero_subdomains s
+			WHERE s.active = true
+			  AND ($1 <= 0 OR s.last_seen_at < now() - make_interval(hours => $1))
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM zero_http_services h
+				WHERE h.subdomain_id = s.id
+				  AND h.active = true
+			  )
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM zero_nuclei_results n
+				WHERE n.target_source = 'subdomains'
+				  AND n.target_id = s.id
+			  )
+			ORDER BY s.last_seen_at ASC
+			LIMIT $2
+		), deleted AS (
+			DELETE FROM zero_subdomains s
+			WHERE s.id IN (SELECT id FROM candidates)
+			RETURNING s.id
+		)
+		SELECT count(*) FROM deleted
+	`, retentionHours)
+	if err != nil {
+		return err
+	}
+	result.DNSOnlySubdomains += deleted
+	result.Subdomains += deleted
+	return nil
+}
+
 func (r *Repository) pruneOldChangeEvents(ctx context.Context, q cleanupDB, retentionHours, batchSize int, result *CleanupResult) error {
 	deleted, err := runBatchedCount(ctx, q, "cleanup old change events", batchSize, `
 		WITH candidates AS (
@@ -353,6 +402,67 @@ func (r *Repository) pruneOldScanRequests(ctx context.Context, q cleanupDB, rete
 		return err
 	}
 	result.ScanRequests += deleted
+	return nil
+}
+
+func (r *Repository) pruneOldScanRuns(ctx context.Context, q cleanupDB, retentionHours, batchSize int, result *CleanupResult) error {
+	for _, runType := range []string{"scope", "enum", "probe", "intel", "nuclei"} {
+		deleted, err := runBatchedCount(ctx, q, "cleanup old "+runType+" scan runs", batchSize, `
+			WITH candidates AS (
+				SELECT id
+				FROM zero_scan_runs
+				WHERE status IN ('succeeded','failed','canceled','incomplete')
+				  AND run_type = $2
+				  AND started_at < now() - make_interval(hours => $1)
+				ORDER BY started_at ASC
+				LIMIT $3
+			), deleted AS (
+				DELETE FROM zero_scan_runs
+				WHERE id IN (SELECT id FROM candidates)
+				RETURNING id
+			)
+			SELECT count(*) FROM deleted
+		`, retentionHours, runType)
+		if err != nil {
+			return err
+		}
+		result.ScanRuns += deleted
+	}
+	deleted, err := runBatchedCount(ctx, q, "cleanup old full scan runs", batchSize, `
+		WITH candidates AS (
+			SELECT sr.id
+			FROM zero_scan_runs sr
+			WHERE sr.status IN ('succeeded','failed','canceled','incomplete')
+			  AND sr.run_type = 'full'
+			  AND sr.program_id IS NOT NULL
+			  AND sr.started_at < now() - make_interval(hours => $1)
+			  AND EXISTS (
+				SELECT 1
+				FROM zero_scan_runs newer
+				WHERE newer.program_id = sr.program_id
+				  AND newer.run_type = 'full'
+				  AND newer.status IN ('succeeded','failed','canceled','incomplete')
+				  AND (
+					newer.started_at > sr.started_at
+					OR (
+						newer.started_at = sr.started_at
+						AND newer.id > sr.id
+					)
+				  )
+			  )
+			ORDER BY sr.started_at ASC
+			LIMIT $2
+		), deleted AS (
+			DELETE FROM zero_scan_runs
+			WHERE id IN (SELECT id FROM candidates)
+			RETURNING id
+		)
+		SELECT count(*) FROM deleted
+	`, retentionHours)
+	if err != nil {
+		return err
+	}
+	result.ScanRuns += deleted
 	return nil
 }
 
@@ -444,4 +554,21 @@ func (r *Repository) CompactChangeEvents(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("commit compact change events: %w", err)
 	}
 	return before - kept, nil
+}
+
+func (r *Repository) CompactOperationalStorage(ctx context.Context) error {
+	for _, table := range []string{
+		"zero_subdomains",
+		"zero_http_services",
+		"zero_technology_observations",
+		"zero_scan_runs",
+		"zero_scan_requests",
+		"zero_scope_assets",
+		"zero_change_events",
+	} {
+		if _, err := r.pool.Exec(ctx, fmt.Sprintf("VACUUM (FULL, ANALYZE) %s", table)); err != nil {
+			return fmt.Errorf("compact %s: %w", table, err)
+		}
+	}
+	return nil
 }

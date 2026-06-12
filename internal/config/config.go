@@ -146,11 +146,14 @@ type IntelConfig struct {
 type DataConfig struct {
 	StaleAfterHours           int
 	DeleteInactiveInventory   bool
+	RetainDNSOnlySubdomains   bool
+	DNSOnlyRetentionHours     int
 	InactiveRetentionHours    int
 	InactiveRetentionScans    int
 	ChangeEventEntities       string
 	ChangeEventRetentionHours int
 	ScanRequestRetentionHours int
+	ScanRunRetentionHours     int
 	CleanupBatchSize          int
 }
 
@@ -249,11 +252,14 @@ func Load() (Config, error) {
 	v.SetDefault("database.retry_wait", "5s")
 	v.SetDefault("data.stale_after_hours", 72)
 	v.SetDefault("data.delete_inactive_inventory", true)
+	v.SetDefault("data.retain_dns_only_subdomains", false)
+	v.SetDefault("data.dns_only_retention_hours", 0)
 	v.SetDefault("data.inactive_retention_hours", 0)
 	v.SetDefault("data.inactive_retention_scans", 0)
 	v.SetDefault("data.change_event_entities", "candidate_finding,nuclei_result")
 	v.SetDefault("data.change_event_retention_hours", 72)
-	v.SetDefault("data.scan_request_retention_hours", 168)
+	v.SetDefault("data.scan_request_retention_hours", 72)
+	v.SetDefault("data.scan_run_retention_hours", 72)
 	v.SetDefault("data.cleanup_batch_size", 5000)
 	v.SetDefault("intel.cve_min_year", 2018)
 	v.SetDefault("intel.nvd_retries", 5)
@@ -359,11 +365,14 @@ func Load() (Config, error) {
 	_ = v.BindEnv("intel.nvd_retry_wait", "ZERO_NVD_RETRY_WAIT")
 	_ = v.BindEnv("data.stale_after_hours", "ZERO_STALE_AFTER_HOURS")
 	_ = v.BindEnv("data.delete_inactive_inventory", "ZERO_DELETE_INACTIVE_INVENTORY")
+	_ = v.BindEnv("data.retain_dns_only_subdomains", "ZERO_RETAIN_DNS_ONLY_SUBDOMAINS")
+	_ = v.BindEnv("data.dns_only_retention_hours", "ZERO_DNS_ONLY_RETENTION_HOURS")
 	_ = v.BindEnv("data.inactive_retention_hours", "ZERO_INACTIVE_RETENTION_HOURS")
 	_ = v.BindEnv("data.inactive_retention_scans", "ZERO_INACTIVE_RETENTION_SCANS")
 	_ = v.BindEnv("data.change_event_entities", "ZERO_CHANGE_EVENT_ENTITIES")
 	_ = v.BindEnv("data.change_event_retention_hours", "ZERO_CHANGE_EVENT_RETENTION_HOURS")
 	_ = v.BindEnv("data.scan_request_retention_hours", "ZERO_SCAN_REQUEST_RETENTION_HOURS")
+	_ = v.BindEnv("data.scan_run_retention_hours", "ZERO_SCAN_RUN_RETENTION_HOURS")
 	_ = v.BindEnv("data.cleanup_batch_size", "ZERO_CLEANUP_BATCH_SIZE")
 
 	return Config{
@@ -489,11 +498,14 @@ func Load() (Config, error) {
 		Data: DataConfig{
 			StaleAfterHours:           v.GetInt("data.stale_after_hours"),
 			DeleteInactiveInventory:   v.GetBool("data.delete_inactive_inventory"),
+			RetainDNSOnlySubdomains:   v.GetBool("data.retain_dns_only_subdomains"),
+			DNSOnlyRetentionHours:     clampInt(v.GetInt("data.dns_only_retention_hours"), 0, 24*365),
 			InactiveRetentionHours:    clampInt(v.GetInt("data.inactive_retention_hours"), 0, 24*365),
 			InactiveRetentionScans:    clampInt(v.GetInt("data.inactive_retention_scans"), 0, 100),
 			ChangeEventEntities:       v.GetString("data.change_event_entities"),
 			ChangeEventRetentionHours: clampInt(v.GetInt("data.change_event_retention_hours"), 0, 24*365),
 			ScanRequestRetentionHours: clampInt(v.GetInt("data.scan_request_retention_hours"), 0, 24*365),
+			ScanRunRetentionHours:     clampInt(v.GetInt("data.scan_run_retention_hours"), 0, 24*365),
 			CleanupBatchSize:          clampInt(v.GetInt("data.cleanup_batch_size"), 100, 50000),
 		},
 	}, nil

@@ -61,6 +61,30 @@ func newWorkerCommand() *cobra.Command {
 			var scanRequestsRunning atomic.Bool
 			var duePipelineRunning atomic.Bool
 			var cleanupRunning atomic.Bool
+			var cleanupPending atomic.Bool
+			runCleanup := func(name string) {
+				if duePipelineRunning.Load() || scanRequestsRunning.Load() {
+					cleanupPending.Store(true)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s deferred: scans are running\n", name)
+					return
+				}
+				if !cleanupRunning.CompareAndSwap(false, true) {
+					cleanupPending.Store(true)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s deferred: previous cleanup still running\n", name)
+					return
+				}
+				defer cleanupRunning.Store(false)
+				cleanupPending.Store(false)
+				if err := runChildE(cmd, "run", "cleanup"); err != nil {
+					cleanupPending.Store(true)
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s failed: %v\n", name, err)
+				}
+			}
+			runPendingCleanup := func(trigger string) {
+				if cleanupPending.Load() {
+					runCleanup("pending cleanup after " + trigger)
+				}
+			}
 			runDueJob := func(name string, limit int) {
 				if cleanupRunning.Load() {
 					fmt.Fprintf(cmd.OutOrStdout(), "%s skipped: cleanup is running\n", name)
@@ -70,7 +94,10 @@ func newWorkerCommand() *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "%s skipped: previous due pipeline still running\n", name)
 					return
 				}
-				defer duePipelineRunning.Store(false)
+				defer func() {
+					duePipelineRunning.Store(false)
+					runPendingCleanup(name)
+				}()
 				if err := runDuePrograms(cmd, limit, cfg.TargetParallelism, false, true); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "%s failed: %v\n", name, err)
 				}
@@ -96,7 +123,10 @@ func newWorkerCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), "scan request processing skipped: previous tick still running")
 					return
 				}
-				defer scanRequestsRunning.Store(false)
+				defer func() {
+					scanRequestsRunning.Store(false)
+					runPendingCleanup("scan requests")
+				}()
 				if err := runQueuedScanRequests(cmd, cfg); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "scan request processing failed: %v\n", err)
 				}
@@ -113,18 +143,8 @@ func newWorkerCommand() *cobra.Command {
 				}
 			}
 			if err := addJob("cleanup-inactive", cfg.Schedule.Cleanup, func() {
-				if duePipelineRunning.Load() || scanRequestsRunning.Load() {
-					fmt.Fprintln(cmd.OutOrStdout(), "cleanup inactive skipped: scans are running")
-					return
-				}
-				if !cleanupRunning.CompareAndSwap(false, true) {
-					fmt.Fprintln(cmd.OutOrStdout(), "cleanup inactive skipped: previous cleanup still running")
-					return
-				}
-				defer cleanupRunning.Store(false)
-				if err := runChildE(cmd, "run", "cleanup"); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "cleanup inactive failed: %v\n", err)
-				}
+				cleanupPending.Store(true)
+				runCleanup("cleanup inactive")
 			}); err != nil {
 				return err
 			}
@@ -132,6 +152,10 @@ func newWorkerCommand() *cobra.Command {
 			c.Start()
 			if cfg.Worker.RunOnStartup {
 				go func() {
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup cleanup\n", time.Now().UTC().Format(time.RFC3339))
+					cleanupPending.Store(true)
+					runCleanup("startup cleanup")
+					fmt.Fprintf(cmd.OutOrStdout(), "[%s] finished startup cleanup\n", time.Now().UTC().Format(time.RFC3339))
 					fmt.Fprintf(cmd.OutOrStdout(), "[%s] starting startup scope-sync-if-due\n", time.Now().UTC().Format(time.RFC3339))
 					if err := runScopeSyncIfDue(cmd, cfg); err != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "startup scope sync failed: %v\n", err)

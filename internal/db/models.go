@@ -72,6 +72,7 @@ type CancelScanResult struct {
 type CleanupResult struct {
 	ScopeAssets                 int `json:"scope_assets"`
 	Subdomains                  int `json:"subdomains"`
+	DNSOnlySubdomains           int `json:"dns_only_subdomains"`
 	HTTPServices                int `json:"http_services"`
 	TechnologyObservations      int `json:"technology_observations"`
 	TechnologyVulnerabilityRows int `json:"technology_vulnerability_rows"`

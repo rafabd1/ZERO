@@ -55,7 +55,8 @@ The worker is the normal execution mode.
 - `ZERO_SCAN_REQUEST_HEARTBEAT=30s` updates long-running request progress and DB liveness.
 - `ZERO_SCAN_REQUEST_STALE_AFTER=30m` requeues running requests whose heartbeat is stale.
 - `ZERO_TOOL_TIMEOUT=20m` bounds external steps without dedicated batch timeouts, such as subfinder and template updates.
-- `ZERO_INACTIVE_RETENTION_HOURS=72` and `ZERO_INACTIVE_RETENTION_SCANS=2` control cleanup of inactive inventory.
+- `ZERO_DELETE_INACTIVE_INVENTORY=true`, `ZERO_INACTIVE_RETENTION_HOURS=0`, and `ZERO_INACTIVE_RETENTION_SCANS=0` keep stale inventory out of the database by default.
+- `ZERO_RETAIN_DNS_ONLY_SUBDOMAINS=false` deletes DNS-only hostnames that have no active HTTP service during cleanup. Set it to `true` only when you intentionally want Zero to keep a broad DNS inventory for DNS-oriented campaigns.
 
 The main pipeline per due program is:
 
@@ -140,7 +141,9 @@ The API exposes the same operation through `POST /v1/scan-requests/{id}/cancel` 
 
 ## Cleanup
 
-The worker schedules operational cleanup with `ZERO_SCHEDULE_CLEANUP`. By default it runs every 12 hours, skips while scans are running, and deletes inactive inventory immediately. This keeps the database focused on current alive/reusable assets plus finding evidence.
+The worker schedules operational cleanup with `ZERO_SCHEDULE_CLEANUP`. By default it runs every 12 hours and also runs once on worker startup. If a cleanup tick happens while scans are running, the worker marks cleanup as pending and executes it as soon as the scan workers become idle.
+
+Cleanup is intentionally aggressive by default. It deletes inactive inventory immediately, prunes completed scan requests and scan runs after `ZERO_SCAN_REQUEST_RETENTION_HOURS` / `ZERO_SCAN_RUN_RETENTION_HOURS`, and removes DNS-only subdomains that have no active HTTP service unless `ZERO_RETAIN_DNS_ONLY_SUBDOMAINS=true`. This keeps the database focused on current reusable HTTP services, technology observations, scope records, findings, reports, and validation evidence.
 
 Manual cleanup:
 
@@ -150,13 +153,14 @@ docker compose run --rm zero run cleanup
 
 HTTP services linked to Nuclei results or candidate findings are preserved for evidence integrity. Cleanup deletes in bounded batches controlled by `ZERO_CLEANUP_BATCH_SIZE`.
 
-For a database that already accumulated inventory change history, run a manual compaction during a quiet maintenance window:
+For a database that already accumulated deleted rows or inventory history, run manual compaction during a quiet maintenance window:
 
 ```bash
 docker compose run --rm zero run cleanup --compact-change-events
+docker compose run --rm zero run cleanup --compact-storage
 ```
 
-This rewrites `zero_change_events` after pruning disallowed event types, so avoid running it during broad campaigns.
+`--compact-change-events` rewrites `zero_change_events` after pruning disallowed event types. `--compact-storage` runs `VACUUM FULL ANALYZE` on large operational tables so hosted Postgres/Supabase storage counters can actually shrink after large deletes. Both options block affected tables while compacting, so avoid running them during broad campaigns.
 
 ## Tuning
 

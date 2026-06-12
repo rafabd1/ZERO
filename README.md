@@ -23,6 +23,7 @@ The point is not to run every scanner against every URL. Zero is built to answer
 - Storing scope, assets, services, technologies, CVE context, Nuclei output, findings, reports, scan state, and campaign progress in Postgres.
 - Reusing stored inventory for later scans so repeated campaigns do not have to redo expensive discovery every time.
 - Monitoring campaigns through a local dashboard and an authenticated API.
+- Keeping Postgres lean by default: inactive inventory, old scan execution history, and DNS-only hostnames without active HTTP services are pruned unless explicitly retained.
 
 ## How It Works
 

@@ -89,6 +89,7 @@ func addCleanupRunCommand(parent *cobra.Command) {
 	var retentionScans int
 	var keepInactive bool
 	var compactChangeEvents bool
+	var compactStorage bool
 	cmd := &cobra.Command{
 		Use:   "cleanup",
 		Short: "Delete stale operational state and prune non-essential history.",
@@ -108,10 +109,13 @@ func addCleanupRunCommand(parent *cobra.Command) {
 			defer repo.Close()
 			result, err := repo.CleanupOperationalData(ctx, db.CleanupOptions{
 				DeleteInactiveInventory:   cfg.Data.DeleteInactiveInventory && !keepInactive,
+				DeleteDNSOnlySubdomains:   cfg.Data.DeleteInactiveInventory && !cfg.Data.RetainDNSOnlySubdomains && !keepInactive,
+				DNSOnlyRetentionHours:     cfg.Data.DNSOnlyRetentionHours,
 				InactiveRetentionHours:    retentionHours,
 				InactiveRetentionScans:    retentionScans,
 				ChangeEventRetentionHours: cfg.Data.ChangeEventRetentionHours,
 				ScanRequestRetentionHours: cfg.Data.ScanRequestRetentionHours,
+				ScanRunRetentionHours:     cfg.Data.ScanRunRetentionHours,
 				BatchSize:                 cfg.Data.CleanupBatchSize,
 			})
 			if err != nil {
@@ -124,18 +128,27 @@ func addCleanupRunCommand(parent *cobra.Command) {
 				}
 				result.ChangeEvents += compacted
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "cleanup deleted rows: scope_assets=%d subdomains=%d http_services=%d technologies=%d technology_vulnerability_matches=%d change_events=%d scan_requests=%d retention_hours=%d retention_scans=%d delete_inactive=%t compact_change_events=%t\n",
+			if compactStorage {
+				if err := repo.CompactOperationalStorage(ctx); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "cleanup deleted rows: scope_assets=%d subdomains=%d dns_only_subdomains=%d http_services=%d technologies=%d technology_vulnerability_matches=%d change_events=%d scan_requests=%d scan_runs=%d retention_hours=%d retention_scans=%d delete_inactive=%t retain_dns_only_subdomains=%t compact_change_events=%t compact_storage=%t\n",
 				result.ScopeAssets,
 				result.Subdomains,
+				result.DNSOnlySubdomains,
 				result.HTTPServices,
 				result.TechnologyObservations,
 				result.TechnologyVulnerabilityRows,
 				result.ChangeEvents,
 				result.ScanRequests,
+				result.ScanRuns,
 				retentionHours,
 				retentionScans,
 				cfg.Data.DeleteInactiveInventory && !keepInactive,
+				cfg.Data.RetainDNSOnlySubdomains || keepInactive,
 				compactChangeEvents,
+				compactStorage,
 			)
 			return nil
 		},
@@ -144,6 +157,7 @@ func addCleanupRunCommand(parent *cobra.Command) {
 	cmd.Flags().IntVar(&retentionScans, "retention-scans", -1, "delete inactive rows not seen in the latest N successful full scans; defaults to ZERO_INACTIVE_RETENTION_SCANS")
 	cmd.Flags().BoolVar(&keepInactive, "keep-inactive", false, "do not delete inactive inventory rows even if ZERO_DELETE_INACTIVE_INVENTORY is enabled")
 	cmd.Flags().BoolVar(&compactChangeEvents, "compact-change-events", false, "rewrite zero_change_events to physically reclaim storage after pruning disallowed event types")
+	cmd.Flags().BoolVar(&compactStorage, "compact-storage", false, "run VACUUM FULL ANALYZE on large operational tables after cleanup; blocks those tables while compacting")
 	parent.AddCommand(cmd)
 }
 
@@ -259,22 +273,27 @@ func runDuePrograms(parent *cobra.Command, limit, parallelism int, dryRun, skipS
 	if cfg.Data.DeleteInactiveInventory {
 		cleanup, err := repo.CleanupOperationalData(ctx, db.CleanupOptions{
 			DeleteInactiveInventory:   true,
+			DeleteDNSOnlySubdomains:   !cfg.Data.RetainDNSOnlySubdomains,
+			DNSOnlyRetentionHours:     cfg.Data.DNSOnlyRetentionHours,
 			InactiveRetentionHours:    cfg.Data.InactiveRetentionHours,
 			InactiveRetentionScans:    cfg.Data.InactiveRetentionScans,
 			ChangeEventRetentionHours: cfg.Data.ChangeEventRetentionHours,
 			ScanRequestRetentionHours: cfg.Data.ScanRequestRetentionHours,
+			ScanRunRetentionHours:     cfg.Data.ScanRunRetentionHours,
 			BatchSize:                 cfg.Data.CleanupBatchSize,
 		})
 		if err != nil && firstErr == nil {
 			firstErr = err
 		} else if err == nil {
-			fmt.Fprintf(parent.OutOrStdout(), "post-cycle cleanup deleted rows: scope_assets=%d subdomains=%d http_services=%d technologies=%d change_events=%d scan_requests=%d\n",
+			fmt.Fprintf(parent.OutOrStdout(), "post-cycle cleanup deleted rows: scope_assets=%d subdomains=%d dns_only_subdomains=%d http_services=%d technologies=%d change_events=%d scan_requests=%d scan_runs=%d\n",
 				cleanup.ScopeAssets,
 				cleanup.Subdomains,
+				cleanup.DNSOnlySubdomains,
 				cleanup.HTTPServices,
 				cleanup.TechnologyObservations,
 				cleanup.ChangeEvents,
 				cleanup.ScanRequests,
+				cleanup.ScanRuns,
 			)
 		}
 	}
