@@ -43,6 +43,7 @@ Use:
 - `ZERO_SCOPE_PROVIDERS=h1,bugcrowd,intigriti` to select providers.
 - `ZERO_SCOPE_BOUNTY_ONLY=true` to keep bounty-eligible programs/assets.
 - `ZERO_SCOPE_SYNC_MAX_AGE=24h` so the startup worker does not sync on every restart.
+- `ZERO_SCOPE_PROVIDER_TIMEOUT=10m` and `ZERO_SCOPE_OPTIONAL_PROVIDER_TIMEOUT=10m` bound provider pollers without cutting normal slow syncs too early. If a provider errors or times out after another provider synced successfully, the worker keeps the available inventory and still starts due scans.
 
 ## Recon And Probing
 

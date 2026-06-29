@@ -3,6 +3,8 @@ package cli
 import (
 	"testing"
 	"time"
+
+	"github.com/rafabd1/ZERO/internal/config"
 )
 
 func TestNormalizeScopeProvidersAliasesAndDedupes(t *testing.T) {
@@ -30,5 +32,21 @@ func TestScopeSyncDueFromLast(t *testing.T) {
 	old := now.Add(-25 * time.Hour)
 	if !scopeSyncDueFromLast(&old, 24*time.Hour, now) {
 		t.Fatal("old previous sync should be due")
+	}
+}
+
+func TestScopeProviderTimeoutUsesConfiguredOptionalTimeout(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Scope.ProviderTimeout = 10 * time.Minute
+	cfg.Scope.OptionalProviderTimeout = 10 * time.Minute
+
+	if got := scopeProviderTimeout(cfg, "h1"); got != 10*time.Minute {
+		t.Fatalf("h1 timeout = %s; want 10m", got)
+	}
+	if got := scopeProviderTimeout(cfg, "bugcrowd"); got != 10*time.Minute {
+		t.Fatalf("bugcrowd timeout = %s; want 10m", got)
+	}
+	if got := scopeProviderTimeout(cfg, "intigriti"); got != 10*time.Minute {
+		t.Fatalf("intigriti timeout = %s; want 10m", got)
 	}
 }

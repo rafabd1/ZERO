@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -96,13 +97,37 @@ func runScopeSync(parent *cobra.Command, cfg config.Config, providers []string) 
 		"providers": providers,
 		"sources":   map[string]any{},
 	}
+	var providerErrors []error
 	for _, provider := range providers {
-		result, err := syncScopeProvider(ctx, svc, cfg, scanID, provider)
+		providerCtx := ctx
+		var cancel context.CancelFunc
+		timeout := scopeProviderTimeout(cfg, provider)
+		if timeout > 0 {
+			providerCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		fmt.Fprintf(parent.OutOrStdout(), "scope sync provider %s starting", provider)
+		if timeout > 0 {
+			fmt.Fprintf(parent.OutOrStdout(), " (timeout %s)", timeout)
+		}
+		fmt.Fprintln(parent.OutOrStdout())
+		result, err := syncScopeProvider(providerCtx, svc, cfg, scanID, provider)
+		if cancel != nil {
+			cancel()
+		}
 		if err != nil {
-			if finishErr := finishScanRun(ctx, repo, scanID, err, total.Programs, total.Assets, stats); finishErr != nil {
-				return finishErr
+			providerErr := fmt.Errorf("%s scope sync failed: %w", provider, err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				providerErr = fmt.Errorf("%s scope sync timed out after %s: %w", provider, timeout, err)
 			}
-			return err
+			providerErrors = append(providerErrors, providerErr)
+			stats["sources"].(map[string]any)[provider] = map[string]any{
+				"assets":   result.Assets,
+				"error":    err.Error(),
+				"programs": result.Programs,
+				"timeout":  timeout.String(),
+			}
+			fmt.Fprintf(parent.ErrOrStderr(), "%v\n", providerErr)
+			continue
 		}
 		total.Programs += result.Programs
 		total.Assets += result.Assets
@@ -112,14 +137,33 @@ func runScopeSync(parent *cobra.Command, cfg config.Config, providers []string) 
 		}
 		fmt.Fprintf(parent.OutOrStdout(), "synced %d %s programs and %d scope assets\n", result.Programs, provider, result.Assets)
 	}
+	if len(providerErrors) > 0 {
+		stats["partial"] = total.Programs > 0
+		stats["provider_errors"] = len(providerErrors)
+	}
 	stats["programs"] = total.Programs
 	stats["assets"] = total.Assets
 	stats["source"] = strings.Join(providers, ",")
+	if total.Programs == 0 && len(providerErrors) > 0 {
+		err := errors.Join(providerErrors...)
+		if finishErr := finishScanRun(ctx, repo, scanID, err, total.Programs, total.Assets, stats); finishErr != nil {
+			return finishErr
+		}
+		return err
+	}
 	if err := finishScanRun(ctx, repo, scanID, nil, total.Programs, total.Assets, stats); err != nil {
 		return err
 	}
 	fmt.Fprintf(parent.OutOrStdout(), "synced %d total programs and %d scope assets from %s\n", total.Programs, total.Assets, strings.Join(providers, ","))
 	return nil
+}
+
+func scopeProviderTimeout(cfg config.Config, provider string) time.Duration {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider != "h1" && cfg.Scope.OptionalProviderTimeout > 0 {
+		return cfg.Scope.OptionalProviderTimeout
+	}
+	return cfg.Scope.ProviderTimeout
 }
 
 func syncScopeProvider(ctx context.Context, svc *scope.Service, cfg config.Config, scanID, provider string) (scope.SyncResult, error) {

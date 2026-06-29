@@ -55,11 +55,13 @@ type IntigritiConfig struct {
 }
 
 type ScopeConfig struct {
-	BountyOnly  bool
-	PrivateOnly bool
-	Categories  string
-	Providers   string
-	SyncMaxAge  time.Duration
+	BountyOnly              bool
+	PrivateOnly             bool
+	Categories              string
+	Providers               string
+	SyncMaxAge              time.Duration
+	ProviderTimeout         time.Duration
+	OptionalProviderTimeout time.Duration
 }
 
 type ToolConfig struct {
@@ -181,6 +183,8 @@ func Load() (Config, error) {
 	v.SetDefault("scope.categories", "url,wildcard")
 	v.SetDefault("scope.providers", "h1")
 	v.SetDefault("scope.sync_max_age", "24h")
+	v.SetDefault("scope.provider_timeout", "10m")
+	v.SetDefault("scope.optional_provider_timeout", "10m")
 	v.SetDefault("tools.subfinder_bin", "subfinder")
 	v.SetDefault("tools.subfinder_provider_config", "")
 	v.SetDefault("tools.subfinder_sources", "shodan,bevigil,virustotal,securitytrails")
@@ -288,6 +292,8 @@ func Load() (Config, error) {
 	_ = v.BindEnv("scope.categories", "ZERO_SCOPE_CATEGORIES")
 	_ = v.BindEnv("scope.providers", "ZERO_SCOPE_PROVIDERS")
 	_ = v.BindEnv("scope.sync_max_age", "ZERO_SCOPE_SYNC_MAX_AGE")
+	_ = v.BindEnv("scope.provider_timeout", "ZERO_SCOPE_PROVIDER_TIMEOUT")
+	_ = v.BindEnv("scope.optional_provider_timeout", "ZERO_SCOPE_OPTIONAL_PROVIDER_TIMEOUT")
 	_ = v.BindEnv("tools.subfinder_bin", "ZERO_SUBFINDER_BIN")
 	_ = v.BindEnv("tools.subfinder_provider_config", "ZERO_SUBFINDER_PROVIDER_CONFIG", "SUBFINDER_PROVIDER_CONFIG")
 	_ = v.BindEnv("tools.subfinder_sources", "ZERO_SUBFINDER_SOURCES")
@@ -403,11 +409,13 @@ func Load() (Config, error) {
 			Token: v.GetString("intigriti.token"),
 		},
 		Scope: ScopeConfig{
-			BountyOnly:  v.GetBool("scope.bounty_only"),
-			PrivateOnly: v.GetBool("scope.private_only"),
-			Categories:  v.GetString("scope.categories"),
-			Providers:   v.GetString("scope.providers"),
-			SyncMaxAge:  v.GetDuration("scope.sync_max_age"),
+			BountyOnly:              v.GetBool("scope.bounty_only"),
+			PrivateOnly:             v.GetBool("scope.private_only"),
+			Categories:              v.GetString("scope.categories"),
+			Providers:               v.GetString("scope.providers"),
+			SyncMaxAge:              v.GetDuration("scope.sync_max_age"),
+			ProviderTimeout:         v.GetDuration("scope.provider_timeout"),
+			OptionalProviderTimeout: v.GetDuration("scope.optional_provider_timeout"),
 		},
 		Tools: ToolConfig{
 			SubfinderBin:             v.GetString("tools.subfinder_bin"),
